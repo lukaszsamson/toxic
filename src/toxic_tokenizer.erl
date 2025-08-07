@@ -6,6 +6,7 @@
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
 -export([tokenize/1, tokenize/3, tokenize/4, invalid_do_error/1, terminator/1]).
+-export([tokenize_with_ranges/4, ranges_to_legacy/1]).
 
 -define(at_op(T),
   T =:= $@).
@@ -132,6 +133,8 @@ tokenize(String, Line, Column, Opts) ->
         Acc#toxic_tokenizer{unescape=Unescape};
       ({indentation, Indentation}, Acc) when Indentation >= 0 ->
         Acc#toxic_tokenizer{column=Indentation+1};
+      ({produce_ranges, ProduceRanges}, Acc) when is_boolean(ProduceRanges) ->
+        Acc#toxic_tokenizer{produce_ranges=ProduceRanges};
       (_, Acc) ->
         Acc
     end, #toxic_tokenizer{identifier_tokenizer=IdentifierTokenizer}, Opts),
@@ -140,6 +143,40 @@ tokenize(String, Line, Column, Opts) ->
 
 tokenize(String, Line, Opts) ->
   tokenize(String, Line, 1, Opts).
+
+%% Public API that returns tokens where metadata carries explicit ranges
+%% in the shape {{StartLine, StartColumn}, {EndLine, EndColumn}, Extra}.
+%% End positions are exclusive.
+tokenize_with_ranges(String, Line, Column, Opts) ->
+  %% Force range production in scope
+  RangedOpts = [{produce_ranges, true} | Opts],
+  tokenize(String, Line, Column, RangedOpts).
+
+%% Convert range tokens back to legacy metas {Line, Column, Extra}
+ranges_to_legacy(TokensWithRanges) ->
+  lists:map(fun ranges_token_to_legacy/1, TokensWithRanges).
+
+%% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
+%% Build meta depending on whether ranges are enabled
+make_meta(Line, Column, EndLine, EndColumn, Extra, #toxic_tokenizer{produce_ranges=true}) ->
+  {{Line, Column}, {EndLine, EndColumn}, Extra};
+make_meta(Line, Column, _EndLine, _EndColumn, Extra, #toxic_tokenizer{produce_ranges=false}) ->
+  {Line, Column, Extra}.
+
+make_meta_len(Line, Column, Len, Extra, Scope) ->
+  make_meta(Line, Column, Line, Column + Len, Extra, Scope).
+
+%% Meta helpers (work with both legacy and range-shaped metas)
+% Helper functions removed for now; keep placeholders to avoid unused warnings
+% meta helpers can be reintroduced when migrating more token sites
+
+%% Removed: legacy length inference no longer needed when emitting ranges inline.
+
+%% Map a token with range meta back to legacy meta
+ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}}) ->
+  {Type, {Line, Column, Extra}};
+ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}, Value}) ->
+  {Type, {Line, Column, Extra}, Value}.
 
 tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
@@ -181,17 +218,17 @@ tokenize(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
 
 tokenize([$0, $x, H | T], Line, Column, Scope, Tokens) when ?is_hex(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_hex(T, [H], 1),
-  Token = {int, {Line, Column, Number}, OriginalRepresentation},
+  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
   tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
 tokenize([$0, $b, H | T], Line, Column, Scope, Tokens) when ?is_bin(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_bin(T, [H], 1),
-  Token = {int, {Line, Column, Number}, OriginalRepresentation},
+  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
   tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
 tokenize([$0, $o, H | T], Line, Column, Scope, Tokens) when ?is_octal(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_octal(T, [H], 1),
-  Token = {int, {Line, Column, Number}, OriginalRepresentation},
+  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
   tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
 % Comments
@@ -240,7 +277,7 @@ tokenize([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
       Scope
   end,
 
-  Token = {char, {Line, Column, [$?, $\\, H]}, Char},
+  Token = {char, make_meta_len(Line, Column, 3, [$?, $\\, H], Scope), Char},
   tokenize(T, Line, Column + 3, NewScope, [Token | Tokens]);
 
 tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
@@ -252,7 +289,7 @@ tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
     false ->
       Scope
   end,
-  Token = {char, {Line, Column, [$?, Char]}, Char},
+  Token = {char, make_meta_len(Line, Column, 2, [$?, Char], Scope), Char},
   tokenize(T, Line, Column + 2, NewScope, [Token | Tokens]);
 
 % Heredocs
@@ -307,7 +344,7 @@ tokenize(":..//" ++ Rest, Line, Column, Scope, Tokens) ->
 tokenize([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
     ?unary_op3(T1, T2, T3); ?comp_op3(T1, T2, T3); ?and_op3(T1, T2, T3); ?or_op3(T1, T2, T3);
     ?arrow_op3(T1, T2, T3); ?xor_op3(T1, T2, T3); ?concat_op3(T1, T2, T3); ?ellipsis_op3(T1, T2, T3) ->
-  Token = {atom, {Line, Column, nil}, list_to_atom([T1, T2, T3])},
+  Token = {atom, make_meta_len(Line, Column, 4, nil, Scope), list_to_atom([T1, T2, T3])},
   tokenize(Rest, Line, Column + 4, Scope, [Token | Tokens]);
 
 % ## Two Token Operators
@@ -315,33 +352,34 @@ tokenize([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
 tokenize([$:, $:, $: | Rest], Line, Column, Scope, Tokens) ->
   Message = "atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity",
   NewScope = prepend_warning(Line, Column, Message, Scope),
-  Token = {atom, {Line, Column, nil}, '::'},
+  Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), '::'},
   tokenize(Rest, Line, Column + 3, NewScope, [Token | Tokens]);
 
 tokenize([$:, T1, T2 | Rest], Line, Column, Scope, Tokens) when
     ?comp_op2(T1, T2); ?rel_op2(T1, T2); ?and_op(T1, T2); ?or_op(T1, T2);
     ?arrow_op(T1, T2); ?in_match_op(T1, T2); ?concat_op(T1, T2); ?power_op(T1, T2);
     ?stab_op(T1, T2); ?range_op(T1, T2) ->
-  Token = {atom, {Line, Column, nil}, list_to_atom([T1, T2])},
+  Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), list_to_atom([T1, T2])},
   tokenize(Rest, Line, Column + 3, Scope, [Token | Tokens]);
 
 % ## Single Token Operators
 tokenize([$:, T | Rest], Line, Column, Scope, Tokens) when
     ?at_op(T); ?unary_op(T); ?capture_op(T); ?dual_op(T); ?mult_op(T);
     ?rel_op(T); ?match_op(T); ?pipe_op(T); T =:= $. ->
-  Token = {atom, {Line, Column, nil}, list_to_atom([T])},
+  Token = {atom, make_meta_len(Line, Column, 2, nil, Scope), list_to_atom([T])},
   tokenize(Rest, Line, Column + 2, Scope, [Token | Tokens]);
 
 % ## Stand-alone tokens
 
 tokenize("=>" ++ Rest, Line, Column, Scope, Tokens) ->
-  Token = {assoc_op, {Line, Column, previous_was_eol(Tokens)}, '=>'},
+  EOL = previous_was_eol(Tokens),
+  Token = {assoc_op, make_meta_len(Line, Column, 2, EOL, Scope), '=>'},
   tokenize(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
 
 tokenize("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, {Line, Column, nil}, '..//'},
+      Token = {identifier, make_meta_len(Line, Column, 4, nil, Scope), '..//'},
       tokenize(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
     {_, _} ->
       unexpected_token(String, Line, Column, Scope, Tokens)
@@ -380,15 +418,15 @@ tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?arrow_op3(T1, T
 
 % ## Containers + punctuation tokens
 tokenize([$, | Rest], Line, Column, Scope, Tokens) ->
-  Token = {',', {Line, Column, 0}},
+  Token = {',', make_meta_len(Line, Column, 1, 0, Scope)},
   tokenize(Rest, Line, Column + 1, Scope, [Token | Tokens]);
 
 tokenize([$<, $< | Rest], Line, Column, Scope, Tokens) ->
-  Token = {'<<', {Line, Column, nil}},
+  Token = {'<<', make_meta_len(Line, Column, 2, nil, Scope)},
   handle_terminator(Rest, Line, Column + 2, Scope, Token, Tokens);
 
 tokenize([$>, $> | Rest], Line, Column, Scope, Tokens) ->
-  Token = {'>>', {Line, Column, previous_was_eol(Tokens)}},
+  Token = {'>>', make_meta_len(Line, Column, 2, previous_was_eol(Tokens), Scope)},
   handle_terminator(Rest, Line, Column + 2, Scope, Token, Tokens);
 
 tokenize([${ | Rest], Line, Column, Scope, [{'%', _} | _] = Tokens) ->
@@ -400,17 +438,17 @@ tokenize([${ | Rest], Line, Column, Scope, [{'%', _} | _] = Tokens) ->
   error({?LOC(Line, Column), Message, [${]}, Rest, Scope, Tokens);
 
 tokenize([T | Rest], Line, Column, Scope, Tokens) when T =:= $(; T =:= ${; T =:= $[ ->
-  Token = {list_to_atom([T]), {Line, Column, nil}},
+  Token = {list_to_atom([T]), make_meta_len(Line, Column, 1, nil, Scope)},
   handle_terminator(Rest, Line, Column + 1, Scope, Token, Tokens);
 
 tokenize([T | Rest], Line, Column, Scope, Tokens) when T =:= $); T =:= $}; T =:= $] ->
-  Token = {list_to_atom([T]), {Line, Column, previous_was_eol(Tokens)}},
+  Token = {list_to_atom([T]), make_meta_len(Line, Column, 1, previous_was_eol(Tokens), Scope)},
   handle_terminator(Rest, Line, Column + 1, Scope, Token, Tokens);
 
 % ## Two Token Operators
 tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?ternary_op(T1, T2) ->
   Op = list_to_atom([T1, T2]),
-  Token = {ternary_op, {Line, Column, previous_was_eol(Tokens)}, Op},
+  Token = {ternary_op, make_meta_len(Line, Column, 2, previous_was_eol(Tokens), Scope), Op},
   tokenize(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
 
 tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?power_op(T1, T2) ->
@@ -520,7 +558,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
         {ok, [Part]} when is_binary(Part) ->
           case unsafe_to_atom(Part, Line, Column, Scope) of
             {ok, Atom} ->
-              Token = {atom_quoted, {Line, Column, H}, Atom},
+      Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
               tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
             {error, Reason} ->
@@ -532,7 +570,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
             true  -> atom_safe;
             false -> atom_unsafe
           end,
-          Token = {Key, {Line, Column, H}, Unescaped},
+          Token = {Key, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Unescaped},
           tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
         {error, Reason} ->
@@ -549,7 +587,7 @@ tokenize([$: | String] = Original, Line, Column, Scope, Tokens) ->
     {_Kind, Unencoded, Atom, Rest, Length, Ascii, _Special} ->
       NewScope = maybe_warn_for_ambiguous_bang_before_equals(atom, Unencoded, Rest, Line, Column, Scope),
       TrackedScope = track_ascii(Ascii, NewScope),
-      Token = {atom, {Line, Column, Unencoded}, Atom},
+      Token = {atom, make_meta_len(Line, Column, 1 + Length, Unencoded, TrackedScope), Atom},
       tokenize(Rest, Line, Column + 1 + Length, TrackedScope, [Token | Tokens]);
     empty when Scope#toxic_tokenizer.cursor_completion == false ->
       unexpected_token(Original, Line, Column, Scope, Tokens);
@@ -566,7 +604,7 @@ tokenize([$: | String] = Original, Line, Column, Scope, Tokens) ->
 % properly in case of errors.
 
 tokenize([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
-  case tokenize_number(T, [H], 1, false) of
+      case tokenize_number(T, [H], 1, false) of
     {error, Reason, Original} ->
       error({?LOC(Line, Column), Reason, Original}, T, Scope, Tokens);
     {[I | Rest], Number, Original, _Length} when ?is_upcase(I); ?is_downcase(I); I == $_ ->
@@ -588,10 +626,10 @@ tokenize([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
           error({?LOC(Line, Column), Msg, [I]}, T, Scope, Tokens)
       end;
     {Rest, Number, Original, Length} when is_integer(Number) ->
-      Token = {int, {Line, Column, Number}, Original},
+      Token = {int, make_meta_len(Line, Column, Length, Number, Scope), Original},
       tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
     {Rest, Number, Original, Length} ->
-      Token = {flt, {Line, Column, Number}, Original},
+      Token = {flt, make_meta_len(Line, Column, Length, Number, Scope), Original},
       tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens])
   end;
 
@@ -604,10 +642,10 @@ tokenize([T | Rest], Line, Column, Scope, Tokens) when ?is_horizontal_space(T) -
 % End of line
 
 tokenize(";" ++ Rest, Line, Column, Scope, []) ->
-  tokenize(Rest, Line, Column + 1, Scope, [{';', {Line, Column, 0}}]);
+  tokenize(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)}]);
 
 tokenize(";" ++ Rest, Line, Column, Scope, [Top | _] = Tokens) when element(1, Top) /= ';' ->
-  tokenize(Rest, Line, Column + 1, Scope, [{';', {Line, Column, 0}} | Tokens]);
+  tokenize(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)} | Tokens]);
 
 tokenize("\\" = Original, Line, Column, Scope, Tokens) ->
   error({?LOC(Line, Column), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
@@ -641,14 +679,14 @@ tokenize([$%, $[ | Rest], Line, Column, Scope, Tokens) ->
   error(Reason, Rest, Scope, Tokens);
 
 tokenize([$%, ${ | T], Line, Column, Scope, Tokens) ->
-  Token = {'{', {Line, Column, nil}},
-  handle_terminator(T, Line, Column + 2, Scope, Token, [{'%{}', {Line, Column, nil}} | Tokens]);
+  Token = {'{', make_meta_len(Line, Column, 2, nil, Scope)},
+  handle_terminator(T, Line, Column + 2, Scope, Token, [{'%{}', make_meta_len(Line, Column, 2, nil, Scope)} | Tokens]);
 
 tokenize([$% | T], Line, Column, Scope, Tokens) ->
-  tokenize(T, Line, Column + 1, Scope, [{'%', {Line, Column, nil}} | Tokens]);
+  tokenize(T, Line, Column + 1, Scope, [{'%', make_meta_len(Line, Column, 1, nil, Scope)} | Tokens]);
 
 tokenize([$. | T], Line, Column, Scope, Tokens) ->
-  tokenize_dot(T, Line, Column + 1, {Line, Column, nil}, Scope, Tokens);
+  tokenize_dot(T, Line, Column + 1, make_meta_len(Line, Column, 1, nil, Scope), Scope, Tokens);
 
 % Identifiers
 
@@ -810,7 +848,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
         {ok, [Part]} when is_binary(Part) ->
           case unsafe_to_atom(Part, Line, Column - 1, Scope) of
             {ok, Atom} ->
-              Token = {kw_identifier, {Line, Column - 1, H}, Atom},
+              Token = {kw_identifier, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Atom},
               tokenize(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
@@ -821,7 +859,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
             true  -> kw_identifier_safe;
             false -> kw_identifier_unsafe
           end,
-          Token = {Key, {Line, Column - 1, H}, Unescaped},
+          Token = {Key, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Unescaped},
           tokenize(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
 
         {error, Reason} ->
@@ -844,7 +882,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
 
       case unescape_tokens(Parts, Line, Column, NewScope) of
         {ok, Unescaped} ->
-          Token = {string_type(H), {Line, Column - 1, nil}, Unescaped},
+          Token = {string_type(H), make_meta(Line, Column - 1, NewLine, NewColumn, nil, NewScope), Unescaped},
           tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
         {error, Reason} ->
