@@ -1929,7 +1929,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     test "heredoc" do
       assert tokenize("~x\"\"\"\nasd\n\"\"\"") == {:ok, [
         {
@@ -1956,7 +1955,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     test "heredoc with indent" do
       assert tokenize("~x\"\"\"\n  asd\n  \"\"\"") == {:ok, [
         {
@@ -2027,7 +2025,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     test "with LF newline" do
       assert tokenize("~x/a\nsd/") == {:ok, [
         {
@@ -2042,7 +2039,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     test "with CR LF newline" do
       assert tokenize("~x/a\r\nsd/") == {:ok, [
         {
@@ -2057,7 +2053,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     # TODO: is this a bug?
     test "with escaped LF newline" do
       assert tokenize("~x/a\\\nsd/") == {:ok, [
@@ -2073,7 +2068,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: invalid range
     # TODO: is this a bug?
     test "with escaped CR LF newline" do
       assert tokenize("~x/a\\\r\nsd/") == {:ok, [
@@ -2193,7 +2187,6 @@ defmodule ToxicTest do
       }
     end
 
-    # TODO: invalid range
     test "with interpolation lowercase heredoc" do
       assert tokenize("~x'''\na\#{123}sd\n'''") == {
         :ok,
@@ -2220,7 +2213,6 @@ defmodule ToxicTest do
       }
     end
 
-    # TODO: invalid range
     test "with interpolation uppercase heredoc" do
       assert tokenize("~X'''\na\#{123}sd\n'''") == {
         :ok,
@@ -2239,7 +2231,6 @@ defmodule ToxicTest do
       }
     end
 
-    # TODO: invalid range
     test "with escaped interpolation lowercase heredoc" do
       assert tokenize("~x'''\na\\\#{123}sd\n'''") == {
         :ok,
@@ -2258,7 +2249,6 @@ defmodule ToxicTest do
       }
     end
 
-    # TODO: invalid range
     test "with escaped interpolation uppercase heredoc" do
       assert tokenize("~X'''\na\\\#{123}sd\n'''") == {
         :ok,

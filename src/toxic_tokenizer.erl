@@ -1862,9 +1862,8 @@ add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope,
   case MaybeEncoded of
     {ok, Atom} ->
       {Final, Modifiers} = collect_modifiers(Rest, []),
-      TokenLen = NewColumn - TokenColumn + length(Modifiers),
-      Token = {sigil, make_meta_len(Line, TokenColumn, TokenLen, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
       NewColumnWithModifiers = NewColumn + length(Modifiers),
+      Token = {sigil, make_meta(Line, TokenColumn, NewLine, NewColumnWithModifiers, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
       tokenize(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
 
     {error, Reason} ->
