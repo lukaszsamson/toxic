@@ -3,8 +3,11 @@ defmodule ToxicTest do
   doctest Toxic
 
   defp tokenize(string) do
-    {:ok, _, _, _, ex_lex_tokens, ex_lex_remaining} =
-      Toxic.tokenize(to_charlist(string), 1, 1, [])
+    {:ok, _, _, _, ex_lex_tokens_with_ranges, ex_lex_remaining} =
+      :toxic_tokenizer.tokenize_with_ranges(to_charlist(string), 1, 1, [])
+
+    # Convert back to legacy format for comparison
+    ex_lex_tokens = :toxic_tokenizer.ranges_to_legacy(ex_lex_tokens_with_ranges)
 
     {:ok, _, _, _, elixir_tokens, _remaining} =
       :elixir_tokenizer.tokenize(to_charlist(string), 1, 1, [])
@@ -19,6 +22,37 @@ defmodule ToxicTest do
 
   test "empty" do
     assert tokenize("") == {:ok, [], ""}
+  end
+
+  describe "tokenize_with_ranges" do
+    test "returns tokens with end positions" do
+      {:ok, _, _, _, tokens, _} =
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [])
+
+      # Check that we got a token with range format
+      assert [{:int, {{1, 1}, {1, 6}, _}, ~c"0x123"}] = Enum.reverse(tokens)
+    end
+
+    test "multi-token expression has correct ranges" do
+      {:ok, _, _, _, tokens, _} =
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123;"), 1, 1, [])
+
+      reversed = Enum.reverse(tokens)
+
+      # Check we got the expected tokens with ranges
+      assert [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
+              {:";", {{1, 6}, {1, 7}, 0}}] = reversed
+    end
+
+    test "ranges_to_legacy converts correctly" do
+      {:ok, _, _, _, tokens_with_ranges, _} =
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [])
+
+      legacy_tokens = :toxic_tokenizer.ranges_to_legacy(tokens_with_ranges)
+
+      # Should match the legacy format
+      assert [{:int, {1, 1, _}, ~c"0x123"}] = Enum.reverse(legacy_tokens)
+    end
   end
 
   describe "hex numbers" do
@@ -492,6 +526,46 @@ defmodule ToxicTest do
       assert tokenize("=  /") == {:ok, [{:identifier, {1, 1, nil}, :=}, {:mult_op, {1, 4, nil}, :/}], ""}
       # pipe_op
       assert tokenize("| \t/") == {:ok, [{:identifier, {1, 1, nil}, :|}, {:mult_op, {1, 4, nil}, :/}], ""}
+    end
+
+    test "unary operators at start of line after newline" do
+      # Unary minus after newline should have nil EOL meta
+      assert tokenize("\n-1") == {:ok, [
+        {:eol, {1, 1, 1}},
+        {:dual_op, {2, 1, nil}, :-},
+        {:int, {2, 2, 1}, ~c"1"}
+      ], ""}
+
+      # Unary plus after newline should have nil EOL meta
+      assert tokenize("\n+1") == {:ok, [
+        {:eol, {1, 1, 1}},
+        {:dual_op, {2, 1, nil}, :+},
+        {:int, {2, 2, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "unary operators with indentation after newline" do
+      # Indented unary minus
+      assert tokenize("\n  -1") == {:ok, [
+        {:eol, {1, 1, 1}},
+        {:dual_op, {2, 3, nil}, :-},
+        {:int, {2, 4, 1}, ~c"1"}
+      ], ""}
+
+      # Indented unary plus
+      assert tokenize("\n\t+1") == {:ok, [
+        {:eol, {1, 1, 1}},
+        {:dual_op, {2, 2, nil}, :+},
+        {:int, {2, 3, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "at_op after newline has nil EOL meta" do
+      assert tokenize("\n@x") == {:ok, [
+        {:eol, {1, 1, 1}},
+        {:at_op, {2, 1, nil}, :@},
+        {:identifier, {2, 2, ~c"x"}, :x}
+      ], ""}
     end
   end
 
@@ -1777,18 +1851,27 @@ defmodule ToxicTest do
     for module <- [
       Atom,
       Tuple,
-      # List,
-      # Map,
-      # Keyword,
-      # Bitwise,
-      # String,
-      # Integer,
-      # Float,
+      List,
+      Map,
+      Keyword,
+      Bitwise,
+      String,
+      Integer,
+      Float,
       ] do
 
       @module module
       test "elixir src #{@module}" do
         source = @module.module_info()[:compile][:source] |> File.read!
+        # lines = String.split(source, "\n")
+        assert {:ok, _, _} = tokenize(source)
+      end
+    end
+
+    test "elixir src" do
+      files = Enum.module_info()[:compile][:source] |> Path.join("../../..") |> Path.expand() |> Path.join("**/*.ex*") |> Path.wildcard
+      for file <- files do
+        source = file |> File.read!
         # lines = String.split(source, "\n")
         assert {:ok, _, _} = tokenize(source)
       end

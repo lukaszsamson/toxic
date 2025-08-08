@@ -926,9 +926,8 @@ handle_unary_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
       Token = {identifier, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
-      % TODO: Maybe remove this workaround?
-      EOLExtra = case Kind of at_op -> nil; _ -> previous_was_eol(Tokens) end,
-      Token = {Kind, make_meta_len(Line, Column, Length + Extra, EOLExtra, Scope), Op},
+      %% For unary operators, Elixir does not carry EOL counts in meta
+      Token = {Kind, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens])
   end.
 
