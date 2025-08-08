@@ -60,9 +60,12 @@ extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when i
   case toxic_tokenizer:tokenize(Rest, Line, Column + 2, Scope#toxic_tokenizer{terminators=[]}) of
     {error, {Location, _, "}"}, [$} | NewRest], Warnings, Tokens} ->
       NewScope = Scope#toxic_tokenizer{warnings=Warnings},
-      {EndLine, EndColumn} = location_end(Location),
-      Output2 = build_interpol(Line, Column, EndLine, EndColumn, lists:reverse(Tokens), Output1),
-      extract(NewRest, [], Output2, EndLine, EndColumn, NewScope, true, Last);
+      {EndLine, EndColumn0} = location_end(Location),
+      %% Store end meta at the closing '}' column (inclusive like Elixir),
+      %% but resume scanning after it.
+      ResumeColumn = EndColumn0 + 1,
+      Output2 = build_interpol(Line, Column, EndLine, EndColumn0, lists:reverse(Tokens), Output1),
+      extract(NewRest, [], Output2, EndLine, ResumeColumn, NewScope, true, Last);
     {error, Reason, _, _, _} ->
       {error, Reason};
     {ok, EndLine, EndColumn, Warnings, Tokens, Terminators} when Scope#toxic_tokenizer.cursor_completion /= false ->
