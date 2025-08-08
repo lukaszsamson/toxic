@@ -176,7 +176,9 @@ make_meta_len(Line, Column, Len, Extra, Scope) ->
 ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}}) ->
   {Type, {Line, Column, Extra}};
 ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}, Value}) ->
-  {Type, {Line, Column, Extra}, Value}.
+  {Type, {Line, Column, Extra}, Value};
+ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}, Value1, Value2}) ->
+  {Type, {Line, Column, Extra}, Value1, Value2}.
 
 tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
