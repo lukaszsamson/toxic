@@ -60,10 +60,9 @@ extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) ->
   case toxic_tokenizer:tokenize(Rest, Line, Column + 2, Scope#toxic_tokenizer{terminators=[]}) of
     {error, {Location, _, "}"}, [$} | NewRest], Warnings, Tokens} ->
       NewScope = Scope#toxic_tokenizer{warnings=Warnings},
-      {line, EndLine} = lists:keyfind(line, 1, Location),
-      {column, EndColumn} = lists:keyfind(column, 1, Location),
+      {EndLine, EndColumn} = location_end(Location),
       Output2 = build_interpol(Line, Column, EndLine, EndColumn, lists:reverse(Tokens), Output1),
-      extract(NewRest, [], Output2, EndLine, EndColumn + 1, NewScope, true, Last);
+      extract(NewRest, [], Output2, EndLine, add_one(EndColumn), NewScope, true, Last);
     {error, Reason, _, _, _} ->
       {error, Reason};
     {ok, EndLine, EndColumn, Warnings, Tokens, Terminators} when Scope#toxic_tokenizer.cursor_completion /= false ->
@@ -277,6 +276,20 @@ build_string(Buffer, Output) -> [lists:reverse(Buffer) | Output].
 
 build_interpol(Line, Column, EndLine, EndColumn, Buffer, Output) ->
   [{{Line, Column, nil}, {EndLine, EndColumn, nil}, Buffer} | Output].
+
+%% Normalize tokenizer error location to end {Line, Column}
+location_end({{_, _}, {EndLine, EndColumn}, _}) -> {EndLine, EndColumn};
+location_end({Line, Column}) when is_integer(Line), is_integer(Column) -> {Line, Column};
+location_end({Line, Column, _}) -> {Line, Column};
+location_end(Location) when is_list(Location) ->
+  case lists:keyfind(end_line, 1, Location) of
+    {end_line, EndLine} -> {EndLine, proplists:get_value(end_column, Location)};
+    false -> {proplists:get_value(line, Location), proplists:get_value(column, Location)}
+  end.
+
+% TODO: Why we need this hack?
+add_one({_, Col}) when is_integer(Col) -> Col + 1;
+add_one(Col) when is_integer(Col) -> Col + 1.
 
 prepend_warning(Line, Column, Msg, #toxic_tokenizer{warnings=Warnings} = Scope) ->
   Scope#toxic_tokenizer{warnings = [{{Line, Column}, Msg} | Warnings]}.

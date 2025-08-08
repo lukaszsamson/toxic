@@ -154,7 +154,7 @@ tokenize_with_ranges(String, Line, Column, Opts) ->
 
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
-  lists:map(fun ranges_token_to_legacy/1, TokensWithRanges).
+  [ranges_token_to_legacy(Token) || Token <- TokensWithRanges].
 
 %% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
 %% Build meta depending on whether ranges are enabled
@@ -173,12 +173,33 @@ make_meta_len(Line, Column, Len, Extra, Scope) ->
 %% Removed: legacy length inference no longer needed when emitting ranges inline.
 
 %% Map a token with range meta back to legacy meta
-ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}}) ->
-  {Type, {Line, Column, Extra}};
-ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}, Value}) ->
-  {Type, {Line, Column, Extra}, Value};
-ranges_token_to_legacy({Type, {{Line, Column}, _End, Extra}, Value1, Value2}) ->
-  {Type, {Line, Column, Extra}, Value1, Value2}.
+ranges_token_to_legacy({Type, Meta}) ->
+  {Type, legacy_meta(Meta)};
+ranges_token_to_legacy({Type, Meta, Value}) when Type =:= bin_string; Type =:= list_string; Type =:= atom_unsafe; Type =:= kw_identifier_unsafe ->
+  {Type, legacy_meta(Meta), ranges_convert_parts(Value)};
+ranges_token_to_legacy({Type, Meta, Value}) ->
+  {Type, legacy_meta(Meta), Value};
+ranges_token_to_legacy({Type, Meta, Indent, Parts}) when Type =:= bin_heredoc; Type =:= list_heredoc ->
+  {Type, legacy_meta(Meta), Indent, ranges_convert_parts(Parts)};
+ranges_token_to_legacy({sigil, Meta, SigilAtom, Parts, Modifiers, Indentation, Delimiter}) ->
+  {sigil, legacy_meta(Meta), SigilAtom, ranges_convert_parts(Parts), Modifiers, Indentation, Delimiter};
+ranges_token_to_legacy(Other) ->
+  %% Fallback: leave unchanged
+  Other.
+
+legacy_meta({{Line, Column}, _End, Extra}) -> {Line, Column, Extra};
+legacy_meta({Line, Column, Extra}) -> {Line, Column, Extra};
+legacy_meta(M) -> M.
+
+ranges_convert_parts(Parts) when is_list(Parts) ->
+  [ranges_convert_part(Part) || Part <- Parts];
+ranges_convert_parts(Other) ->
+  Other.
+
+ranges_convert_part({StartMeta, EndMeta, Tokens}) when is_tuple(StartMeta), is_tuple(EndMeta), is_list(Tokens) ->
+  {legacy_meta(StartMeta), legacy_meta(EndMeta), ranges_to_legacy(Tokens)};
+ranges_convert_part(Other) ->
+  Other.
 
 tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
