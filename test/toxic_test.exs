@@ -1761,28 +1761,22 @@ defmodule ToxicTest do
       assert tokenize("nil") == {:ok, [{:nil, {{1, 1}, {1, 4}, nil}}], ""}
     end
 
-
-    # TODO: return range
     test "when" do
       assert tokenize("when") == {:ok, [{:when_op, {{1, 1}, {1, 5}, nil}, :when}], ""}
     end
 
-    # TODO: return range
     test "and" do
       assert tokenize("and") == {:ok, [{:and_op, {{1, 1}, {1, 4}, nil}, :and}], ""}
     end
 
-    # TODO: return range
     test "or" do
       assert tokenize("or") == {:ok, [{:or_op, {{1, 1}, {1, 3}, nil}, :or}], ""}
     end
 
-    # TODO: return range
     test "not" do
-      assert tokenize("not") == {:ok, [{:unary_op, {{1, 1}, {1, 3}, nil}, :not}], ""}
+      assert tokenize("not") == {:ok, [{:unary_op, {{1, 1}, {1, 4}, nil}, :not}], ""}
     end
 
-    # TODO: return range
     test "not in" do
       assert tokenize("not in") == {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in"}], ""}
       assert tokenize("not  in") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
@@ -1790,7 +1784,6 @@ defmodule ToxicTest do
       # assert tokenize("not\nin") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
     end
 
-    # TODO: return range
     test "in" do
       assert tokenize("in") == {:ok, [{:in_op, {{1, 1}, {1, 3}, nil}, :in}], ""}
     end
@@ -1800,15 +1793,15 @@ defmodule ToxicTest do
     end
 
     test "rescue" do
-      assert tokenize("rescue") == {:ok, [{:block_identifier, {1, 1, nil}, :rescue}], ""}
+      assert tokenize("rescue") == {:ok, [{:block_identifier, {{1, 1}, {1, 7}, nil}, :rescue}], ""}
     end
 
     test "after" do
-      assert tokenize("after") == {:ok, [{:block_identifier, {1, 1, nil}, :after}], ""}
+      assert tokenize("after") == {:ok, [{:block_identifier, {{1, 1}, {1, 6}, nil}, :after}], ""}
     end
 
     test "else" do
-      assert tokenize("else") == {:ok, [{:block_identifier, {1, 1, nil}, :else}], ""}
+      assert tokenize("else") == {:ok, [{:block_identifier, {{1, 1}, {1, 5}, nil}, :else}], ""}
     end
   end
 

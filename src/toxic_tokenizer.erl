@@ -1757,7 +1757,8 @@ tokenize_keyword(token, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(block, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
-  Token = {block_identifier, make_meta_len(Line, Column, Length, nil, Scope), Atom},
+  Meta = make_meta_len(Line, Column, Length, nil, Scope),
+  Token = {block_identifier, Meta, Atom},
   tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
@@ -1769,10 +1770,22 @@ tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
       _ ->
         case {Kind, Tokens} of
           {in_op, [{unary_op, NotInfo, 'not'} | T]} ->
-            add_token_with_eol({in_op, NotInfo, 'not in'}, T);
+            %% Build a range from the start of 'not' to the end of 'in'
+            Start = case NotInfo of
+              {{SL, SC}, _, _} -> {SL, SC};
+              {SL, SC, _} -> {SL, SC}
+            end,
+            EndLine = Line,
+            EndColumn = Column + Length,
+            Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, nil, Scope),
+            add_token_with_eol({in_op, Meta, 'not in'}, T);
 
           {_, _} ->
-            add_token_with_eol({Kind, {Line, Column, previous_was_eol(Tokens)}, Atom}, Tokens)
+            Meta = case Kind of
+              unary_op -> make_meta(Line, Column, Line, Column + Length, nil, Scope);
+              _ -> make_meta_len(Line, Column, Length, nil, Scope)
+            end,
+            add_token_with_eol({Kind, Meta, Atom}, Tokens)
         end
     end,
 
