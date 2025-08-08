@@ -3,19 +3,20 @@ defmodule ToxicTest do
   doctest Toxic
 
   defp tokenize(string) do
-    {:ok, _, _, _, ex_lex_tokens_with_ranges, ex_lex_remaining} =
-      :toxic_tokenizer.tokenize_with_ranges(to_charlist(string), 1, 1, [])
+    charlist = to_charlist(string)
+    {:ok, _, _, _, toxic_tokens_with_ranges, toxic_remaining} =
+      :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [])
 
     # Convert back to legacy format for comparison
-    ex_lex_tokens = :toxic_tokenizer.ranges_to_legacy(ex_lex_tokens_with_ranges)
+    toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
 
     {:ok, _, _, _, elixir_tokens, _remaining} =
-      :elixir_tokenizer.tokenize(to_charlist(string), 1, 1, [])
+      :elixir_tokenizer.tokenize(charlist, 1, 1, [])
 
-    assert Enum.reverse(ex_lex_tokens) == Enum.reverse(elixir_tokens)
+    assert Enum.reverse(toxic_tokens) == Enum.reverse(elixir_tokens)
 
-    tokens = Enum.reverse(ex_lex_tokens)
-    remaining_str = List.to_string(ex_lex_remaining)
+    tokens = Enum.reverse(toxic_tokens_with_ranges)
+    remaining_str = List.to_string(toxic_remaining)
 
     {:ok, tokens, remaining_str}
   end
@@ -57,7 +58,7 @@ defmodule ToxicTest do
 
   describe "hex numbers" do
     test "simple hex numbers" do
-      assert tokenize("0x123") == {:ok, [{:int, {1, 1, 291}, ~c"0x123"}], ""}
+      assert tokenize("0x123") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "hex numbers with underscores" do
@@ -69,13 +70,13 @@ defmodule ToxicTest do
     end
 
     test "hex followed by other characters" do
-      assert tokenize("0x123;") == {:ok, [{:int, {1, 1, 291}, ~c"0x123"}, {:";", {1, 6, 0}}], ""}
+      assert tokenize("0x123;") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
     end
   end
 
   describe "binary numbers" do
     test "simple binary numbers" do
-      assert tokenize("0b101") == {:ok, [{:int, {1, 1, 5}, ~c"0b101"}], ""}
+      assert tokenize("0b101") == {:ok, [{:int, {{1, 1}, {1, 6}, 5}, ~c"0b101"}], ""}
     end
 
     test "binary numbers with underscores" do
@@ -89,7 +90,7 @@ defmodule ToxicTest do
 
   describe "octal numbers" do
     test "simple octal numbers" do
-      assert tokenize("0o123") == {:ok, [{:int, {1, 1, 83}, ~c"0o123"}], ""}
+      assert tokenize("0o123") == {:ok, [{:int, {{1, 1}, {1, 6}, 83}, ~c"0o123"}], ""}
     end
 
     test "octal numbers with underscores" do
@@ -103,7 +104,7 @@ defmodule ToxicTest do
 
   describe "floats" do
     test "simple floats" do
-      assert tokenize("1.23") == {:ok, [{:flt, {1, 1, 1.23}, ~c"1.23"}], ""}
+      assert tokenize("1.23") == {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}], ""}
     end
 
     test "floats with underscores" do
@@ -121,7 +122,7 @@ defmodule ToxicTest do
 
     test "floats with e and underscore" do
       assert tokenize("1_2_3.4_5e6_7") ==
-               {:ok, [{:flt, {1, 1, 1.2345e69}, ~c"1_2_3.4_5e6_7"}], ""}
+               {:ok, [{:flt, {{1, 1}, {1, 14}, 1.2345e69}, ~c"1_2_3.4_5e6_7"}], ""}
     end
 
     test "floats with e and underscore and sign" do
@@ -139,7 +140,7 @@ defmodule ToxicTest do
 
   describe "integers" do
     test "simple integers" do
-      assert tokenize("123") == {:ok, [{:int, {1, 1, 123}, ~c"123"}], ""}
+      assert tokenize("123") == {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}], ""}
     end
 
     test "starting with 0" do
@@ -161,7 +162,7 @@ defmodule ToxicTest do
 
   describe "operator atoms" do
     test "keyword identifiers" do
-      assert tokenize(".: ") == {:ok, [{:kw_identifier, {1, 1, nil}, :.}], ""}
+      assert tokenize(".: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 3}, nil}, :.}], ""}
       assert tokenize("<<>>: ") == {:ok, [{:kw_identifier, {1, 1, nil}, :<<>>}], ""}
       assert tokenize("%{}: ") == {:ok, [{:kw_identifier, {1, 1, nil}, :%{}}], ""}
       assert tokenize("%: ") == {:ok, [{:kw_identifier, {1, 1, nil}, :%}], ""}
@@ -171,7 +172,7 @@ defmodule ToxicTest do
     end
 
     test "atom operators" do
-      assert tokenize(":<<>>") == {:ok, [{:atom, {1, 1, nil}, :<<>>}], ""}
+      assert tokenize(":<<>>") == {:ok, [{:atom, {{1, 1}, {1, 6}, nil}, :<<>>}], ""}
       assert tokenize(":%{}") == {:ok, [{:atom, {1, 1, nil}, :%{}}], ""}
       assert tokenize(":%") == {:ok, [{:atom, {1, 1, nil}, :%}], ""}
       assert tokenize(":{}") == {:ok, [{:atom, {1, 1, nil}, :{}}], ""}
@@ -186,92 +187,92 @@ defmodule ToxicTest do
   describe "operators as atoms" do
     test "three-token operators as atoms" do
       # unary_op3
-      assert tokenize(":~~~") == {:ok, [{:atom, {1, 1, nil}, :"~~~"}], ""}
+      assert tokenize(":~~~") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}], ""}
       # comp_op3
-      assert tokenize(":===") == {:ok, [{:atom, {1, 1, nil}, :===}], ""}
-      assert tokenize(":!==") == {:ok, [{:atom, {1, 1, nil}, :!==}], ""}
+      assert tokenize(":===") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :===}], ""}
+      assert tokenize(":!==") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :!==}], ""}
       # and_op3
-      assert tokenize(":&&&") == {:ok, [{:atom, {1, 1, nil}, :&&&}], ""}
+      assert tokenize(":&&&") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :&&&}], ""}
       # or_op3
-      assert tokenize(":|||") == {:ok, [{:atom, {1, 1, nil}, :|||}], ""}
+      assert tokenize(":|||") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :|||}], ""}
       # arrow_op3
-      assert tokenize(":<<<") == {:ok, [{:atom, {1, 1, nil}, :<<<}], ""}
-      assert tokenize(":>>>") == {:ok, [{:atom, {1, 1, nil}, :>>>}], ""}
-      assert tokenize(":~>>") == {:ok, [{:atom, {1, 1, nil}, :~>>}], ""}
-      assert tokenize(":<<~") == {:ok, [{:atom, {1, 1, nil}, :<<~}], ""}
-      assert tokenize(":<~>") == {:ok, [{:atom, {1, 1, nil}, :<~>}], ""}
-      assert tokenize(":<|>") == {:ok, [{:atom, {1, 1, nil}, :"<|>"}], ""}
+      assert tokenize(":<<<") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<<<}], ""}
+      assert tokenize(":>>>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :>>>}], ""}
+      assert tokenize(":~>>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :~>>}], ""}
+      assert tokenize(":<<~") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<<~}], ""}
+      assert tokenize(":<~>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<~>}], ""}
+      assert tokenize(":<|>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"<|>"}], ""}
       # xor_op3
-      assert tokenize(":^^^") == {:ok, [{:atom, {1, 1, nil}, :"^^^"}], ""}
+      assert tokenize(":^^^") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"^^^"}], ""}
       # concat_op3
-      assert tokenize(":+++") == {:ok, [{:atom, {1, 1, nil}, :+++}], ""}
-      assert tokenize(":---") == {:ok, [{:atom, {1, 1, nil}, :---}], ""}
+      assert tokenize(":+++") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :+++}], ""}
+      assert tokenize(":---") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :---}], ""}
       # ellipsis_op3
-      assert tokenize(":...") == {:ok, [{:atom, {1, 1, nil}, :...}], ""}
+      assert tokenize(":...") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :...}], ""}
     end
 
     test "special handling of :::" do
       # TODO: assert on warning
-      assert tokenize(":::") == {:ok, [{:atom, {1, 1, nil}, :"::"}], ""}
+      assert tokenize(":::") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}], ""}
     end
 
     test "two-token operators as atoms" do
       # comp_op2
-      assert tokenize(":==") == {:ok, [{:atom, {1, 1, nil}, :==}], ""}
-      assert tokenize(":!=") == {:ok, [{:atom, {1, 1, nil}, :!=}], ""}
-      assert tokenize(":=~") == {:ok, [{:atom, {1, 1, nil}, :=~}], ""}
+      assert tokenize(":==") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :==}], ""}
+      assert tokenize(":!=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :!=}], ""}
+      assert tokenize(":=~") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :=~}], ""}
       # rel_op2
-      assert tokenize(":>=") == {:ok, [{:atom, {1, 1, nil}, :>=}], ""}
-      assert tokenize(":<=") == {:ok, [{:atom, {1, 1, nil}, :<=}], ""}
+      assert tokenize(":>=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :>=}], ""}
+      assert tokenize(":<=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<=}], ""}
       # and_op
-      assert tokenize(":&&") == {:ok, [{:atom, {1, 1, nil}, :&&}], ""}
+      assert tokenize(":&&") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :&&}], ""}
       # or_op
-      assert tokenize(":||") == {:ok, [{:atom, {1, 1, nil}, :||}], ""}
+      assert tokenize(":||") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :||}], ""}
       # arrow_op
-      assert tokenize(":|>") == {:ok, [{:atom, {1, 1, nil}, :|>}], ""}
-      assert tokenize(":~>") == {:ok, [{:atom, {1, 1, nil}, :~>}], ""}
-      assert tokenize(":<~") == {:ok, [{:atom, {1, 1, nil}, :<~}], ""}
+      assert tokenize(":|>") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :|>}], ""}
+      assert tokenize(":~>") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :~>}], ""}
+      assert tokenize(":<~") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<~}], ""}
       # in_match_op
-      assert tokenize(":<-") == {:ok, [{:atom, {1, 1, nil}, :<-}], ""}
-      assert tokenize(":\\\\") == {:ok, [{:atom, {1, 1, nil}, :"\\\\"}], ""}
+      assert tokenize(":<-") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<-}], ""}
+      assert tokenize(":\\\\") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"\\\\"}], ""}
       # concat_op
-      assert tokenize(":++") == {:ok, [{:atom, {1, 1, nil}, :++}], ""}
-      assert tokenize(":--") == {:ok, [{:atom, {1, 1, nil}, :--}], ""}
+      assert tokenize(":++") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :++}], ""}
+      assert tokenize(":--") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :--}], ""}
       # power_op
-      assert tokenize(":**") == {:ok, [{:atom, {1, 1, nil}, :**}], ""}
+      assert tokenize(":**") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :**}], ""}
       # stab_op
-      assert tokenize(":->") == {:ok, [{:atom, {1, 1, nil}, :->}], ""}
+      assert tokenize(":->") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :->}], ""}
       # range_op
-      assert tokenize(":..") == {:ok, [{:atom, {1, 1, nil}, :..}], ""}
+      assert tokenize(":..") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :..}], ""}
     end
 
     test "single-token operators as atoms" do
       # at_op
-      assert tokenize(":@") == {:ok, [{:atom, {1, 1, nil}, :@}], ""}
+      assert tokenize(":@") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :@}], ""}
       # unary_op
-      assert tokenize(":!") == {:ok, [{:atom, {1, 1, nil}, :!}], ""}
-      assert tokenize(":^") == {:ok, [{:atom, {1, 1, nil}, :^}], ""}
+      assert tokenize(":!") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :!}], ""}
+      assert tokenize(":^") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :^}], ""}
       # capture_op
-      assert tokenize(":&") == {:ok, [{:atom, {1, 1, nil}, :&}], ""}
+      assert tokenize(":&") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :&}], ""}
       # dual_op
-      assert tokenize(":+") == {:ok, [{:atom, {1, 1, nil}, :+}], ""}
-      assert tokenize(":-") == {:ok, [{:atom, {1, 1, nil}, :-}], ""}
+      assert tokenize(":+") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :+}], ""}
+      assert tokenize(":-") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :-}], ""}
       # mult_op
-      assert tokenize(":*") == {:ok, [{:atom, {1, 1, nil}, :*}], ""}
-      assert tokenize(":/") == {:ok, [{:atom, {1, 1, nil}, :/}], ""}
+      assert tokenize(":*") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :*}], ""}
+      assert tokenize(":/") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :/}], ""}
       # rel_op
-      assert tokenize(":<") == {:ok, [{:atom, {1, 1, nil}, :<}], ""}
-      assert tokenize(":>") == {:ok, [{:atom, {1, 1, nil}, :>}], ""}
+      assert tokenize(":<") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :<}], ""}
+      assert tokenize(":>") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :>}], ""}
       # match_op
-      assert tokenize(":=") == {:ok, [{:atom, {1, 1, nil}, :=}], ""}
+      assert tokenize(":=") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :=}], ""}
       # pipe_op
-      assert tokenize(":|") == {:ok, [{:atom, {1, 1, nil}, :|}], ""}
+      assert tokenize(":|") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :|}], ""}
       # dot
-      assert tokenize(":.") == {:ok, [{:atom, {1, 1, nil}, :.}], ""}
+      assert tokenize(":.") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}], ""}
     end
 
     test "followed by other characters" do
-      assert tokenize(":~~~;") == {:ok, [{:atom, {1, 1, nil}, :"~~~"}, {:";", {1, 5, 0}}], ""}
+      assert tokenize(":~~~;") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
       assert tokenize(":::;") == {:ok, [{:atom, {1, 1, nil}, :"::"}, {:";", {1, 4, 0}}], ""}
       assert tokenize(":.;") == {:ok, [{:atom, {1, 1, nil}, :.}, {:";", {1, 3, 0}}], ""}
     end
@@ -279,13 +280,15 @@ defmodule ToxicTest do
 
   describe "stand alone tokens" do
     test "=>" do
-      assert tokenize("=>") == {:ok, [{:assoc_op, {1, 1, nil}, :"=>"}], ""}
+      assert tokenize("=>") == {:ok, [{:assoc_op, {{1, 1}, {1, 3}, nil}, :"=>"}], ""}
     end
 
     test "=> after eol" do
-      assert tokenize("\n=>") == {:ok, [{:assoc_op, {2, 1, 1}, :"=>"}], ""}
-      assert tokenize("\n\n=>") == {:ok, [{:assoc_op, {3, 1, 2}, :"=>"}], ""}
+      assert tokenize("\n=>") == {:ok, [{:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}], ""}
+      assert tokenize("\n\n=>") == {:ok, [{:assoc_op, {{3, 1}, {3, 3}, 2}, :"=>"}], ""}
     end
+
+    # TODO
 
     # test "=> after ;" do
     #   # assert tokenize(";=>") == {:ok, [{:assoc_op, {2, 1, 1}, :"=>"}], ""}
@@ -298,90 +301,92 @@ defmodule ToxicTest do
     # end
 
     test "..//" do
-      assert tokenize("..///") == {:ok, [{:identifier, {1, 1, nil}, :..//}, {:mult_op, {1, 5, nil}, :/}], ""}
-      assert tokenize("..// /") == {:ok, [{:identifier, {1, 1, nil}, :..//}, {:mult_op, {1, 6, nil}, :/}], ""}
+      assert tokenize("..///") == {:ok, [{:identifier, {{1, 1}, {1, 5}, nil}, :..//}, {:mult_op, {{1, 5}, {1, 6}, nil}, :/}], ""}
+      assert tokenize("..// /") == {:ok, [{:identifier, {{1, 1}, {1, 5}, nil}, :..//}, {:mult_op, {{1, 6}, {1, 7}, nil}, :/}], ""}
     end
   end
 
   describe "operators" do
     test "three token operators" do
       # unary_op3
-      assert tokenize("~~~") == {:ok, [{:unary_op, {1, 1, nil}, :"~~~"}], ""}
+      assert tokenize("~~~") == {:ok, [{:unary_op, {{1, 1}, {1, 4}, nil}, :"~~~"}], ""}
       # comp_op3
-      assert tokenize("===") == {:ok, [{:comp_op, {1, 1, nil}, :===}], ""}
-      assert tokenize("!==") == {:ok, [{:comp_op, {1, 1, nil}, :!==}], ""}
+      assert tokenize("===") == {:ok, [{:comp_op, {{1, 1}, {1, 4}, nil}, :===}], ""}
+      assert tokenize("!==") == {:ok, [{:comp_op, {{1, 1}, {1, 4}, nil}, :!==}], ""}
       # and_op3
-      assert tokenize("&&&") == {:ok, [{:and_op, {1, 1, nil}, :&&&}], ""}
+      assert tokenize("&&&") == {:ok, [{:and_op, {{1, 1}, {1, 4}, nil}, :&&&}], ""}
       # or_op3
-      assert tokenize("|||") == {:ok, [{:or_op, {1, 1, nil}, :|||}], ""}
+      assert tokenize("|||") == {:ok, [{:or_op, {{1, 1}, {1, 4}, nil}, :|||}], ""}
       # arrow_op3
-      assert tokenize("<<<") == {:ok, [{:arrow_op, {1, 1, nil}, :<<<}], ""}
-      assert tokenize(">>>") == {:ok, [{:arrow_op, {1, 1, nil}, :>>>}], ""}
-      assert tokenize("~>>") == {:ok, [{:arrow_op, {1, 1, nil}, :~>>}], ""}
-      assert tokenize("<<~") == {:ok, [{:arrow_op, {1, 1, nil}, :<<~}], ""}
-      assert tokenize("<~>") == {:ok, [{:arrow_op, {1, 1, nil}, :<~>}], ""}
-      assert tokenize("<|>") == {:ok, [{:arrow_op, {1, 1, nil}, :"<|>"}], ""}
+      assert tokenize("<<<") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<<<}], ""}
+      assert tokenize(">>>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :>>>}], ""}
+      assert tokenize("~>>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :~>>}], ""}
+      assert tokenize("<<~") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<<~}], ""}
+      assert tokenize("<~>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<~>}], ""}
+      assert tokenize("<|>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :"<|>"}], ""}
       # xor_op3
-      assert tokenize("^^^") == {:ok, [{:xor_op, {1, 1, nil}, :"^^^"}], ""}
+      assert tokenize("^^^") == {:ok, [{:xor_op, {{1, 1}, {1, 4}, nil}, :"^^^"}], ""}
       # concat_op3
-      assert tokenize("+++") == {:ok, [{:concat_op, {1, 1, nil}, :+++}], ""}
-      assert tokenize("---") == {:ok, [{:concat_op, {1, 1, nil}, :---}], ""}
+      assert tokenize("+++") == {:ok, [{:concat_op, {{1, 1}, {1, 4}, nil}, :+++}], ""}
+      assert tokenize("---") == {:ok, [{:concat_op, {{1, 1}, {1, 4}, nil}, :---}], ""}
       # ellipsis_op3
-      assert tokenize("...") == {:ok, [{:ellipsis_op, {1, 1, nil}, :...}], ""}
+      assert tokenize("...") == {:ok, [{:ellipsis_op, {{1, 1}, {1, 4}, nil}, :...}], ""}
     end
 
     test "two-token operators" do
       # comp_op2
-      assert tokenize("==") == {:ok, [{:comp_op, {1, 1, nil}, :==}], ""}
-      assert tokenize("!=") == {:ok, [{:comp_op, {1, 1, nil}, :!=}], ""}
-      assert tokenize("=~") == {:ok, [{:comp_op, {1, 1, nil}, :=~}], ""}
+      assert tokenize("==") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :==}], ""}
+      assert tokenize("!=") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :!=}], ""}
+      assert tokenize("=~") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :=~}], ""}
       # rel_op2
-      assert tokenize(">=") == {:ok, [{:rel_op, {1, 1, nil}, :>=}], ""}
-      assert tokenize("<=") == {:ok, [{:rel_op, {1, 1, nil}, :<=}], ""}
+      assert tokenize(">=") == {:ok, [{:rel_op, {{1, 1}, {1, 3}, nil}, :>=}], ""}
+      assert tokenize("<=") == {:ok, [{:rel_op, {{1, 1}, {1, 3}, nil}, :<=}], ""}
       # and_op
-      assert tokenize("&&") == {:ok, [{:and_op, {1, 1, nil}, :&&}], ""}
+      assert tokenize("&&") == {:ok, [{:and_op, {{1, 1}, {1, 3}, nil}, :&&}], ""}
       # or_op
-      assert tokenize("||") == {:ok, [{:or_op, {1, 1, nil}, :||}], ""}
+      assert tokenize("||") == {:ok, [{:or_op, {{1, 1}, {1, 3}, nil}, :||}], ""}
       # arrow_op
-      assert tokenize("|>") == {:ok, [{:arrow_op, {1, 1, nil}, :|>}], ""}
-      assert tokenize("~>") == {:ok, [{:arrow_op, {1, 1, nil}, :~>}], ""}
-      assert tokenize("<~") == {:ok, [{:arrow_op, {1, 1, nil}, :<~}], ""}
+      assert tokenize("|>") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :|>}], ""}
+      assert tokenize("~>") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :~>}], ""}
+      assert tokenize("<~") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :<~}], ""}
       # in_match_op
-      assert tokenize("<-") == {:ok, [{:in_match_op, {1, 1, nil}, :<-}], ""}
-      assert tokenize("\\\\") == {:ok, [{:in_match_op, {1, 1, nil}, :"\\\\"}], ""}
+      assert tokenize("<-") == {:ok, [{:in_match_op, {{1, 1}, {1, 3}, nil}, :<-}], ""}
+      assert tokenize("\\\\") == {:ok, [{:in_match_op, {{1, 1}, {1, 3}, nil}, :"\\\\"}], ""}
       # concat_op
-      assert tokenize("++") == {:ok, [{:concat_op, {1, 1, nil}, :++}], ""}
-      assert tokenize("--") == {:ok, [{:concat_op, {1, 1, nil}, :--}], ""}
+      assert tokenize("++") == {:ok, [{:concat_op, {{1, 1}, {1, 3}, nil}, :++}], ""}
+      assert tokenize("--") == {:ok, [{:concat_op, {{1, 1}, {1, 3}, nil}, :--}], ""}
       # power_op
-      assert tokenize("**") == {:ok, [{:power_op, {1, 1, nil}, :**}], ""}
+      assert tokenize("**") == {:ok, [{:power_op, {{1, 1}, {1, 3}, nil}, :**}], ""}
       # stab_op
-      assert tokenize("->") == {:ok, [{:stab_op, {1, 1, nil}, :->}], ""}
+      assert tokenize("->") == {:ok, [{:stab_op, {{1, 1}, {1, 3}, nil}, :->}], ""}
       # range_op
-      assert tokenize("..") == {:ok, [{:range_op, {1, 1, nil}, :..}], ""}
+      assert tokenize("..") == {:ok, [{:range_op, {{1, 1}, {1, 3}, nil}, :..}], ""}
       # type_op
-      assert tokenize("::") == {:ok, [{:type_op, {1, 1, nil}, :"::"}], ""}
+      assert tokenize("::") == {:ok, [{:type_op, {{1, 1}, {1, 3}, nil}, :"::"}], ""}
     end
 
     test "ternary_op" do
-      assert tokenize("//") == {:ok, [{:ternary_op, {1, 1, nil}, :"//"}], ""}
+      assert tokenize("//") == {:ok, [{:ternary_op, {{1, 1}, {1, 3}, nil}, :"//"}], ""}
     end
 
     test "ternary_op after eol" do
-      assert tokenize("\n//") == {:ok, [{:ternary_op, {2, 1, 1}, :"//"}], ""}
+      assert tokenize("\n//") == {:ok, [{:ternary_op, {{2, 1}, {2, 3}, 1}, :"//"}], ""}
     end
 
     test "," do
-      assert tokenize(",") == {:ok, [{:",", {1, 1, 0}}], ""}
+      assert tokenize(",") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}}], ""}
     end
 
     test "<<>>" do
-      assert tokenize("<<>>") == {:ok, [{:"<<", {1, 1, nil}}, {:">>", {1, 3, nil}}], ""}
+      assert tokenize("<<>>") == {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:">>", {{1, 3}, {1, 5}, nil}}], ""}
     end
 
     test ">> after eol" do
-      assert tokenize("<<\n>>") == {:ok, [{:"<<", {1, 1, nil}}, {:eol, {1, 3, 1}}, {:">>", {2, 1, 1}}], ""}
+      # TODO: eol with only position???
+      assert tokenize("<<\n>>") == {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:eol, {1, 3, 1}}, {:">>", {{2, 1}, {2, 3}, 1}}], ""}
     end
 
+    # TODO
     # test "space between % and {" do
     #   assert tokenize("% {") == {:ok, [{:ternary_op, {2, 1, 1}, :"::"}], ""}
     # end
@@ -412,23 +417,23 @@ defmodule ToxicTest do
 
     test "single-token operators" do
       # at_op
-      assert tokenize("@") == {:ok, [{:at_op, {1, 1, nil}, :@}], ""}
+      assert tokenize("@") == {:ok, [{:at_op, {{1, 1}, {1, 2}, nil}, :@}], ""}
       # unary_op
-      assert tokenize("!") == {:ok, [{:unary_op, {1, 1, nil}, :!}], ""}
-      assert tokenize("^") == {:ok, [{:unary_op, {1, 1, nil}, :^}], ""}
+      assert tokenize("!") == {:ok, [{:unary_op, {{1, 1}, {1, 2}, nil}, :!}], ""}
+      assert tokenize("^") == {:ok, [{:unary_op, {{1, 1}, {1, 2}, nil}, :^}], ""}
       # dual_op
-      assert tokenize("+") == {:ok, [{:dual_op, {1, 1, nil}, :+}], ""}
-      assert tokenize("-") == {:ok, [{:dual_op, {1, 1, nil}, :-}], ""}
+      assert tokenize("+") == {:ok, [{:dual_op, {{1, 1}, {1, 2}, nil}, :+}], ""}
+      assert tokenize("-") == {:ok, [{:dual_op, {{1, 1}, {1, 2}, nil}, :-}], ""}
       # mult_op
-      assert tokenize("*") == {:ok, [{:mult_op, {1, 1, nil}, :*}], ""}
-      assert tokenize("/") == {:ok, [{:mult_op, {1, 1, nil}, :/}], ""}
+      assert tokenize("*") == {:ok, [{:mult_op, {{1, 1}, {1, 2}, nil}, :*}], ""}
+      assert tokenize("/") == {:ok, [{:mult_op, {{1, 1}, {1, 2}, nil}, :/}], ""}
       # rel_op
-      assert tokenize("<") == {:ok, [{:rel_op, {1, 1, nil}, :<}], ""}
-      assert tokenize(">") == {:ok, [{:rel_op, {1, 1, nil}, :>}], ""}
+      assert tokenize("<") == {:ok, [{:rel_op, {{1, 1}, {1, 2}, nil}, :<}], ""}
+      assert tokenize(">") == {:ok, [{:rel_op, {{1, 1}, {1, 2}, nil}, :>}], ""}
       # match_op
-      assert tokenize("=") == {:ok, [{:match_op, {1, 1, nil}, :=}], ""}
+      assert tokenize("=") == {:ok, [{:match_op, {{1, 1}, {1, 2}, nil}, :=}], ""}
       # pipe_op
-      assert tokenize("|") == {:ok, [{:pipe_op, {1, 1, nil}, :|}], ""}
+      assert tokenize("|") == {:ok, [{:pipe_op, {{1, 1}, {1, 2}, nil}, :|}], ""}
     end
 
     test "capture_int" do
@@ -676,40 +681,40 @@ defmodule ToxicTest do
 
   describe "bin strings" do
     test "empty bin strings" do
-      assert tokenize("\"\"") == {:ok, [{:bin_string, {1, 1, nil}, [""]}], ""}
+      assert tokenize("\"\"") == {:ok, [{:bin_string, {{1, 1}, {1, 3}, nil}, [""]}], ""}
     end
 
     test "simple bin strings" do
-      assert tokenize("\"foo\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo"]}], ""}
+      assert tokenize("\"foo\"") == {:ok, [{:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]}], ""}
     end
 
     test "unicode bin strings" do
-      assert tokenize("\"ą\"") == {:ok, [{:bin_string, {1, 1, nil}, ["ą"]}], ""}
+      assert tokenize("\"ą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]}], ""}
     end
 
     test "with LF newlines" do
-      assert tokenize("\"foo\nbar\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo\nbar"]}], ""}
+      assert tokenize("\"foo\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]}], ""}
     end
 
     test "with CRLF newlines" do
-      assert tokenize("\"foo\r\nbar\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo\r\nbar"]}], ""}
+      assert tokenize("\"foo\r\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\r\nbar"]}], ""}
     end
 
     test "with escaped LF newlines" do
-      assert tokenize("\"foo\\\nbar\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foobar"]}], ""}
+      assert tokenize("\"foo\\\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
     end
 
     test "with escaped CRLF newlines" do
-      assert tokenize("\"foo\\\r\nbar\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foobar"]}], ""}
+      assert tokenize("\"foo\\\r\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
     end
 
     test "with LF escape" do
-      assert tokenize("\"foo\\nbar\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo\nbar"]}], ""}
+      assert tokenize("\"foo\\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\nbar"]}], ""}
     end
 
     test "with CRLF escape" do
       assert tokenize("\"foo\\r\\nbar\"") ==
-               {:ok, [{:bin_string, {1, 1, nil}, ["foo\r\nbar"]}], ""}
+               {:ok, [{:bin_string, {{1, 1}, {1, 13}, nil}, ["foo\r\nbar"]}], ""}
     end
 
     test "with terminator escape" do
@@ -762,7 +767,7 @@ defmodule ToxicTest do
     end
 
     test "with interpolation in the middle" do
-      assert tokenize("\"foo \#{0x123} baz\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo ", {{1, 6, nil}, {1, 13, nil}, [{:int, {1, 8, 291}, ~c"0x123"}]}, " baz"]}], ""}
+      assert tokenize("\"foo \#{0x123} baz\"") == {:ok, [{:bin_string, {{1, 1}, {1, 19}, nil}, ["foo ", {{1, 6, nil}, {1, 13, nil}, [{:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}]}, " baz"]}], ""}
     end
 
     test "with interpolation in the beginning" do
@@ -819,21 +824,21 @@ defmodule ToxicTest do
     end
 
     test "with nested interpolation" do
-      assert tokenize("\"foo \#{\"inner \#{0x123} \"} baz\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo ", {{1, 6, nil}, {1, 25, nil}, [{:bin_string, {1, 8, nil}, ["inner ", {{1, 15, nil}, {1, 22, nil}, [{:int, {1, 17, 291}, ~c"0x123"}]}, " "]}]}, " baz"]}], ""}
+      assert tokenize("\"foo \#{\"inner \#{0x123} \"} baz\"") == {:ok, [{:bin_string, {{1, 1}, {1, 31}, nil}, ["foo ", {{1, 6, nil}, {1, 25, nil}, [{:bin_string, {{1, 8}, {1, 25}, nil}, ["inner ", {{1, 15, nil}, {1, 22, nil}, [{:int, {{1, 17}, {1, 22}, 291}, ~c"0x123"}]}, " "]}]}, " baz"]}], ""}
     end
 
     test "with escaped interpolation" do
-      assert tokenize("\"foo \\\#{0x123} baz\"") == {:ok, [{:bin_string, {1, 1, nil}, ["foo \#{0x123} baz"]}], ""}
+      assert tokenize("\"foo \\\#{0x123} baz\"") == {:ok, [{:bin_string, {{1, 1}, {1, 20}, nil}, ["foo \#{0x123} baz"]}], ""}
     end
   end
 
   describe "charlist strings" do
     test "empty charlist strings" do
-      assert tokenize("''") == {:ok, [{:list_string, {1, 1, nil}, [""]}], ""}
+      assert tokenize("''") == {:ok, [{:list_string, {{1, 1}, {1, 3}, nil}, [""]}], ""}
     end
 
     test "simple charlist strings" do
-      assert tokenize("'foo'") == {:ok, [{:list_string, {1, 1, nil}, ["foo"]}], ""}
+      assert tokenize("'foo'") == {:ok, [{:list_string, {{1, 1}, {1, 6}, nil}, ["foo"]}], ""}
     end
 
     test "unicode charlist strings" do
@@ -866,7 +871,7 @@ defmodule ToxicTest do
     end
 
     test "with terminator escape" do
-      assert tokenize("'foo\\'bar'") == {:ok, [{:list_string, {1, 1, nil}, ["foo'bar"]}], ""}
+      assert tokenize("'foo\\'bar'") == {:ok, [{:list_string, {{1, 1}, {1, 11}, nil}, ["foo'bar"]}], ""}
     end
 
     test "with interpolation" do
@@ -880,22 +885,22 @@ defmodule ToxicTest do
 
   describe "bin heredocs" do
     test "empty heredocs" do
-      assert tokenize("\"\"\"\n\"\"\"") == {:ok, [{:bin_heredoc, {1, 1, nil}, 0, [""]}], ""}
+      assert tokenize("\"\"\"\n\"\"\"") == {:ok, [{:bin_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
     end
 
     test "simple heredocs" do
       assert tokenize("\"\"\"\nfoo\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {1, 1, nil}, 0, ["foo\n"]}], ""}
+               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}], ""}
     end
 
     test "simple heredocs CRLF" do
       assert tokenize("\"\"\"\r\nfoo\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {1, 1, nil}, 0, ["foo\r\n"]}], ""}
+               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\n"]}], ""}
     end
 
     test "simple with indentation" do
       assert tokenize("\"\"\"\n  foo\n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {1, 1, nil}, 2, ["foo\n"]}], ""}
+               {:ok, [{:bin_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\n"]}], ""}
     end
 
     test "simple with tab indentation" do
@@ -1002,11 +1007,11 @@ defmodule ToxicTest do
         [
           {
             :bin_heredoc,
-            {1, 1, nil},
+            {{1, 1}, {3, 4}, nil},
             0,
             [
               "foo ",
-              {{2, 5, nil}, {2, 12, nil}, [{:int, {2, 7, 291}, ~c"0x123"}]},
+              {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
               " baz\n"
             ]
           }
@@ -1187,29 +1192,48 @@ defmodule ToxicTest do
 
   describe "char" do
     test "simple char" do
-      assert tokenize("?a") == {:ok, [{:char, {1, 1, ~c"?a"}, ?a}], ""}
+      assert tokenize("?a") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?a"}, ?a}], ""}
     end
 
     test "LF" do
-      assert tokenize("?\n") == {:ok, [{:char, {1, 1, ~c"?\n"}, ?\n}], ""}
+      # TODO: range is wrong
+      assert tokenize("?\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\n"}, ?\n}], ""}
+    end
+
+    test "CR" do
+      assert tokenize("?\r") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\n"}, ?\r}], ""}
+    end
+
+    test "NULL" do
+      assert tokenize("?\0") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\n"}, ?\0}], ""}
+    end
+
+    test "CR LF" do
+      assert tokenize("?\r\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {1, 3, 1}}], ""}
     end
 
     test "escape" do
-      assert tokenize("?\\0") == {:ok, [{:char, {1, 1, ~c"?\\0"}, ?\0}], ""}
-      assert tokenize("?\\a") == {:ok, [{:char, {1, 1, ~c"?\\a"}, ?\a}], ""}
-      assert tokenize("?\\\\") == {:ok, [{:char, {1, 1, ~c"?\\\\"}, ?\\}], ""}
+      assert tokenize("?\\0") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\0"}, ?\0}], ""}
+      assert tokenize("?\\a") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\a"}, ?\a}], ""}
+      assert tokenize("?\\\\") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\\"}, ?\\}], ""}
     end
 
     test "unknown escape" do
-      assert tokenize("?\\z") == {:ok, [{:char, {1, 1, ~c"?\\z"}, ?z}], ""}
+      assert tokenize("?\\z") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\z"}, ?z}], ""}
     end
 
     test "unknown escape non letter" do
-      assert tokenize("?\\1") == {:ok, [{:char, {1, 1, ~c"?\\1"}, ?1}], ""}
+      assert tokenize("?\\1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\1"}, ?1}], ""}
     end
 
     test "escape LF" do
-      assert tokenize("?\\\n") == {:ok, [{:char, {1, 1, ~c"?\\\n"}, ?\n}], ""}
+      # TODO: range is invalid
+      assert tokenize("?\\\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\n"}, ?\n}], ""}
+    end
+
+    test "escape CR LF" do
+      # TODO: range is invalid?
+      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
     end
   end
 
@@ -1248,7 +1272,7 @@ defmodule ToxicTest do
 
     test "code after comment" do
       assert tokenize("# foo\n0x123") ==
-               {:ok, [{:eol, {1, 1, 1}}, {:int, {2, 1, 291}, ~c"0x123"}], ""}
+               {:ok, [{:eol, {1, 1, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "multiline comment" do
@@ -1286,8 +1310,8 @@ defmodule ToxicTest do
 
   describe "non operator atoms" do
     test "quoted" do
-      assert tokenize(":\"a\"") == {:ok, [{:atom_quoted, {1, 1, 34}, :a}], ""}
-      assert tokenize(":'a'") == {:ok, [{:atom_quoted, {1, 1, 39}, :a}], ""}
+      assert tokenize(":\"a\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 34}, :a}], ""}
+      assert tokenize(":'a'") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 39}, :a}], ""}
     end
 
     test "quoted newline escape" do
@@ -1331,7 +1355,7 @@ defmodule ToxicTest do
     end
 
     test "simple" do
-      assert tokenize(":foo") == {:ok, [{:atom, {1, 1, ~c"foo"}, :foo}], ""}
+      assert tokenize(":foo") == {:ok, [{:atom, {{1, 1}, {1, 5}, ~c"foo"}, :foo}], ""}
     end
 
     test "with underscore" do
@@ -1412,12 +1436,11 @@ defmodule ToxicTest do
       assert tokenize(":_世界?") == {:ok, [{:atom, {1, 1, [95, 19990, 30028, 63]}, :_世界?}], ""}
     end
 
-    # TODO: Fix lexer to normalize micro sign to mu
-    # test "special case - micro sign normalized to mu" do
-    #   # MICRO SIGN (µ) should be normalized to Greek lowercase mu (μ)
-    #   assert tokenize(":µs") == {:ok, [{:atom, {1, 1, [956, 115]}, :μs}], ""}
-    #   assert tokenize(":micro_µ_second") == {:ok, [{:atom, {1, 1, [109, 105, 99, 114, 111, 95, 956, 95, 115, 101, 99, 111, 110, 100]}, :micro_μ_second}], ""}
-    # end
+    test "special case - micro sign normalized to mu" do
+      # MICRO SIGN (µ) should be normalized to Greek lowercase mu (μ)
+      assert tokenize(":µs") == {:ok, [{:atom, {{1, 1}, {1, 4}, [956, 115]}, :μs}], ""}
+      assert tokenize(":micro_µ_second") == {:ok, [{:atom, {{1, 1}, {1, 16}, [109, 105, 99, 114, 111, 95, 956, 95, 115, 101, 99, 111, 110, 100]}, :micro_μ_second}], ""}
+    end
 
     test "ISO8601 example from docs" do
       assert tokenize(":ISO8601") == {:ok, [{:atom, {1, 1, ~c"ISO8601"}, :ISO8601}], ""}
@@ -1426,7 +1449,7 @@ defmodule ToxicTest do
 
   describe "identifier" do
     test "simple identifier" do
-      assert tokenize("foo") == {:ok, [{:identifier, {1, 1, ~c"foo"}, :foo}], ""}
+      assert tokenize("foo") == {:ok, [{:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo}], ""}
     end
 
     test "unicode identifier - latin extended" do
@@ -1464,7 +1487,7 @@ defmodule ToxicTest do
 
   describe "alias" do
     test "simple alias" do
-      assert tokenize("Foo") == {:ok, [{:alias, {1, 1, ~c"Foo"}, :Foo}], ""}
+      assert tokenize("Foo") == {:ok, [{:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo}], ""}
     end
 
     test "alias with underscore" do
@@ -1484,17 +1507,17 @@ defmodule ToxicTest do
     end
 
     test "nested alias" do
-      assert tokenize("Foo.Bar") == {:ok, [{:alias, {1, 1, ~c"Foo"}, :Foo}, {:., {1, 4, nil}}, {:alias, {1, 5, ~c"Bar"}, :Bar}], ""}
+      assert tokenize("Foo.Bar") == {:ok, [{:alias, {1, 1, ~c"Foo"}, :Foo}, {:., {{1, 4}, {1, 5}, nil}}, {:alias, {{1, 5}, {1, 8}, ~c"Bar"}, :Bar}], ""}
     end
 
     test "multiple nested aliases" do
-      assert tokenize("Foo.Bar.Baz") == {:ok, [{:alias, {1, 1, ~c"Foo"}, :Foo}, {:., {1, 4, nil}}, {:alias, {1, 5, ~c"Bar"}, :Bar}, {:., {1, 8, nil}}, {:alias, {1, 9, ~c"Baz"}, :Baz}], ""}
+      assert tokenize("Foo.Bar.Baz") == {:ok, [{:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo}, {:., {{1, 4}, {1, 5}, nil}}, {:alias, {1, 5, ~c"Bar"}, :Bar}, {:., {1, 8, nil}}, {:alias, {1, 9, ~c"Baz"}, :Baz}], ""}
     end
   end
 
   describe "kw_identifier" do
     test "simple kw_identifier" do
-      assert tokenize("foo: bar") == {:ok, [{:kw_identifier, {1, 1, ~c"foo"}, :foo}, {:identifier, {1, 6, ~c"bar"}, :bar}], ""}
+      assert tokenize("foo: bar") == {:ok, [{:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo}, {:identifier, {{1, 6}, {1, 9}, ~c"bar"}, :bar}], ""}
     end
 
     test "kw_identifier with underscore" do
@@ -1553,7 +1576,7 @@ defmodule ToxicTest do
     end
 
     test "double quoted kw_identifier" do
-      assert tokenize("\"foo\": 1") == {:ok, [{:kw_identifier, {1, 1, 34}, :foo}, {:int, {1, 8, 1}, ~c"1"}], ""}
+      assert tokenize("\"foo\": 1") == {:ok, [{:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo}, {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}], ""}
     end
 
     test "single quoted kw_identifier" do
@@ -1627,77 +1650,77 @@ defmodule ToxicTest do
 
     test "dot three-token operator" do
       # unary_op3
-      assert tokenize(".~~~") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"~~~"}, :"~~~"}], ""}
+      assert tokenize(".~~~") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~~~"}, :"~~~"}], ""}
       # comp_op3
-      assert tokenize(".===") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"==="}, :===}], ""}
-      assert tokenize(".!==") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"!=="}, :!==}], ""}
+      assert tokenize(".===") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"==="}, :===}], ""}
+      assert tokenize(".!==") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"!=="}, :!==}], ""}
       # and_op3
-      assert tokenize(".&&&") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"&&&"}, :&&&}], ""}
+      assert tokenize(".&&&") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"&&&"}, :&&&}], ""}
       # or_op3
-      assert tokenize(".|||") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"|||"}, :|||}], ""}
+      assert tokenize(".|||") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"|||"}, :|||}], ""}
       # arrow_op3
-      assert tokenize(".<<<") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<<<"}, :<<<}], ""}
-      assert tokenize(".>>>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c">>>"}, :>>>}], ""}
-      assert tokenize(".~>>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"~>>"}, :~>>}], ""}
-      assert tokenize(".<<~") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<<~"}, :<<~}], ""}
-      assert tokenize(".<~>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<~>"}, :<~>}], ""}
-      assert tokenize(".<|>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<|>"}, :<|>}], ""}
+      assert tokenize(".<<<") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<<"}, :<<<}], ""}
+      assert tokenize(".>>>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c">>>"}, :>>>}], ""}
+      assert tokenize(".~>>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~>>"}, :~>>}], ""}
+      assert tokenize(".<<~") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<~"}, :<<~}], ""}
+      assert tokenize(".<~>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<~>"}, :<~>}], ""}
+      assert tokenize(".<|>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<|>"}, :<|>}], ""}
       # xor_op3
-      assert tokenize(".^^^") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"^^^"}, :^^^}], ""}
+      assert tokenize(".^^^") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"^^^"}, :^^^}], ""}
       # concat_op3
-      assert tokenize(".+++") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"+++"}, :+++}], ""}
-      assert tokenize(".---") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"---"}, :---}], ""}
+      assert tokenize(".+++") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"+++"}, :+++}], ""}
+      assert tokenize(".---") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"---"}, :---}], ""}
     end
 
     test "dot two-token operators" do
       # comp_op2
-      assert tokenize(".==") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"=="}, :==}], ""}
-      assert tokenize(".!=") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"!="}, :!=}], ""}
-      assert tokenize(".=~") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"=~"}, :=~}], ""}
+      assert tokenize(".==") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=="}, :==}], ""}
+      assert tokenize(".!=") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"!="}, :!=}], ""}
+      assert tokenize(".=~") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=~"}, :=~}], ""}
       # rel_op2
-      assert tokenize(".>=") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c">="}, :>=}], ""}
-      assert tokenize(".<=") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<="}, :<=}], ""}
+      assert tokenize(".>=") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c">="}, :>=}], ""}
+      assert tokenize(".<=") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<="}, :<=}], ""}
       # and_op
-      assert tokenize(".&&") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"&&"}, :&&}], ""}
+      assert tokenize(".&&") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"&&"}, :&&}], ""}
       # or_op
-      assert tokenize(".||") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"||"}, :||}], ""}
+      assert tokenize(".||") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"||"}, :||}], ""}
       # arrow_op
-      assert tokenize(".|>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"|>"}, :|>}], ""}
-      assert tokenize(".~>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"~>"}, :~>}], ""}
-      assert tokenize(".<~") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<~"}, :<~}], ""}
+      assert tokenize(".|>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"|>"}, :|>}], ""}
+      assert tokenize(".~>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"~>"}, :~>}], ""}
+      assert tokenize(".<~") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<~"}, :<~}], ""}
       # in_match_op
-      assert tokenize(".<-") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<-"}, :<-}], ""}
-      assert tokenize(".\\\\") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"\\\\"}, :"\\\\"}], ""}
+      assert tokenize(".<-") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<-"}, :<-}], ""}
+      assert tokenize(".\\\\") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"\\\\"}, :"\\\\"}], ""}
       # concat_op
-      assert tokenize(".++") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"++"}, :++}], ""}
-      assert tokenize(".--") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"--"}, :--}], ""}
+      assert tokenize(".++") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"++"}, :++}], ""}
+      assert tokenize(".--") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"--"}, :--}], ""}
       # power_op
-      assert tokenize(".**") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"**"}, :**}], ""}
+      assert tokenize(".**") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"**"}, :**}], ""}
       # type_op
-      assert tokenize(".::") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"::"}, :"::"}], ""}
+      assert tokenize(".::") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"::"}, :"::"}], ""}
     end
 
     test "dot single-token operators" do
       # at_op
-      assert tokenize(".@") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"@"}, :@}], ""}
+      assert tokenize(".@") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"@"}, :@}], ""}
       # unary_op
-      assert tokenize(".!") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"!"}, :!}], ""}
-      assert tokenize(".^") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"^"}, :^}], ""}
+      assert tokenize(".!") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"!"}, :!}], ""}
+      assert tokenize(".^") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"^"}, :^}], ""}
       # capture_op
-      assert tokenize(".&") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"&"}, :&}], ""}
+      assert tokenize(".&") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"&"}, :&}], ""}
       # dual_op
-      assert tokenize(".+") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"+"}, :+}], ""}
-      assert tokenize(".-") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"-"}, :-}], ""}
+      assert tokenize(".+") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"+"}, :+}], ""}
+      assert tokenize(".-") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"-"}, :-}], ""}
       # mult_op
-      assert tokenize(".*") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"*"}, :*}], ""}
-      assert tokenize("./") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"/"}, :/}], ""}
+      assert tokenize(".*") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"*"}, :*}], ""}
+      assert tokenize("./") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"/"}, :/}], ""}
       # rel_op
-      assert tokenize(".<") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"<"}, :<}], ""}
-      assert tokenize(".>") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c">"}, :>}], ""}
+      assert tokenize(".<") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"<"}, :<}], ""}
+      assert tokenize(".>") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c">"}, :>}], ""}
       # match_op
-      assert tokenize(".=") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"="}, :=}], ""}
+      assert tokenize(".=") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"="}, :=}], ""}
       # pipe_op
-      assert tokenize(".|") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, ~c"|"}, :|}], ""}
+      assert tokenize(".|") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"|"}, :|}], ""}
     end
 
     test "dot paren" do
@@ -1705,7 +1728,7 @@ defmodule ToxicTest do
     end
 
     test "dot quote double" do
-      assert tokenize(".\"foo\"") == {:ok, [{:., {1, 1, nil}}, {:identifier, {1, 2, 34}, :foo}], ""}
+      assert tokenize(".\"foo\"") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo}], ""}
     end
 
     test "dot quote single" do
@@ -1725,64 +1748,55 @@ defmodule ToxicTest do
     end
   end
 
-  # describe "keyword list" do
-  #   test "simple keyword" do
-  #     assert tokenize("foo: 1") == {:ok, [{:kw_identifier, {1, 1, ~c"foo"}, :foo}, {:int, {1, 6, 1}, ~c"1"}], ""}
-  #   end
-  # end
-
-  # describe "reserved word" do
-  #   test "do-end" do
-  #     assert tokenize("do\nend") == {:ok, [{:keyword, ~c"do", :terminator}], ""}
-  #   end
-  # end
-
-  # # describe "map" do
-  # #   test "empty map" do
-  # #     assert tokenize("%{}") == {:ok, [{:map, {1, 1, nil}, []}], ""}
-  # #   end
-
-  # #   test "simple map" do
-  # #     assert tokenize("%{foo: 1}") == {:ok, [{:map, {1, 1, nil}, [{:foo, {1, 2, nil}, 1}]}], ""}
-  # #   end
-  # # end
-
   describe "reserved words" do
     test "true" do
-      assert tokenize("true") == {:ok, [{:true, {1, 1, nil}}], ""}
+      assert tokenize("true") == {:ok, [{:true, {{1, 1}, {1, 5}, nil}}], ""}
     end
 
     test "false" do
-      assert tokenize("false") == {:ok, [{:false, {1, 1, nil}}], ""}
+      assert tokenize("false") == {:ok, [{:false, {{1, 1}, {1, 6}, nil}}], ""}
     end
 
     test "nil" do
-      assert tokenize("nil") == {:ok, [{:nil, {1, 1, nil}}], ""}
+      assert tokenize("nil") == {:ok, [{:nil, {{1, 1}, {1, 4}, nil}}], ""}
     end
 
 
+    # TODO: return range
     test "when" do
-      assert tokenize("when") == {:ok, [{:when_op, {1, 1, nil}, :when}], ""}
+      assert tokenize("when") == {:ok, [{:when_op, {{1, 1}, {1, 5}, nil}, :when}], ""}
     end
 
+    # TODO: return range
     test "and" do
-      assert tokenize("and") == {:ok, [{:and_op, {1, 1, nil}, :and}], ""}
+      assert tokenize("and") == {:ok, [{:and_op, {{1, 1}, {1, 4}, nil}, :and}], ""}
     end
 
+    # TODO: return range
     test "or" do
-      assert tokenize("or") == {:ok, [{:or_op, {1, 1, nil}, :or}], ""}
+      assert tokenize("or") == {:ok, [{:or_op, {{1, 1}, {1, 3}, nil}, :or}], ""}
     end
 
+    # TODO: return range
     test "not" do
-      assert tokenize("not") == {:ok, [{:unary_op, {1, 1, nil}, :not}], ""}
+      assert tokenize("not") == {:ok, [{:unary_op, {{1, 1}, {1, 3}, nil}, :not}], ""}
     end
 
+    # TODO: return range
+    test "not in" do
+      assert tokenize("not in") == {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in"}], ""}
+      assert tokenize("not  in") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
+      # TODO: report to elixir
+      # assert tokenize("not\nin") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
+    end
+
+    # TODO: return range
     test "in" do
-      assert tokenize("in") == {:ok, [{:in_op, {1, 1, nil}, :in}], ""}
+      assert tokenize("in") == {:ok, [{:in_op, {{1, 1}, {1, 3}, nil}, :in}], ""}
     end
 
     test "catch" do
-      assert tokenize("catch") == {:ok, [{:block_identifier, {1, 1, nil}, :catch}], ""}
+      assert tokenize("catch") == {:ok, [{:block_identifier, {{1, 1}, {1, 6}, nil}, :catch}], ""}
     end
 
     test "rescue" do
@@ -1795,6 +1809,472 @@ defmodule ToxicTest do
 
     test "else" do
       assert tokenize("else") == {:ok, [{:block_identifier, {1, 1, nil}, :else}], ""}
+    end
+  end
+
+  describe "sigil" do
+    test "incomplete" do
+      assert tokenize("~x") == {:ok, [], ""}
+    end
+
+    test "empty" do
+      assert tokenize("~x//") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 5}, nil},
+          :sigil_x,
+          [""],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "simple" do
+      assert tokenize("~x/asd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+
+      assert tokenize("~x<asd>") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "<"
+        }
+      ], ""}
+
+      assert tokenize("~x\"asd\"") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "\""
+        }
+      ], ""}
+
+      assert tokenize("~x'asd'") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "'"
+        }
+      ], ""}
+
+      assert tokenize("~x[asd]") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "["
+        }
+      ], ""}
+
+      assert tokenize("~x(asd)") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "("
+        }
+      ], ""}
+
+      assert tokenize("~x{asd}") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "{"
+        }
+      ], ""}
+
+      assert tokenize("~x|asd|") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 8}, nil},
+          :sigil_x,
+          ["asd"],
+          [],
+          nil,
+          "|"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    test "heredoc" do
+      assert tokenize("~x\"\"\"\nasd\n\"\"\"") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {3, 4}, nil},
+          :sigil_x,
+          ["asd\n"],
+          [],
+          0,
+          "\"\"\""
+        }
+      ], ""}
+
+      assert tokenize("~x'''\nasd\n'''") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {3, 4}, nil},
+          :sigil_x,
+          ["asd\n"],
+          [],
+          0,
+          "'''"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    test "heredoc with indent" do
+      assert tokenize("~x\"\"\"\n  asd\n  \"\"\"") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {3, 6}, nil},
+          :sigil_x,
+          ["asd\n"],
+          [],
+          2,
+          "\"\"\""
+        }
+      ], ""}
+    end
+
+    test "with modifier" do
+      assert tokenize("~x/asd/foo") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 11}, nil},
+          :sigil_x,
+          ["asd"],
+          ~c"foo",
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "capital letters" do
+      assert tokenize("~FOO1/asd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 11}, nil},
+          :sigil_FOO1,
+          ["asd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "with escaped terminator" do
+      assert tokenize("~x/a\\/sd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 10}, nil},
+          :sigil_x,
+          ["a/sd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "with escaped terminator uppercase" do
+      assert tokenize("~X/a\\/sd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 10}, nil},
+          :sigil_X,
+          ["a/sd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    test "with LF newline" do
+      assert tokenize("~x/a\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {2, 4}, nil},
+          :sigil_x,
+          ["a\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    test "with CR LF newline" do
+      assert tokenize("~x/a\r\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {2, 4}, nil},
+          :sigil_x,
+          ["a\r\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    # TODO: is this a bug?
+    test "with escaped LF newline" do
+      assert tokenize("~x/a\\\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {2, 4}, nil},
+          :sigil_x,
+          ["a\\\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    # TODO: invalid range
+    # TODO: is this a bug?
+    test "with escaped CR LF newline" do
+      assert tokenize("~x/a\\\r\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {2, 4}, nil},
+          :sigil_x,
+          ["a\\\r\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "with LF newline escape" do
+      assert tokenize("~x/a\\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 10}, nil},
+          :sigil_x,
+          ["a\\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "with CR LF newline escape" do
+      assert tokenize("~x/a\\r\\nsd/") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {1, 12}, nil},
+          :sigil_x,
+          ["a\\r\\nsd"],
+          [],
+          nil,
+          "/"
+        }
+      ], ""}
+    end
+
+    test "with interpolation lowercase" do
+      assert tokenize("~x/a\#{123}sd/") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {1, 14}, nil},
+            :sigil_x,
+            [
+              "a",
+              {{1, 5, nil}, {1, 10, nil}, [{:int, {{1, 7}, {1, 10}, 123}, ~c"123"}]},
+              "sd"
+            ],
+            [],
+            nil,
+            "/"
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with interpolation uppercase" do
+      assert tokenize("~X/a\#{123}sd/") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {1, 14}, nil},
+            :sigil_X,
+            ["a\#{123}sd"],
+            [],
+            nil,
+            "/"
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with escaped interpolation lowercase" do
+      assert tokenize("~x/a\\\#{123}sd/") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {1, 15}, nil},
+            :sigil_x,
+            ["a\\\#{123}sd"],
+            [],
+            nil,
+            "/"
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with escaped interpolation uppercase" do
+      assert tokenize("~X/a\\\#{123}sd/") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {1, 15}, nil},
+            :sigil_X,
+            ["a\\\#{123}sd"],
+            [],
+            nil,
+            "/"
+          }
+        ],
+        ""
+      }
+    end
+
+    # TODO: invalid range
+    test "with interpolation lowercase heredoc" do
+      assert tokenize("~x'''\na\#{123}sd\n'''") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {3, 4}, nil},
+            :sigil_x,
+            [
+              "a",
+              {
+                {2, 2, nil},
+                {2, 7, nil},
+                [{:int, {{2, 4}, {2, 7}, 123}, ~c"123"}]
+              },
+              "sd\n"
+            ],
+            [],
+            0,
+            "'''"
+          }
+        ],
+        ""
+      }
+    end
+
+    # TODO: invalid range
+    test "with interpolation uppercase heredoc" do
+      assert tokenize("~X'''\na\#{123}sd\n'''") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {3, 4}, nil},
+            :sigil_X,
+            ["a\#{123}sd\n"],
+            [],
+            0,
+            "'''"
+          }
+        ],
+        ""
+      }
+    end
+
+    # TODO: invalid range
+    test "with escaped interpolation lowercase heredoc" do
+      assert tokenize("~x'''\na\\\#{123}sd\n'''") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {3, 4}, nil},
+            :sigil_x,
+            ["a\\\#{123}sd\n"],
+            [],
+            0,
+            "'''"
+          }
+        ],
+        ""
+      }
+    end
+
+    # TODO: invalid range
+    test "with escaped interpolation uppercase heredoc" do
+      assert tokenize("~X'''\na\\\#{123}sd\n'''") == {
+        :ok,
+        [
+          {
+            :sigil,
+            {{1, 1}, {3, 4}, nil},
+            :sigil_X,
+            ["a\\\#{123}sd\n"],
+            [],
+            0,
+            "'''"
+          }
+        ],
+        ""
+      }
     end
   end
 
