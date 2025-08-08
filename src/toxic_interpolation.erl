@@ -11,32 +11,32 @@ unescape_tokens/1, unescape_map/1]).
 
 %% Extract string interpolations
 
-extract(Line, Column, Scope, Interpol, String, Last) ->
+extract(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_integer(Column) ->
   extract(String, [], [], Line, Column, Scope, Interpol, Last).
 
 %% Terminators
 
-extract([], _Buffer, _Output, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) ->
+extract([], _Buffer, _Output, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
 
 extract([], Buffer, Output, Line, Column, Scope, _Interpol, _Last) ->
   finish_extraction([], Buffer, Output, Line, Column, Scope);
 
-extract([Last | Rest], Buffer, Output, Line, Column, Scope, _Interpol, Last) ->
+extract([Last | Rest], Buffer, Output, Line, Column, Scope, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
   finish_extraction(Rest, Buffer, Output, Line, Column + 1, Scope);
 
 %% Going through the string
 
-extract([$\\, $\r, $\n | Rest], Buffer, Output, Line, _Column, Scope, Interpol, Last) ->
+extract([$\\, $\r, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n, $\r, $\\ | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\\, $\n | Rest], Buffer, Output, Line, _Column, Scope, Interpol, Last) ->
+extract([$\\, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n, $\\ | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\n | Rest], Buffer, Output, Line, _Column, Scope, Interpol, Last) ->
+extract([$\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) ->
+extract([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   NewScope =
     %% TODO: Remove this on Elixir v2.0
     case Interpol of
@@ -49,20 +49,20 @@ extract([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
 
   extract(Rest, [Last | Buffer], Output, Line, Column+2, NewScope, Interpol, Last);
 
-extract([$\\, Last, Last, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, [Last, Last, Last] = All) ->
+extract([$\\, Last, Last, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, [Last, Last, Last] = All) when is_integer(Line), is_integer(Column) ->
   extract(Rest, [Last, Last, Last | Buffer], Output, Line, Column+4, Scope, Interpol, All);
 
-extract([$\\, $#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) ->
+extract([$\\, $#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
   extract(Rest, [${, $#, $\\ | Buffer], Output, Line, Column+3, Scope, true, Last);
 
-extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) ->
+extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
   Output1 = build_string(Buffer, Output),
   case toxic_tokenizer:tokenize(Rest, Line, Column + 2, Scope#toxic_tokenizer{terminators=[]}) of
     {error, {Location, _, "}"}, [$} | NewRest], Warnings, Tokens} ->
       NewScope = Scope#toxic_tokenizer{warnings=Warnings},
       {EndLine, EndColumn} = location_end(Location),
       Output2 = build_interpol(Line, Column, EndLine, EndColumn, lists:reverse(Tokens), Output1),
-      extract(NewRest, [], Output2, EndLine, add_one(EndColumn), NewScope, true, Last);
+      extract(NewRest, [], Output2, EndLine, EndColumn, NewScope, true, Last);
     {error, Reason, _, _, _} ->
       {error, Reason};
     {ok, EndLine, EndColumn, Warnings, Tokens, Terminators} when Scope#toxic_tokenizer.cursor_completion /= false ->
@@ -74,16 +74,16 @@ extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) ->
       {error, {string, Line, Column, "missing interpolation terminator: \"}\"", []}}
   end;
 
-extract([$\\ | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) ->
+extract([$\\ | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_char(Rest, [$\\ | Buffer], Output, Line, Column + 1, Scope, Interpol, Last);
 
 %% Catch all clause
 
 extract([Char1, Char2 | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
-    when Char1 =< 255, Char2 =< 255 ->
+    when Char1 =< 255, Char2 =< 255, is_integer(Line), is_integer(Column) ->
   extract([Char2 | Rest], [Char1 | Buffer], Output, Line, Column + 1, Scope, Interpol, Last);
 
-extract(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
+extract(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_char(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last).
 
 extract_char(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
@@ -286,10 +286,6 @@ location_end(Location) when is_list(Location) ->
     {end_line, EndLine} -> {EndLine, proplists:get_value(end_column, Location)};
     false -> {proplists:get_value(line, Location), proplists:get_value(column, Location)}
   end.
-
-% TODO: Why we need this hack?
-add_one({_, Col}) when is_integer(Col) -> Col + 1;
-add_one(Col) when is_integer(Col) -> Col + 1.
 
 prepend_warning(Line, Column, Msg, #toxic_tokenizer{warnings=Warnings} = Scope) ->
   Scope#toxic_tokenizer{warnings = [{{Line, Column}, Msg} | Warnings]}.

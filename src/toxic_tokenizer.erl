@@ -163,7 +163,7 @@ make_meta(Line, Column, EndLine, EndColumn, Extra, #toxic_tokenizer{produce_rang
 make_meta(Line, Column, _EndLine, _EndColumn, Extra, #toxic_tokenizer{produce_ranges=false}) ->
   {Line, Column, Extra}.
 
-make_meta_len(Line, Column, Len, Extra, Scope) ->
+make_meta_len(Line, Column, Len, Extra, Scope) when is_integer(Line), is_integer(Column), is_integer(Len) ->
   make_meta(Line, Column, Line, Column + Len, Extra, Scope).
 
 %% Meta helpers (work with both legacy and range-shaped metas)
@@ -200,6 +200,9 @@ ranges_convert_part({StartMeta, EndMeta, Tokens}) when is_tuple(StartMeta), is_t
   {legacy_meta(StartMeta), legacy_meta(EndMeta), ranges_to_legacy(Tokens)};
 ranges_convert_part(Other) ->
   Other.
+
+tokenize(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
+  error({badarg, tokenize, line_or_column_not_integer, {Line, Column, Scope, Tokens}});
 
 tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
