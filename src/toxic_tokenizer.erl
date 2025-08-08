@@ -314,31 +314,31 @@ tokenize([$' | T], Line, Column, Scope, Tokens) ->
 % Operator atoms
 
 tokenize(".:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, {Line, Column, nil}, '.'} | Tokens]);
+  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '.'} | Tokens]);
 
 tokenize("<<>>:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, {Line, Column, nil}, '<<>>'} | Tokens]);
+  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
 tokenize("%{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 4, Scope, [{kw_identifier, {Line, Column, nil}, '%{}'} | Tokens]);
+  tokenize(Rest, Line, Column + 4, Scope, [{kw_identifier, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
 tokenize("%:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, {Line, Column, nil}, '%'} | Tokens]);
+  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
 tokenize("&:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, {Line, Column, nil}, '&'} | Tokens]);
+  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '&'} | Tokens]);
 tokenize("{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 3, Scope, [{kw_identifier, {Line, Column, nil}, '{}'} | Tokens]);
+  tokenize(Rest, Line, Column + 3, Scope, [{kw_identifier, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
 tokenize("..//:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, {Line, Column, nil}, '..//'} | Tokens]);
+  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
 
 tokenize(":<<>>" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{atom, {Line, Column, nil}, '<<>>'} | Tokens]);
+  tokenize(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
 tokenize(":%{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 4, Scope, [{atom, {Line, Column, nil}, '%{}'} | Tokens]);
+  tokenize(Rest, Line, Column + 4, Scope, [{atom, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
 tokenize(":%" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{atom, {Line, Column, nil}, '%'} | Tokens]);
+  tokenize(Rest, Line, Column + 2, Scope, [{atom, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
 tokenize(":{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 3, Scope, [{atom, {Line, Column, nil}, '{}'} | Tokens]);
+  tokenize(Rest, Line, Column + 3, Scope, [{atom, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
 tokenize(":..//" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{atom, {Line, Column, nil}, '..//'} | Tokens]);
+  tokenize(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
 
 % ## Three Token Operators
 tokenize([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
@@ -502,7 +502,7 @@ tokenize([$& | Rest], Line, Column, Scope, Tokens) ->
         capture_op
     end,
 
-  Token = {Kind, {Line, Column, nil}, '&'},
+  Token = {Kind, make_meta_len(Line, Column, 1, nil, Scope), '&'},
   tokenize(Rest, Line, Column + 1, Scope, [Token | Tokens]);
 
 tokenize([T | Rest], Line, Column, Scope, Tokens) when ?at_op(T) ->
@@ -807,7 +807,7 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
       case unescape_tokens(Parts, Line, Column, NewScope) of
         {ok, Unescaped} ->
-          Token = {heredoc_type(H), {Line, Column, nil}, NewColumn - 4, Unescaped},
+          Token = {heredoc_type(H), make_meta(Line, Column, NewLine, NewColumn, nil, NewScope), NewColumn - 4, Unescaped},
           tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
         {error, Reason} ->
@@ -891,27 +891,27 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
   end.
 
 handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  Token = {kw_identifier, {Line, Column, nil}, Op},
+  Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
   tokenize(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
 handle_unary_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, {Line, Column, nil}, Op},
+      Token = {identifier, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
-      Token = {Kind, {Line, Column, nil}, Op},
+      Token = {Kind, make_meta_len(Line, Column, Length + Extra, previous_was_eol(Tokens), Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens])
   end.
 
 handle_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  Token = {kw_identifier, {Line, Column, nil}, Op},
+  Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
   tokenize(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
 handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, {Line, Column, nil}, Op},
+      Token = {identifier, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
       NewScope =
@@ -933,7 +933,7 @@ handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
             Scope
         end,
 
-      Token = {Kind, {Line, Column, previous_was_eol(Tokens)}, Op},
+      Token = {Kind, make_meta_len(Line, Column, Length + Extra, previous_was_eol(Tokens), Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, NewScope, add_token_with_eol(Token, Tokens))
   end.
 
