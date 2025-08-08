@@ -62,11 +62,11 @@ defmodule ToxicTest do
     end
 
     test "hex numbers with underscores" do
-      assert tokenize("0xAB_CD") == {:ok, [{:int, {1, 1, 43981}, ~c"0xAB_CD"}], ""}
+      assert tokenize("0xAB_CD") == {:ok, [{:int, {{1, 1}, {1, 8}, 43981}, ~c"0xAB_CD"}], ""}
     end
 
     test "hex numbers with uppercase and lowercase" do
-      assert tokenize("0xAbCd") == {:ok, [{:int, {1, 1, 43981}, ~c"0xAbCd"}], ""}
+      assert tokenize("0xAbCd") == {:ok, [{:int, {{1, 1}, {1, 7}, 43981}, ~c"0xAbCd"}], ""}
     end
 
     test "hex followed by other characters" do
@@ -80,11 +80,11 @@ defmodule ToxicTest do
     end
 
     test "binary numbers with underscores" do
-      assert tokenize("0b10_10_01") == {:ok, [{:int, {1, 1, 41}, ~c"0b10_10_01"}], ""}
+      assert tokenize("0b10_10_01") == {:ok, [{:int, {{1, 1}, {1, 11}, 41}, ~c"0b10_10_01"}], ""}
     end
 
     test "binary followed by other characters" do
-      assert tokenize("0b1010;") == {:ok, [{:int, {1, 1, 10}, ~c"0b1010"}, {:";", {1, 7, 0}}], ""}
+      assert tokenize("0b1010;") == {:ok, [{:int, {{1, 1}, {1, 7}, 10}, ~c"0b1010"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
     end
   end
 
@@ -94,11 +94,11 @@ defmodule ToxicTest do
     end
 
     test "octal numbers with underscores" do
-      assert tokenize("0o12_34_56") == {:ok, [{:int, {1, 1, 42798}, ~c"0o12_34_56"}], ""}
+      assert tokenize("0o12_34_56") == {:ok, [{:int, {{1, 1}, {1, 11}, 42798}, ~c"0o12_34_56"}], ""}
     end
 
     test "octal followed by other characters" do
-      assert tokenize("0o765;") == {:ok, [{:int, {1, 1, 501}, ~c"0o765"}, {:";", {1, 6, 0}}], ""}
+      assert tokenize("0o765;") == {:ok, [{:int, {{1, 1}, {1, 6}, 501}, ~c"0o765"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
     end
   end
 
@@ -108,16 +108,16 @@ defmodule ToxicTest do
     end
 
     test "floats with underscores" do
-      assert tokenize("1_2_3.4_5") == {:ok, [{:flt, {1, 1, 123.45}, ~c"1_2_3.4_5"}], ""}
+      assert tokenize("1_2_3.4_5") == {:ok, [{:flt, {{1, 1}, {1, 10}, 123.45}, ~c"1_2_3.4_5"}], ""}
     end
 
     test "floats with leading 0" do
-      assert tokenize("01.123") == {:ok, [{:flt, {1, 1, 1.123}, ~c"01.123"}], ""}
+      assert tokenize("01.123") == {:ok, [{:flt, {{1, 1}, {1, 7}, 1.123}, ~c"01.123"}], ""}
     end
 
     test "floats with exponent" do
-      assert tokenize("1.23e4") == {:ok, [{:flt, {1, 1, 12300.0}, ~c"1.23e4"}], ""}
-      assert tokenize("1.23E4") == {:ok, [{:flt, {1, 1, 12300.0}, ~c"1.23E4"}], ""}
+      assert tokenize("1.23e4") == {:ok, [{:flt, {{1, 1}, {1, 7}, 12300.0}, ~c"1.23e4"}], ""}
+      assert tokenize("1.23E4") == {:ok, [{:flt, {{1, 1}, {1, 7}, 12300.0}, ~c"1.23E4"}], ""}
     end
 
     test "floats with e and underscore" do
@@ -127,14 +127,14 @@ defmodule ToxicTest do
 
     test "floats with e and underscore and sign" do
       assert tokenize("1_2_3.4_5e-6_7") ==
-               {:ok, [{:flt, {1, 1, 1.2345e-65}, ~c"1_2_3.4_5e-6_7"}], ""}
+               {:ok, [{:flt, {{1, 1}, {1, 15}, 1.2345e-65}, ~c"1_2_3.4_5e-6_7"}], ""}
 
       assert tokenize("1_2_3.4_5e+6_7") ==
-               {:ok, [{:flt, {1, 1, 1.2345e69}, ~c"1_2_3.4_5e+6_7"}], ""}
+               {:ok, [{:flt, {{1, 1}, {1, 15}, 1.2345e69}, ~c"1_2_3.4_5e+6_7"}], ""}
     end
 
     test "floats followed by other characters" do
-      assert tokenize("1.23;") == {:ok, [{:flt, {1, 1, 1.23}, ~c"1.23"}, {:";", {1, 5, 0}}], ""}
+      assert tokenize("1.23;") == {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
     end
   end
 
@@ -144,11 +144,11 @@ defmodule ToxicTest do
     end
 
     test "starting with 0" do
-      assert tokenize("0123") == {:ok, [{:int, {1, 1, 123}, ~c"0123"}], ""}
+      assert tokenize("0123") == {:ok, [{:int, {{1, 1}, {1, 5}, 123}, ~c"0123"}], ""}
     end
 
     test "integers with underscores" do
-      assert tokenize("1_2_3") == {:ok, [{:int, {1, 1, 123}, ~c"1_2_3"}], ""}
+      assert tokenize("1_2_3") == {:ok, [{:int, {{1, 1}, {1, 6}, 123}, ~c"1_2_3"}], ""}
     end
 
     # test "integers with underscores and sign" do
@@ -156,7 +156,7 @@ defmodule ToxicTest do
     # end
 
     test "integers followed by other characters" do
-      assert tokenize("123;") == {:ok, [{:int, {1, 1, 123}, ~c"123"}, {:";", {1, 4, 0}}], ""}
+      assert tokenize("123;") == {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
     end
   end
 
@@ -173,14 +173,14 @@ defmodule ToxicTest do
 
     test "atom operators" do
       assert tokenize(":<<>>") == {:ok, [{:atom, {{1, 1}, {1, 6}, nil}, :<<>>}], ""}
-      assert tokenize(":%{}") == {:ok, [{:atom, {1, 1, nil}, :%{}}], ""}
-      assert tokenize(":%") == {:ok, [{:atom, {1, 1, nil}, :%}], ""}
-      assert tokenize(":{}") == {:ok, [{:atom, {1, 1, nil}, :{}}], ""}
-      assert tokenize(":..//") == {:ok, [{:atom, {1, 1, nil}, :..//}], ""}
+      assert tokenize(":%{}") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :%{}}], ""}
+      assert tokenize(":%") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :%}], ""}
+      assert tokenize(":{}") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :{}}], ""}
+      assert tokenize(":..//") == {:ok, [{:atom, {{1, 1}, {1, 6}, nil}, :..//}], ""}
     end
 
     test "atoms followed by other characters" do
-      assert tokenize(":%{};") == {:ok, [{:atom, {1, 1, nil}, :%{}}, {:";", {1, 5, 0}}], ""}
+      assert tokenize(":%{};") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :%{}}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
     end
   end
 
@@ -273,8 +273,8 @@ defmodule ToxicTest do
 
     test "followed by other characters" do
       assert tokenize(":~~~;") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
-      assert tokenize(":::;") == {:ok, [{:atom, {1, 1, nil}, :"::"}, {:";", {1, 4, 0}}], ""}
-      assert tokenize(":.;") == {:ok, [{:atom, {1, 1, nil}, :.}, {:";", {1, 3, 0}}], ""}
+      assert tokenize(":::;") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
+      assert tokenize(":.;") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}, {:";", {{1, 3}, {1, 4}, 0}}], ""}
     end
   end
 
@@ -1359,38 +1359,38 @@ defmodule ToxicTest do
     end
 
     test "with underscore" do
-      assert tokenize(":_foo") == {:ok, [{:atom, {1, 1, ~c"_foo"}, :_foo}], ""}
-      assert tokenize(":foo_bar") == {:ok, [{:atom, {1, 1, ~c"foo_bar"}, :foo_bar}], ""}
-      assert tokenize(":_foo_bar_") == {:ok, [{:atom, {1, 1, ~c"_foo_bar_"}, :_foo_bar_}], ""}
+      assert tokenize(":_foo") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"_foo"}, :_foo}], ""}
+      assert tokenize(":foo_bar") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo_bar"}, :foo_bar}], ""}
+      assert tokenize(":_foo_bar_") == {:ok, [{:atom, {{1, 1}, {1, 11}, ~c"_foo_bar_"}, :_foo_bar_}], ""}
     end
 
     test "with numbers" do
-      assert tokenize(":foo123") == {:ok, [{:atom, {1, 1, ~c"foo123"}, :foo123}], ""}
-      assert tokenize(":foo_123") == {:ok, [{:atom, {1, 1, ~c"foo_123"}, :foo_123}], ""}
+      assert tokenize(":foo123") == {:ok, [{:atom, {{1, 1}, {1, 8}, ~c"foo123"}, :foo123}], ""}
+      assert tokenize(":foo_123") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo_123"}, :foo_123}], ""}
     end
 
     test "with @ character" do
       # @ is allowed in atom names after the first character
-      assert tokenize(":foo@bar") == {:ok, [{:atom, {1, 1, ~c"foo@bar"}, :foo@bar}], ""}
-      assert tokenize(":foo@123") == {:ok, [{:atom, {1, 1, ~c"foo@123"}, :foo@123}], ""}
-      assert tokenize(":foo@") == {:ok, [{:atom, {1, 1, ~c"foo@"}, :foo@}], ""}
+      assert tokenize(":foo@bar") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo@bar"}, :foo@bar}], ""}
+      assert tokenize(":foo@123") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo@123"}, :foo@123}], ""}
+      assert tokenize(":foo@") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo@"}, :foo@}], ""}
     end
 
     test "ending with ? or !" do
-      assert tokenize(":foo?") == {:ok, [{:atom, {1, 1, ~c"foo?"}, :foo?}], ""}
-      assert tokenize(":foo!") == {:ok, [{:atom, {1, 1, ~c"foo!"}, :foo!}], ""}
-      assert tokenize(":_foo?") == {:ok, [{:atom, {1, 1, ~c"_foo?"}, :_foo?}], ""}
-      assert tokenize(":_foo!") == {:ok, [{:atom, {1, 1, ~c"_foo!"}, :_foo!}], ""}
+      assert tokenize(":foo?") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo?"}, :foo?}], ""}
+      assert tokenize(":foo!") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo!"}, :foo!}], ""}
+      assert tokenize(":_foo?") == {:ok, [{:atom, {{1, 1}, {1, 7}, ~c"_foo?"}, :_foo?}], ""}
+      assert tokenize(":_foo!") == {:ok, [{:atom, {{1, 1}, {1, 7}, ~c"_foo!"}, :_foo!}], ""}
     end
 
     test "unicode letters - latin extended" do
-      assert tokenize(":café") == {:ok, [{:atom, {1, 1, [99, 97, 102, 233]}, :café}], ""}
-      assert tokenize(":niño") == {:ok, [{:atom, {1, 1, [110, 105, 241, 111]}, :niño}], ""}
-      assert tokenize(":ação") == {:ok, [{:atom, {1, 1, [97, 231, 227, 111]}, :ação}], ""}
+      assert tokenize(":café") == {:ok, [{:atom, {{1, 1}, {1, 6}, [99, 97, 102, 233]}, :café}], ""}
+      assert tokenize(":niño") == {:ok, [{:atom, {{1, 1}, {1, 6}, [110, 105, 241, 111]}, :niño}], ""}
+      assert tokenize(":ação") == {:ok, [{:atom, {{1, 1}, {1, 6}, [97, 231, 227, 111]}, :ação}], ""}
     end
 
     test "unicode letters - greek" do
-      assert tokenize(":αβγ") == {:ok, [{:atom, {1, 1, [945, 946, 947]}, :αβγ}], ""}
+      assert tokenize(":αβγ") == {:ok, [{:atom, {{1, 1}, {1, 4}, [945, 946, 947]}, :αβγ}], ""}
       assert tokenize(":Ωμέγα") == {:ok, [{:atom, {1, 1, [937, 956, 941, 947, 945]}, :Ωμέγα}], ""}
     end
 
@@ -1443,7 +1443,7 @@ defmodule ToxicTest do
     end
 
     test "ISO8601 example from docs" do
-      assert tokenize(":ISO8601") == {:ok, [{:atom, {1, 1, ~c"ISO8601"}, :ISO8601}], ""}
+      assert tokenize(":ISO8601") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"ISO8601"}, :ISO8601}], ""}
     end
   end
 
@@ -1563,7 +1563,7 @@ defmodule ToxicTest do
     end
 
     test "kw_identifier with atom value" do
-      assert tokenize("foo: :bar") == {:ok, [{:kw_identifier, {1, 1, ~c"foo"}, :foo}, {:atom, {1, 6, ~c"bar"}, :bar}], ""}
+      assert tokenize("foo: :bar") == {:ok, [{:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo}, {:atom, {{1, 6}, {1, 10}, ~c"bar"}, :bar}], ""}
     end
 
     test "kw_identifier with integer value" do
@@ -2683,7 +2683,7 @@ defmodule ToxicTest do
 
     test "empty_string" do
       assert tokenize("\"\"") == {:ok, [
-        {:bin_string, {1, 1, nil}, [<<>>]}
+        {:bin_string, {{1, 1}, {1, 3}, nil}, [<<>>]}
       ], ""}
     end
 
