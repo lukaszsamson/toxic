@@ -1590,6 +1590,19 @@ check_terminator({Start, Meta}, Terminators, Scope) when Start == 'fn'; Start ==
 
   {ok, NewScope#toxic_tokenizer{terminators=[{Start, Meta, Indentation} | Terminators]}};
 
+% Range-aware: 'end' with ranges meta
+check_terminator({'end', {{EndLine, _EndColumn}, _EndPos, _}}, [{'do', _, Indentation} | Terminators], Scope) ->
+  NewScope =
+    %% If the end is more indented than the do, it may be a missing do error!
+    case Scope#toxic_tokenizer.indentation > Indentation of
+      true ->
+        Hint = {'end', EndLine, Scope#toxic_tokenizer.indentation},
+        Scope#toxic_tokenizer{mismatch_hints=[Hint | Scope#toxic_tokenizer.mismatch_hints]};
+      false ->
+        Scope
+    end,
+  {ok, NewScope#toxic_tokenizer{terminators=Terminators}};
+
 check_terminator({'end', {EndLine, _, _}}, [{'do', _, Indentation} | Terminators], Scope) ->
   NewScope =
     %% If the end is more indented than the do, it may be a missing do error!
@@ -1603,6 +1616,27 @@ check_terminator({'end', {EndLine, _, _}}, [{'do', _, Indentation} | Terminators
     end,
 
   {ok, NewScope#toxic_tokenizer{terminators=Terminators}};
+
+% Range-aware: mismatched closer with ranges meta for both opener and closer
+check_terminator({End, {{EndLine, EndColumn}, _EndPos, _}}, [{Start, {{StartLine, StartColumn}, _StartPos, _}, _} | Terminators], Scope)
+    when End == 'end'; End == ')'; End == ']'; End == '}'; End == '>>' ->
+  case terminator(Start) of
+    End ->
+      {ok, Scope#toxic_tokenizer{terminators=Terminators}};
+
+    ExpectedEnd ->
+      Meta = [
+        {line, StartLine},
+        {column, StartColumn},
+        {end_line, EndLine},
+        {end_column, EndColumn},
+        {error_type, mismatched_delimiter},
+        {opening_delimiter, Start},
+        {closing_delimiter, End},
+        {expected_delimiter, ExpectedEnd}
+     ],
+     {error, {Meta, unexpected_token_or_reserved(End), [atom_to_list(End)]}}
+  end;
 
 check_terminator({End, {EndLine, EndColumn, _}}, [{Start, {StartLine, StartColumn, _}, _} | Terminators], Scope)
     when End == 'end'; End == ')'; End == ']'; End == '}'; End == '>>' ->
@@ -1624,6 +1658,19 @@ check_terminator({End, {EndLine, EndColumn, _}}, [{Start, {StartLine, StartColum
      {error, {Meta, unexpected_token_or_reserved(End), [atom_to_list(End)]}}
   end;
 
+% Range-aware: stray 'end'
+check_terminator({'end', {{Line, Column}, _EndPos, _}}, [], #toxic_tokenizer{mismatch_hints=Hints}) ->
+  Suffix =
+    case lists:keyfind('end', 1, Hints) of
+      {'end', HintLine, _Indentation} ->
+        io_lib:format("\n~ts the \"end\" on line ~B may not have a matching \"do\" "
+                      "defined before it (based on indentation)", [toxic_errors:prefix(hint), HintLine]);
+      false ->
+        ""
+    end,
+
+  {error, {?LOC(Line, Column), {"unexpected reserved word: ", Suffix}, "end"}};
+
 check_terminator({'end', {Line, Column, _}}, [], #toxic_tokenizer{mismatch_hints=Hints}) ->
   Suffix =
     case lists:keyfind('end', 1, Hints) of
@@ -1636,7 +1683,8 @@ check_terminator({'end', {Line, Column, _}}, [], #toxic_tokenizer{mismatch_hints
 
   {error, {?LOC(Line, Column), {"unexpected reserved word: ", Suffix}, "end"}};
 
-check_terminator({End, {Line, Column, _}}, [], _Scope)
+% Range-aware: stray closer
+check_terminator({End, {{Line, Column}, _EndPos, _}}, [], _Scope)
     when End == ')'; End == ']'; End == '}'; End == '>>' ->
   {error, {?LOC(Line, Column), "unexpected token: ", atom_to_list(End)}};
 

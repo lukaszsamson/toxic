@@ -280,25 +280,10 @@ build_string(Buffer, Output) -> [lists:reverse(Buffer) | Output].
 build_interpol(Line, Column, EndLine, EndColumn, Buffer, Output) ->
   [{{Line, Column, nil}, {EndLine, EndColumn, nil}, Buffer} | Output].
 
-%% Normalize tokenizer error location to end {Line, Column}
-% location_end({{_, _}, {EndLine, EndColumn}, _}) -> {EndLine, EndColumn};
-% location_end({Line, Column}) when is_integer(Line), is_integer(Column) -> {Line, Column};
-% location_end({Line, Column, _}) -> {Line, Column};
 location_end(Location) when is_list(Location) ->
-  case lists:keyfind(end_line, 1, Location) of
-    % {end_line, EndLine} -> {EndLine, proplists:get_value(end_column, Location)};
-    false -> 
-      Line = proplists:get_value(line, Location),
-      Col = proplists:get_value(column, Location),
-      % Handle case where Line/Col are tuples from range metadata
-      case {Line, Col} of
-        {{L, C}, {_, _}} -> {L, C}  % Line is tuple, Col is tuple - use Line's values
-        % {{L, C}, _} -> {L, C}       % Line is tuple, Col is other - use Line's values  
-        % {_, {L, C}} -> {L, C}       % Line is other, Col is tuple - use Col's values
-        % {L, C} when is_integer(L), is_integer(C) -> {L, C}  % Both integers
-        % {L, C} -> {L, C}  % Fallback - this should not happen
-      end
-  end.
+  Line = proplists:get_value(line, Location),
+  Col = proplists:get_value(column, Location),
+  {Line, Col}.
 
 prepend_warning(Line, Column, Msg, #toxic_tokenizer{warnings=Warnings} = Scope) ->
   Scope#toxic_tokenizer{warnings = [{{Line, Column}, Msg} | Warnings]}.
