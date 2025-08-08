@@ -211,7 +211,7 @@ tokenize([], Line, Column, #toxic_tokenizer{} = Scope, Tokens) ->
 
 tokenize(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
   FirstLine = lists:takewhile(fun(C) -> C =/= $\n andalso C =/= $\r end, Original),
-  Reason = {?LOC(Line, 1), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
+  Reason = {make_meta_len(Line, 1, 1, nil, Scope), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
   error(Reason, Original, Scope, Tokens);
 
 % Base integers
@@ -648,13 +648,13 @@ tokenize(";" ++ Rest, Line, Column, Scope, [Top | _] = Tokens) when element(1, T
   tokenize(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)} | Tokens]);
 
 tokenize("\\" = Original, Line, Column, Scope, Tokens) ->
-  error({?LOC(Line, Column), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
+  error({make_meta_len(Line, Column, 1, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
 tokenize("\\\n" = Original, Line, Column, Scope, Tokens) ->
-  error({?LOC(Line, Column), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
+  error({make_meta_len(Line, Column, 2, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
 tokenize("\\\r\n" = Original, Line, Column, Scope, Tokens) ->
-  error({?LOC(Line, Column), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
+  error({make_meta_len(Line, Column, 3, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
 tokenize("\\\n" ++ Rest, Line, _Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, Tokens);
@@ -671,11 +671,11 @@ tokenize("\r\n" ++ Rest, Line, Column, Scope, Tokens) ->
 % Others
 
 tokenize([$%, $( | Rest], Line, Column, Scope, Tokens) ->
-  Reason = {?LOC(Line, Column), "expected %{ to define a map, got: ", [$%, $(]},
+  Reason = {make_meta_len(Line, Column, 2, nil, Scope), "expected %{ to define a map, got: ", [$%, $(]},
   error(Reason, Rest, Scope, Tokens);
 
 tokenize([$%, $[ | Rest], Line, Column, Scope, Tokens) ->
-  Reason = {?LOC(Line, Column), "expected %{ to define a map, got: ", [$%, $[]},
+  Reason = {make_meta_len(Line, Column, 2, nil, Scope), "expected %{ to define a map, got: ", [$%, $[]},
   error(Reason, Rest, Scope, Tokens);
 
 tokenize([$%, ${ | T], Line, Column, Scope, Tokens) ->
@@ -698,27 +698,27 @@ tokenize(String, Line, Column, OriginalScope, Tokens) ->
 
       case Rest of
         [$: | T] when ?is_space(hd(T)) ->
-          Token = {kw_identifier, {Line, Column, Unencoded}, Atom},
+          Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, Unencoded, Scope), Atom},
           tokenize(T, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
         [$: | T] when hd(T) =/= $: ->
           AtomName = atom_to_list(Atom) ++ [$:],
-          Reason = {?LOC(Line, Column), "keyword argument must be followed by space after: ", AtomName},
+          Reason = {make_meta_len(Line, Column, Length + 1, nil, Scope), "keyword argument must be followed by space after: ", AtomName},
           error(Reason, String, Scope, Tokens);
 
         _ when HasAt ->
-          Reason = {?LOC(Line, Column), invalid_character_error(Kind, $@), atom_to_list(Atom)},
+          Reason = {make_meta_len(Line, Column, Length, nil, Scope), invalid_character_error(Kind, $@), atom_to_list(Atom)},
           error(Reason, String, Scope, Tokens);
 
         _ when Atom == '__aliases__'; Atom == '__block__' ->
-          error({?LOC(Line, Column), "reserved token: ", atom_to_list(Atom)}, Rest, Scope, Tokens);
+          error({make_meta_len(Line, Column, Length, nil, Scope), "reserved token: ", atom_to_list(Atom)}, Rest, Scope, Tokens);
 
         _ when Kind == alias ->
           tokenize_alias(Rest, Line, Column, Unencoded, Atom, Length, Ascii, Special, Scope, Tokens);
 
         _ when Kind == identifier ->
           NewScope = maybe_warn_for_ambiguous_bang_before_equals(identifier, Unencoded, Rest, Line, Column, Scope),
-          Token = check_call_identifier(Line, Column, Unencoded, Atom, Rest),
+          Token = check_call_identifier(Line, Column, Unencoded, Atom, Length, Rest, Scope),
           tokenize(Rest, Line, Column + Length, NewScope, [Token | Tokens]);
 
         _ ->
@@ -990,7 +990,7 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
         {ok, [UnescapedPart]} ->
           case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
             {ok, Atom} ->
-              Token = check_call_identifier(Line, Column, H, Atom, Rest),
+              Token = check_call_identifier(Line, Column, H, Atom, NewColumn - Column, Rest, NewScope),
               TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
               tokenize(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
 
@@ -1014,7 +1014,7 @@ handle_dot([$. | Rest], Line, Column, DotInfo, Scope, Tokens) ->
   tokenize(Rest, Line, Column, Scope, TokensSoFar).
 
 handle_call_identifier(Rest, Line, Column, DotInfo, Length, UnencodedOp, Scope, Tokens) ->
-  Token = check_call_identifier(Line, Column, UnencodedOp, list_to_atom(UnencodedOp), Rest),
+  Token = check_call_identifier(Line, Column, UnencodedOp, list_to_atom(UnencodedOp), Length, Rest, Scope),
   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
   tokenize(Rest, Line, Column + Length, Scope, [Token | TokensSoFar]).
 
@@ -1347,7 +1347,7 @@ tokenize_comment([], Acc) ->
 
 error_comment(H, Comment, Line, Column, Scope, Tokens) ->
   Token = io_lib:format("\\u~4.16.0B", [H]),
-  Reason = {?LOC(Line, Column), "invalid bidirectional formatting character in comment: ", Token},
+  Reason = {make_meta_len(Line, Column, 1, nil, Scope), "invalid bidirectional formatting character in comment: ", Token},
   error(Reason, Comment, Scope, Tokens).
 
 preserve_comments(Line, Column, Tokens, Comment, Rest, Scope) ->
@@ -1469,22 +1469,22 @@ tokenize_alias(Rest, Line, Column, Unencoded, Atom, Length, Ascii, Special, Scop
   if
     not Ascii or (Special /= []) ->
       Invalid = hd([C || C <- Unencoded, (C < $A) or (C > 127)]),
-      Reason = {?LOC(Line, Column), invalid_character_error("alias (only ASCII characters, without punctuation, are allowed)", Invalid), Unencoded},
+      Reason = {make_meta_len(Line, Column, Length, nil, Scope), invalid_character_error("alias (only ASCII characters, without punctuation, are allowed)", Invalid), Unencoded},
       error(Reason, Unencoded ++ Rest, Scope, Tokens);
 
     true ->
-      AliasesToken = {alias, {Line, Column, Unencoded}, Atom},
+      AliasesToken = {alias, make_meta_len(Line, Column, Length, Unencoded, Scope), Atom},
       tokenize(Rest, Line, Column + Length, Scope, [AliasesToken | Tokens])
   end.
 
 %% Check if it is a call identifier (paren | bracket | do)
 
-check_call_identifier(Line, Column, Info, Atom, [$( | _]) ->
-  {paren_identifier, {Line, Column, Info}, Atom};
-check_call_identifier(Line, Column, Info, Atom, [$[ | _]) ->
-  {bracket_identifier, {Line, Column, Info}, Atom};
-check_call_identifier(Line, Column, Info, Atom, _Rest) ->
-  {identifier, {Line, Column, Info}, Atom}.
+check_call_identifier(Line, Column, Info, Atom, Length, [$( | _], Scope) ->
+  {paren_identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom};
+check_call_identifier(Line, Column, Info, Atom, Length, [$[ | _], Scope) ->
+  {bracket_identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom};
+check_call_identifier(Line, Column, Info, Atom, Length, _Rest, Scope) ->
+  {identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom}.
 
 add_token_with_eol({unary_op, _, _} = Left, T) -> [Left | T];
 add_token_with_eol(Left, [{eol, _} | T]) -> [Left | T];
@@ -1674,15 +1674,15 @@ tokenize_keyword(terminator, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
     {ok, [Check | T]} ->
       handle_terminator(Rest, Line, Column + Length, Scope, Check, T);
     {error, Message, Token} ->
-      error({?LOC(Line, Column), Message, Token}, Token ++ Rest, Scope, Tokens)
+      error({make_meta_len(Line, Column, Length, nil, Scope), Message, Token}, Token ++ Rest, Scope, Tokens)
   end;
 
 tokenize_keyword(token, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
-  Token = {Atom, {Line, Column, nil}},
+  Token = {Atom, make_meta_len(Line, Column, Length, nil, Scope)},
   tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(block, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
-  Token = {block_identifier, {Line, Column, nil}, Atom},
+  Token = {block_identifier, make_meta_len(Line, Column, Length, nil, Scope), Atom},
   tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
@@ -1709,7 +1709,7 @@ tokenize_sigil([$~ | T], Line, Column, Scope, Tokens) ->
       tokenize_sigil_contents(Rest, Name, NewLine, NewColumn, NewScope, NewTokens);
 
     {error, Message, Token} ->
-      Reason = {?LOC(Line, Column), Message, Token},
+      Reason = {make_meta_len(Line, Column, 1, nil, Scope), Message, Token},
       error(Reason, T, Scope, Tokens)
   end.
 
@@ -1771,7 +1771,7 @@ tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Toke
     "//, ||, \"\", '', (), [], {}, <>",
   Message = io_lib:format(MessageString, [[H], Column, H]),
   ErrorColumn = Column - 1 - length(SigilName),
-  error({?LOC(Line, ErrorColumn), "invalid sigil delimiter: ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens);
+  error({make_meta_len(Line, ErrorColumn, 1, nil, Scope), "invalid sigil delimiter: ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens);
 
 % Incomplete sigil.
 tokenize_sigil_contents([], _SigilName, Line, Column, Scope, Tokens) ->
@@ -1787,7 +1787,8 @@ add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope,
   case MaybeEncoded of
     {ok, Atom} ->
       {Final, Modifiers} = collect_modifiers(Rest, []),
-      Token = {sigil, {Line, TokenColumn, nil}, Atom, Parts, Modifiers, Indentation, Delimiter},
+      TokenLen = NewColumn - TokenColumn + length(Modifiers),
+      Token = {sigil, make_meta_len(Line, TokenColumn, TokenLen, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
       NewColumnWithModifiers = NewColumn + length(Modifiers),
       tokenize(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
 
