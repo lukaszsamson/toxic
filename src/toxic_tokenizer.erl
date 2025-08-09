@@ -938,7 +938,7 @@ handle_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_
 handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
+      Token = {identifier, make_meta_len(Line, Column, Length, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
       NewScope =
@@ -960,7 +960,7 @@ handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
             Scope
         end,
 
-      Token = {Kind, make_meta_len(Line, Column, Length + Extra, previous_was_eol(Tokens), Scope), Op},
+      Token = {Kind, make_meta_len(Line, Column, Length, previous_was_eol(Tokens), Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, NewScope, add_token_with_eol(Token, Tokens))
   end.
 
