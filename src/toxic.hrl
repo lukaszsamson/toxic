@@ -78,5 +78,6 @@
   column=1,
   mismatch_hints=[],
   warnings=[],
-  produce_ranges=false
+  produce_ranges=false,
+  linearize=false
 }).

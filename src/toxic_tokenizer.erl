@@ -135,6 +135,8 @@ tokenize(String, Line, Column, Opts) ->
         Acc#toxic_tokenizer{column=Indentation+1};
       ({produce_ranges, ProduceRanges}, Acc) when is_boolean(ProduceRanges) ->
         Acc#toxic_tokenizer{produce_ranges=ProduceRanges};
+      ({linearize, Linearize}, Acc) when is_boolean(Linearize) ->
+        Acc#toxic_tokenizer{linearize=Linearize};
       (_, Acc) ->
         Acc
     end, #toxic_tokenizer{identifier_tokenizer=IdentifierTokenizer}, Opts),
@@ -788,6 +790,35 @@ tokenize(String, Line, Column, OriginalScope, Tokens) ->
       error(Reason, String, OriginalScope, Tokens)
   end.
 
+%% Linearization helpers
+linearize_parts(Parts, Scope, Kind) when is_list(Parts) ->
+  lists:flatten([linearize_part(Part, Scope, Kind) || Part <- Parts]);
+linearize_parts(Part, Scope, Kind) -> linearize_parts([Part], Scope, Kind).
+
+linearize_part({{SL, SC}, _End, _} = _StartMeta, _Scope, _Kind) when is_integer(SL), is_integer(SC) ->
+  []; %% handled as interpolation tuple below (guard to keep dialyzer happy)
+linearize_part({StartMeta, EndMeta, Tokens}, Scope, Kind) when is_list(Tokens) ->
+  [
+    {begin_interpolation, StartMeta, map_kind(Kind)}
+    | linearize_inner_tokens(Tokens, Scope)
+  ] ++ [{end_interpolation, EndMeta, map_kind(Kind)}];
+linearize_part(Bin, Scope, _Kind) when is_binary(Bin); is_list(Bin) ->
+  %% Convert literal to binary, compute a best-effort fragment meta by length. The tokenizer callers
+  %% already pass precise metas for begin/end markers; consumers can rely on them for structure.
+  %% Here we emit without a precise fragment meta if unavailable, using nil extra meta for now.
+  %% TODO: Track precise fragment spans during extraction to fill Meta.
+  Binary = case is_binary(Bin) of true -> Bin; false -> toxic_utils:characters_to_binary(Bin) end,
+  [{string_fragment, {undefined, undefined, nil}, Binary}].
+
+linearize_inner_tokens(Tokens, _Scope) -> Tokens.
+
+map_kind(string) -> string;
+map_kind(charlist) -> charlist;
+map_kind(heredoc) -> heredoc;
+map_kind(sigil) -> sigil;
+map_kind(kw_identifier) -> kw_identifier;
+map_kind(_) -> string.
+
 previous_was_dot([{'.', _} | _]) -> true;
 previous_was_dot(_) -> false.
 
@@ -848,13 +879,29 @@ handle_char(_)  -> false.
 handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
   case extract_heredoc_with_interpolation(Line, Column, Scope, true, T, H) of
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-      case unescape_tokens(Parts, Line, Column, NewScope) of
-        {ok, Unescaped} ->
-          Token = {heredoc_type(H), make_meta(Line, Column, NewLine, NewColumn, nil, NewScope), NewColumn - 4, Unescaped},
-          tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+      case NewScope#toxic_tokenizer.linearize of
+        true ->
+          StartTok = case H of
+            $' -> {list_heredoc_start, make_meta(Line, Column, Line, Column + 3, nil, NewScope), "'''"};
+            _  -> {bin_heredoc_start,  make_meta(Line, Column, Line, Column + 3, nil, NewScope), "\"\"\""}
+          end,
+          Seq = linearize_parts(Parts, NewScope, heredoc),
+          EndTok = case H of
+            $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
+            _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
+          end,
+          Emitted = [StartTok] ++ Seq ++ [EndTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+        false ->
+          case unescape_tokens(Parts, Line, Column, NewScope) of
+            {ok, Unescaped} ->
+              Token = {heredoc_type(H), make_meta(Line, Column, NewLine, NewColumn, nil, NewScope), NewColumn - 4, Unescaped},
+              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
-        {error, Reason} ->
-          error(Reason, Rest, Scope, Tokens)
+            {error, Reason} ->
+              error(Reason, Rest, Scope, Tokens)
+          end
       end;
 
     {error, Reason} ->
@@ -867,6 +914,17 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
       interpolation_error(Reason, [H | T], Scope, Tokens, " (for string starting at line ~B)", [Line], Line, Column-1, [H], [H]);
 
     {NewLine, NewColumn, Parts, [$: | Rest], InterScope} when ?is_space(hd(Rest)) ->
+      case InterScope#toxic_tokenizer.linearize of
+        true ->
+          %% Linearized quoted keyword identifier
+          StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H},
+          Seq = linearize_parts(Parts, InterScope, kw_identifier),
+          EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H},
+          ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, InterScope)},
+          Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          tokenize(Rest, NewLine, NewColumn + 1, InterScope, NewTokens);
+        false ->
       NewScope = case is_unnecessary_quote(Parts, InterScope) of
         true ->
           WarnMsg = io_lib:format(
@@ -907,9 +965,24 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
 
         {error, Reason} ->
           error(Reason, Rest, NewScope, Tokens)
+      end
       end;
 
     {NewLine, NewColumn, Parts, Rest, InterScope} ->
+      case InterScope#toxic_tokenizer.linearize of
+        true ->
+          %% Linearized normal string/charlist
+          {StartTok, EndTok} = case H of
+            $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
+                  , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} };
+            _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
+                  , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} }
+          end,
+          Seq = linearize_parts(Parts, InterScope, (if H =:= $' -> charlist; true -> string end)),
+          Emitted = [StartTok] ++ Seq ++ [EndTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          tokenize(Rest, NewLine, NewColumn, InterScope, NewTokens);
+        false ->
       NewScope =
         case H of
           $' ->
@@ -930,6 +1003,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
 
         {error, Reason} ->
           error(Reason, Rest, NewScope, Tokens)
+      end
       end
   end.
 
@@ -1857,8 +1931,18 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
     when ?is_quote(H) ->
   case extract_heredoc_with_interpolation(Line, Column, Scope, ?is_downcase(S), T, H) of
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-      Indentation = NewColumn - 4,
-      add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, NewScope, Tokens, Indentation, <<H, H, H>>);
+      case NewScope#toxic_tokenizer.linearize of
+        true ->
+          StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>},
+          Seq = linearize_parts(Parts, NewScope, sigil),
+          EndTok = {sigil_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>, NewColumn - 4},
+          Emitted = [StartTok] ++ Seq ++ [EndTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+        false ->
+          Indentation = NewColumn - 4,
+          add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, NewScope, Tokens, Indentation, <<H, H, H>>)
+      end;
 
     {error, Reason} ->
       error(Reason, [$~] ++ SigilName ++ Original, Scope, Tokens)
@@ -1868,8 +1952,20 @@ tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, S
     when ?is_sigil(H) ->
   case toxic_interpolation:extract(Line, Column + 1, Scope, ?is_downcase(S), T, sigil_terminator(H)) of
     {NewLine, NewColumn, Parts, Rest, NewScope} ->
-      Indentation = nil,
-      add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, tokens_to_binary(Parts), Rest, NewScope, Tokens, Indentation, <<H>>);
+      case NewScope#toxic_tokenizer.linearize of
+        true ->
+          StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>},
+          Seq = linearize_parts(tokens_to_binary(Parts), NewScope, sigil),
+          EndTok = {sigil_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>, nil},
+          {Final, Modifiers} = collect_modifiers(Rest, []),
+          ModsTok = case Modifiers of [] -> []; _ -> [{sigil_modifiers, make_meta(NewLine, NewColumn, NewLine, NewColumn + length(Modifiers), nil, NewScope), Modifiers}] end,
+          Emitted = [StartTok] ++ Seq ++ [EndTok | ModsTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          tokenize(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
+        false ->
+          Indentation = nil,
+          add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, tokens_to_binary(Parts), Rest, NewScope, Tokens, Indentation, <<H>>)
+      end;
 
     {error, Reason} ->
       Sigil = [$~, S, H],
