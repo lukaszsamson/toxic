@@ -2111,7 +2111,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: is this a bug?
     test "with escaped LF newline" do
       assert tokenize("~x/a\\\nsd/") == {:ok, [
         {
@@ -2126,7 +2125,6 @@ defmodule ToxicTest do
       ], ""}
     end
 
-    # TODO: is this a bug?
     test "with escaped CR LF newline" do
       assert tokenize("~x/a\\\r\nsd/") == {:ok, [
         {
