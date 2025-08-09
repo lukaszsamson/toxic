@@ -2284,7 +2284,7 @@ defmodule ToxicTest do
     test "try with rescue" do
       assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
         {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-              {:do, {1, 5, nil}},
+              {:do, {{1, 5}, {1, 7}, nil}},
               {:eol, {1, 7, 1}},
               {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
               {:eol, {2, 4, 1}},
@@ -2298,7 +2298,7 @@ defmodule ToxicTest do
               {:eol, {6, 4, 1}},
               {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
               {:eol, {7, 5, 1}},
-              {:atom, {8, 1, ~c"ok"}, :ok},
+              {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
         {:eol, {8, 4, 1}},
         {:end, {{9, 1}, {9, 4}, nil}}], ""}
     end
@@ -2942,41 +2942,41 @@ defmodule ToxicTest do
 
       {:ok, tokens, ""} = tokenize("& +/1")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
         {:identifier, {{1, 3}, {1, 4}, _}, :+},
-        {:mult_op, {1, 4, nil}, :/},
+        {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("& &/1")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
         {:identifier, {{1, 3}, {1, 4}, _}, :"&"},
-        {:mult_op, {1, 4, nil}, :/},
+        {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("& ..///3")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
         {:identifier, {{1, 3}, {1, 7}, _}, :"..//"},
-        {:mult_op, {1, 7, nil}, :/},
-        {:int, {1, 8, 3}, ~c"3"}
+        {:mult_op, {{1, 7}, {1, 8}, nil}, :/},
+        {:int, {{1, 8}, {1, 9}, 3}, ~c"3"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("& / /2")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
-        {:identifier, {1, 3, _}, :/},
-        {:mult_op, {1, 5, nil}, :/},
-        {:int, {1, 6, 2}, ~c"2"}
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
+        {:identifier, {{1, 3}, {1, 4}, _}, :/},
+        {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
+        {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("&/ /2")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
-        {:identifier, {1, 2, _}, :/},
-        {:mult_op, {1, 4, nil}, :/},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
+        {:identifier, {{1, 2}, {1, 3}, _}, :/},
+        {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
       ], tokens)
 
@@ -2984,28 +2984,28 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("&/1")
       assert match?([
         {:identifier, {{1, 1}, {1, 2}, _}, :"&"},
-        {:mult_op, {1, 2, nil}, :/},
+        {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
         {:int, {{1, 3}, {1, 4}, 1}, ~c"1"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("+/1")
       assert match?([
-        {:identifier, {1, 1, _}, :+},
-        {:mult_op, {1, 2, nil}, :/},
+        {:identifier, {{1, 1}, {1, 2}, _}, :+},
+        {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
         {:int, {{1, 3}, {1, 4}, 1}, ~c"1"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("/ /2")
       assert match?([
         {:identifier, {{1, 1}, {1, 2}, _}, :/},
-        {:mult_op, {1, 3, nil}, :/},
+        {:mult_op, {{1, 3}, {1, 4}, nil}, :/},
         {:int, {{1, 4}, {1, 5}, 2}, ~c"2"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("..///3")
       assert match?([
         {:identifier, {{1, 1}, {1, 5}, _}, :"..//"},
-        {:mult_op, {1, 5, nil}, :/},
+        {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
         {:int, {{1, 6}, {1, 7}, 3}, ~c"3"}
       ], tokens)
     end
