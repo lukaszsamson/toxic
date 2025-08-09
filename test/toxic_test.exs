@@ -1742,8 +1742,7 @@ defmodule ToxicTest do
     end
 
     test "dot quote escaped newline" do
-      # TODO: range is invalid on identifier
-      assert tokenize(".\"foo\\\nbar\" 1") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 1}, {2, 5}, 34}, :foobar}, {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}], ""}
+      assert tokenize(".\"foo\\\nbar\" 1") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {2, 5}, 34}, :foobar}, {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}], ""}
     end
 
     test "dot quote newline escape" do
@@ -2268,10 +2267,8 @@ defmodule ToxicTest do
     test "module" do
       assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
       {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
-      # TODO: no range on do
-      {:do, {1, 15, nil}},
+      {:do, {{1, 15}, {1, 17}, nil}},
       {:eol, {1, 17, 1}},
-      # TODO: no range on end
       {:end, {{2, 1}, {2, 4}, nil}}], ""}
     end
 
@@ -2352,25 +2349,24 @@ defmodule ToxicTest do
     test "type" do
       assert tokenize("1 :: 3") == {:ok, [
         {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-        # TODO: range is invalid
         {:type_op, {{1, 3}, {1, 5}, nil}, :"::"},
         {:int, {{1, 6}, {1, 7}, 3}, ~c"3"}
       ], ""}
 
       assert tokenize("true::3") == {:ok, [
-        {:true, {1, 1, nil}},
-        {:type_op, {1, 5, nil}, :"::"},
-        {:int, {1, 7, 3}, ~c"3"}
+        {:true, {{1, 1}, {1, 5}, nil}},
+        {:type_op, {{1, 5}, {1, 7}, nil}, :"::"},
+        {:int, {{1, 7}, {1, 8}, 3}, ~c"3"}
       ], ""}
 
       {:ok, tokens, ""} = tokenize("name.::(3)")
       assert match?([
         {:identifier, {{1, 1}, {1, 5}, _}, :name},
-        {:., {1, 5, nil}},
+        {:., {{1, 5}, {1, 6}, nil}},
         {:paren_identifier, {{1, 6}, {1, 8}, _}, :"::"},
-        {:"(", {1, 8, nil}},
+        {:"(", {{1, 8}, {1, 9}, nil}},
         {:int, {{1, 9}, {1, 10}, 3}, ~c"3"},
-        {:")", {1, 10, nil}}
+        {:")", {{1, 10}, {1, 11}, nil}}
       ], tokens)
     end
 
@@ -2711,14 +2707,14 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo -2")
       assert match?([
         {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:dual_op, {1, 5, nil}, :-},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
         {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("foo  -2")
       assert match?([
         {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:dual_op, {1, 6, nil}, :-},
+        {:dual_op, {{1, 6}, {1, 7}, nil}, :-},
         {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
       ], tokens)
     end
@@ -3030,20 +3026,19 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("~r/foo/ == bar")
       assert match?([
         {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"/">>},
-        # TODO: range is invalid
         {:comp_op, {{1, 9}, {1, 11}, nil}, :"=="},
         {:identifier, {{1, 12}, {1, 15}, _}, :bar}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("~r/foo/iu == bar")
       assert match?([
-        {:sigil, {1, 1, nil}, :sigil_r, [<<"foo">>], ~c"iu", nil, <<"/">>},
-        {:comp_op, {1, 11, nil}, :"=="},
+        {:sigil, {{1, 1}, {1, 10}, nil}, :sigil_r, [<<"foo">>], ~c"iu", nil, <<"/">>},
+        {:comp_op, {{1, 11}, {1, 13}, nil}, :"=="},
         {:identifier, {{1, 14}, {1, 17}, _}, :bar}
       ], tokens)
 
       assert tokenize("~M[1 2 3]u8") == {:ok, [
-        {:sigil, {1, 1, nil}, :sigil_M, [<<"1 2 3">>], ~c"u8", nil, <<"[">>}
+        {:sigil, {{1, 1}, {1, 12}, nil}, :sigil_M, [<<"1 2 3">>], ~c"u8", nil, <<"[">>}
       ], ""}
     end
 
