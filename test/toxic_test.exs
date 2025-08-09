@@ -604,21 +604,35 @@ defmodule ToxicTest do
       # assert tokenize(";;") == {:ok, [{";", {1, 1, 0}}, {";", {1, 2, 0}}], ""}
     end
 
-    # test "commas" do
-    #   assert tokenize(",") == {:ok, [{",", {1, 1, 0}}], ""}
-    # end
+    test "commas" do
+      assert tokenize(",") == {:ok, [",": {{1, 1}, {1, 2}, 0}], ""}
+    end
 
-    # test "tokens after commas" do
-    #   assert tokenize(",0x123") == {:ok, [{",", {1, 1, 0}}, {:int, {1, 2, 291}, "0x123"}], ""}
-    # end
+    test "tokens after commas" do
+      assert tokenize(",0x123") == {
+        :ok,
+        [
+          {:",", {{1, 1}, {1, 2}, 0}},
+          {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}
+        ],
+        ""
+      }
+    end
 
-    # test "commas after tokens" do
-    #   assert tokenize("0x123,") == {:ok, [{:int, {1, 1, 291}, "0x123"}], ","}
-    # end
+    test "commas after tokens" do
+      assert tokenize("0x123,") == {
+        :ok,
+        [
+          {:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
+          {:",", {{1, 6}, {1, 7}, 0}}
+        ],
+        ""
+      }
+    end
 
-    # test "consecutive commas" do
-    #   assert tokenize(",,") == {:ok, [{",", {1, 1, 0}}, {",", {1, 2, 0}}], ""}
-    # end
+    test "consecutive commas" do
+      assert tokenize(",,") == {:ok, [",": {{1, 1}, {1, 2}, 0}, ",": {{1, 2}, {1, 3}, 0}], ""}
+    end
 
     test "newlines" do
       assert tokenize("\n") == {:ok, [{:eol, {1, 1, 1}}], ""}
