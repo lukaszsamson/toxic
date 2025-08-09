@@ -2,18 +2,20 @@ defmodule ToxicTest do
   use ExUnit.Case
   doctest Toxic
 
-  defp tokenize(string) do
+  defp tokenize(string, opts \\ []) do
     charlist = to_charlist(string)
     {:ok, _, _, _, toxic_tokens_with_ranges, toxic_remaining} =
       :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [])
 
-    # Convert back to legacy format for comparison
-    toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
+    if Keyword.get(opts, :must_match_elixir, true) do
+      # Convert back to legacy format for comparison
+      toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
 
-    {:ok, _, _, _, elixir_tokens, _remaining} =
-      :elixir_tokenizer.tokenize(charlist, 1, 1, [])
+      {:ok, _, _, _, elixir_tokens, _remaining} =
+        :elixir_tokenizer.tokenize(charlist, 1, 1, [])
 
-    assert Enum.reverse(toxic_tokens) == Enum.reverse(elixir_tokens)
+      assert Enum.reverse(toxic_tokens) == Enum.reverse(elixir_tokens)
+    end
 
     tokens = Enum.reverse(toxic_tokens_with_ranges)
     remaining_str = List.to_string(toxic_remaining)
@@ -1193,20 +1195,24 @@ defmodule ToxicTest do
       assert tokenize("?a") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?a"}, ?a}], ""}
     end
 
-    test "LF" do
-      # TODO: range is wrong
+    test "raw LF" do
       assert tokenize("?\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}], ""}
     end
 
-    test "CR" do
+    test "token after char with raw LF" do
+      # TODO: elixir tokenizer bug - does not advance line
+      assert tokenize("?\n1", must_match_elixir: false) == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
+    end
+
+    test "raw CR" do
       assert tokenize("?\r") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}], ""}
     end
 
-    test "NULL" do
+    test "raw NULL" do
       assert tokenize("?\0") == {:ok, [{:char, {{1, 1}, {1, 3}, [63, 0]}, ?\0}], ""}
     end
 
-    test "CR LF" do
+    test "raw CR LF" do
       assert tokenize("?\r\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {1, 3, 1}}], ""}
     end
 
@@ -1220,18 +1226,35 @@ defmodule ToxicTest do
       assert tokenize("?\\z") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\z"}, ?z}], ""}
     end
 
+    test "LF escape" do
+      assert tokenize("?\\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\n"}, ?\n}], ""}
+    end
+
+    test "CR escape" do
+      assert tokenize("?\\r") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\r"}, ?\r}], ""}
+    end
+
     test "unknown escape non letter" do
       assert tokenize("?\\1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\1"}, ?1}], ""}
     end
 
-    test "escape LF" do
-      # TODO: range is invalid
+    test "escaped LF" do
       assert tokenize("?\\\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}], ""}
     end
 
-    test "escape CR LF" do
-      # TODO: range is invalid?
-      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
+    test "token after escaped LF" do
+      # TODO: elixir tokenizer bug - does not advance line
+      assert tokenize("?\\\n1", must_match_elixir: false) == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
+    end
+
+    test "escaped CR LF" do
+      # TODO: elixir tokenizer bug - should not consume the newline, only advance line
+      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
+    end
+
+    test "token after escaped CR LF" do
+      # TODO: elixir tokenizer bug - should not consume the newline, only advance line
+      assert tokenize("?\\\r\n1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
     end
   end
 

@@ -303,8 +303,16 @@ tokenize([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
       Scope
   end,
 
-  Token = {char, make_meta_len(Line, Column, 3, [$?, $\\, H], Scope), Char},
-  tokenize(T, Line, Column + 3, NewScope, [Token | Tokens]);
+  % Check if we have a literal newline after the escape
+  {Token, Rest, NewLine, NewColumn} = case {H, T} of
+    {$\n, _} ->
+      % ?\\\n - escaped newline, consume the actual newline
+      {{char, make_meta(Line, Column, Line + 1, 1, [$?, $\\, $\n], Scope), Char}, T, Line + 1, 1};
+    _ ->
+      % Regular escaped char
+      {{char, make_meta_len(Line, Column, 3, [$?, $\\, H], Scope), Char}, T, Line, Column + 3}
+  end,
+  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
 tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
   NewScope = case handle_char(Char) of
@@ -315,8 +323,17 @@ tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
     false ->
       Scope
   end,
-  Token = {char, make_meta_len(Line, Column, 2, [$?, Char], Scope), Char},
-  tokenize(T, Line, Column + 2, NewScope, [Token | Tokens]);
+  
+  % Check if the char is a newline
+  {Token, Rest, NewLine, NewColumn} = case Char of
+    $\n ->
+      % ?\n - raw newline character, consume it and move to next line
+      {{char, make_meta(Line, Column, Line + 1, 1, [$?, $\n], Scope), Char}, T, Line + 1, 1};
+    _ ->
+      % Regular char
+      {{char, make_meta_len(Line, Column, 2, [$?, Char], Scope), Char}, T, Line, Column + 2}
+  end,
+  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
 % Heredocs
 
