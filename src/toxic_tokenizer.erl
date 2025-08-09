@@ -1745,7 +1745,7 @@ keyword_or_unsafe_to_atom(_, Part, Line, Column, Scope) ->
   unsafe_to_atom(Part, Line, Column, Scope).
 
 tokenize_keyword(terminator, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
-  case tokenize_keyword_terminator(Line, Column, Atom, Tokens) of
+  case tokenize_keyword_terminator(Line, Column, Atom, Tokens, Scope) of
     {ok, [Check | T]} ->
       handle_terminator(Rest, Line, Column + Length, Scope, Check, T);
     {error, Message, Token} ->
@@ -1885,18 +1885,19 @@ add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope,
 
 %% Fail early on invalid do syntax. For example, after
 %% most keywords, after comma and so on.
-tokenize_keyword_terminator(DoLine, DoColumn, do, [{identifier, {Line, Column, Meta}, Atom} | T]) ->
-  {ok, add_token_with_eol({do, {DoLine, DoColumn, nil}},
+tokenize_keyword_terminator(DoLine, DoColumn, do, [{identifier, {Line, Column, Meta}, Atom} | T], Scope) ->
+  {ok, add_token_with_eol({do, make_meta_len(DoLine, DoColumn, 2, nil, Scope)},
                           [{do_identifier, {Line, Column, Meta}, Atom} | T])};
-tokenize_keyword_terminator(_Line, _Column, do, [{'fn', _} | _]) ->
+tokenize_keyword_terminator(_Line, _Column, do, [{'fn', _} | _], _Scope) ->
   {error, invalid_do_with_fn_error("unexpected reserved word: "), "do"};
-tokenize_keyword_terminator(Line, Column, do, Tokens) ->
+tokenize_keyword_terminator(Line, Column, do, Tokens, Scope) ->
   case is_valid_do(Tokens) of
-    true  -> {ok, add_token_with_eol({do, {Line, Column, nil}}, Tokens)};
+    true  -> {ok, add_token_with_eol({do, make_meta_len(Line, Column, 2, nil, Scope)}, Tokens)};
     false -> {error, invalid_do_error("unexpected reserved word: "), "do"}
   end;
-tokenize_keyword_terminator(Line, Column, Atom, Tokens) ->
-  {ok, [{Atom, {Line, Column, nil}} | Tokens]}.
+tokenize_keyword_terminator(Line, Column, Atom, Tokens, Scope) ->
+  AtomLen = length(atom_to_list(Atom)),
+  {ok, [{Atom, make_meta_len(Line, Column, AtomLen, nil, Scope)} | Tokens]}.
 
 is_valid_do([{Atom, _} | _]) ->
   case Atom of
