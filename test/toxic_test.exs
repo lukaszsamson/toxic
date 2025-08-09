@@ -286,17 +286,43 @@ defmodule ToxicTest do
       assert tokenize("\n\n=>") == {:ok, [{:assoc_op, {{3, 1}, {3, 3}, 2}, :"=>"}], ""}
     end
 
-    # TODO
+    test "=> after ;" do
+      assert tokenize(";=>") == {
+        :ok,
+        [
+          {:";", {{1, 1}, {1, 2}, 0}},
+          {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
+        ],
+        ""
+      }
+      assert tokenize(";\n=>") == {
+        :ok,
+        [
+          {:";", {{1, 1}, {1, 2}, 1}},
+          {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
+        ],
+        ""
+      }
+    end
 
-    # test "=> after ;" do
-    #   # assert tokenize(";=>") == {:ok, [{:assoc_op, {2, 1, 1}, :"=>"}], ""}
-    #   assert tokenize(";\n=>") == {:ok, [{:assoc_op, {3, 1, 2}, :"=>"}], ""}
-    # end
-
-    # test "=> after ," do
-    #   # assert tokenize(";=>") == {:ok, [{:assoc_op, {2, 1, 1}, :"=>"}], ""}
-    #   assert tokenize(";\n=>") == {:ok, [{:assoc_op, {3, 1, 2}, :"=>"}], ""}
-    # end
+    test "=> after ," do
+      assert tokenize(",=>") == {
+        :ok,
+        [
+          {:",", {{1, 1}, {1, 2}, 0}},
+          {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
+        ],
+        ""
+      }
+      assert tokenize(",\n=>") == {
+        :ok,
+        [
+          {:",", {{1, 1}, {1, 2}, 1}},
+          {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
+        ],
+        ""
+      }
+    end
 
     test "..//" do
       assert tokenize("..///") == {:ok, [{:identifier, {{1, 1}, {1, 5}, nil}, :..//}, {:mult_op, {{1, 5}, {1, 6}, nil}, :/}], ""}
