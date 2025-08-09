@@ -923,11 +923,11 @@ handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) whe
 handle_unary_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
+      Token = {identifier, make_meta_len(Line, Column, Length, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
       %% For unary operators, Elixir does not carry EOL counts in meta
-      Token = {Kind, make_meta_len(Line, Column, Length + Extra, nil, Scope), Op},
+      Token = {Kind, make_meta_len(Line, Column, Length, nil, Scope), Op},
       tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens])
   end.
 
