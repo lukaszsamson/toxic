@@ -1054,7 +1054,7 @@ handle_space_sensitive_tokens([Sign, $:, Space | _] = String, Line, Column, Scop
 handle_space_sensitive_tokens([Sign, NotMarker | T], Line, Column, Scope, [{identifier, _, _} = H | Tokens]) when
     ?dual_op(Sign), not(?is_space(NotMarker)), NotMarker =/= Sign, NotMarker =/= $/, NotMarker =/= $> ->
   Rest = [NotMarker | T],
-  DualOpToken = {dual_op, {Line, Column, nil}, list_to_atom([Sign])},
+  DualOpToken = {dual_op, make_meta_len(Line, Column, 1, nil, Scope), list_to_atom([Sign])},
   tokenize(Rest, Line, Column + 1, Scope, [DualOpToken, setelement(1, H, op_identifier) | Tokens]);
 
 % Handle cursor completion
