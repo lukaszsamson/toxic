@@ -5,7 +5,9 @@ defmodule ToxicTest do
   defp tokenize(string, opts \\ []) do
     charlist = to_charlist(string)
     {:ok, _, _, _, toxic_tokens_with_ranges, toxic_remaining} =
-      :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [])
+      :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [
+        {:linearize, true}
+      ])
 
     if Keyword.get(opts, :must_match_elixir, true) do
       # Convert back to legacy format for comparison
@@ -30,7 +32,9 @@ defmodule ToxicTest do
   describe "tokenize_with_ranges" do
     test "returns tokens with end positions" do
       {:ok, _, _, _, tokens, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [])
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
+          {:linearize, true}
+        ])
 
       # Check that we got a token with range format
       assert [{:int, {{1, 1}, {1, 6}, _}, ~c"0x123"}] = Enum.reverse(tokens)
@@ -38,7 +42,9 @@ defmodule ToxicTest do
 
     test "multi-token expression has correct ranges" do
       {:ok, _, _, _, tokens, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123;"), 1, 1, [])
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123;"), 1, 1, [
+          {:linearize, true}
+        ])
 
       reversed = Enum.reverse(tokens)
 
@@ -49,7 +55,9 @@ defmodule ToxicTest do
 
     test "ranges_to_legacy converts correctly" do
       {:ok, _, _, _, tokens_with_ranges, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [])
+        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
+          {:linearize, true}
+        ])
 
       legacy_tokens = :toxic_tokenizer.ranges_to_legacy(tokens_with_ranges)
 

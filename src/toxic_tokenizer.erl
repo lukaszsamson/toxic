@@ -6,7 +6,7 @@
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
 -export([tokenize/1, tokenize/3, tokenize/4, invalid_do_error/1, terminator/1]).
--export([tokenize_with_ranges/4, ranges_to_legacy/1]).
+-export([tokenize_with_ranges/4, ranges_to_legacy/1, collapse_linear_ranges/1]).
 
 -define(at_op(T),
   T =:= $@).
@@ -156,7 +156,12 @@ tokenize_with_ranges(String, Line, Column, Opts) ->
 
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
-  [ranges_token_to_legacy(Token) || Token <- TokensWithRanges].
+  Collapsed =
+    case contains_linear_markers(TokensWithRanges) of
+      true -> lists:reverse(linear_to_legacy(lists:reverse(TokensWithRanges)));
+      false -> TokensWithRanges
+    end,
+  [ranges_token_to_legacy(Token) || Token <- Collapsed].
 
 %% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
 %% Build meta depending on whether ranges are enabled
@@ -202,6 +207,130 @@ ranges_convert_part({StartMeta, EndMeta, Tokens}) when is_tuple(StartMeta), is_t
   {legacy_meta(StartMeta), legacy_meta(EndMeta), ranges_to_legacy(Tokens)};
 ranges_convert_part(Other) ->
   Other.
+
+contains_linear_markers(Tokens) ->
+  lists:any(fun
+    ({Type, _, _}) -> is_linear_type(Type);
+    ({Type, _, _, _}) -> is_linear_type(Type);
+    ({Type, _, _, _, _}) -> is_linear_type(Type);
+    ({Type, _, _, _, _, _}) -> is_linear_type(Type);
+    (_) -> false
+  end, Tokens).
+
+is_linear_type(bin_string_start) -> true;
+is_linear_type(bin_string_end) -> true;
+is_linear_type(list_string_start) -> true;
+is_linear_type(list_string_end) -> true;
+is_linear_type(bin_heredoc_start) -> true;
+is_linear_type(bin_heredoc_end) -> true;
+is_linear_type(list_heredoc_start) -> true;
+is_linear_type(list_heredoc_end) -> true;
+is_linear_type(sigil_start) -> true;
+is_linear_type(sigil_end) -> true;
+is_linear_type(sigil_modifiers) -> true;
+is_linear_type(kw_identifier_unsafe_start) -> true;
+is_linear_type(kw_identifier_unsafe_end) -> true;
+is_linear_type(begin_interpolation) -> true;
+is_linear_type(end_interpolation) -> true;
+is_linear_type(string_fragment) -> true;
+is_linear_type(_) -> false.
+
+%% Public: collapse linear markers back to legacy container tokens, preserving range metas
+collapse_linear_ranges(Tokens) -> linear_to_legacy(Tokens).
+
+linear_to_legacy(Tokens) ->
+  {Out, []} = linear_to_legacy(Tokens, [], []),
+  lists:reverse(Out).
+
+linear_to_legacy([{bin_string_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{bin_string, Meta, Delim, []} | Stack]);
+linear_to_legacy([{list_string_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{list_string, Meta, Delim, []} | Stack]);
+linear_to_legacy([{bin_heredoc_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{bin_heredoc, Meta, Delim, [], undefined} | Stack]);
+linear_to_legacy([{list_heredoc_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{list_heredoc, Meta, Delim, [], undefined} | Stack]);
+linear_to_legacy([{sigil_start, Meta, SigilAtom, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [], nil, pending_end} | Stack]);
+linear_to_legacy([{kw_identifier_unsafe_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{kw_identifier_unsafe, Meta, Delim, []} | Stack]);
+
+linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim, Parts} | Stack]) ->
+  linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts]} | Stack]);
+linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim, Parts, Extra} | Stack]) when K =:= bin_heredoc; K =:= list_heredoc ->
+  linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts], Extra} | Stack]);
+linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{sigil, Meta, SigilAtom, Delim, Parts, Mods, pending_end} | Stack]) ->
+  linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Bin | Parts], Mods, pending_end} | Stack]);
+
+linear_to_legacy([{begin_interpolation, StartMeta, _Kind} | T], Out, Stack) ->
+  %% Push interpolation frame; collect inner tokens
+  linear_to_legacy(T, Out, [{interpol, StartMeta, []} | Stack]);
+linear_to_legacy([{end_interpolation, EndMeta, _Kind} | T], Out, [{interpol, StartMeta, InnerRev} | StackRest]) ->
+  InnerCollapsed = linear_to_legacy(lists:reverse(InnerRev)),
+  Part = {StartMeta, EndMeta, InnerCollapsed},
+  case StackRest of
+    [{K, Meta, Delim, Parts} | Stack] ->
+      linear_to_legacy(T, Out, [{K, Meta, Delim, [Part | Parts]} | Stack]);
+    [{K, Meta, Delim, Parts, Extra} | Stack] when K =:= bin_heredoc; K =:= list_heredoc ->
+      linear_to_legacy(T, Out, [{K, Meta, Delim, [Part | Parts], Extra} | Stack]);
+    [{sigil, Meta, SigilAtom, Delim, Parts, Mods, pending_end} | Stack] ->
+      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Part | Parts], Mods, pending_end} | Stack]);
+    _ -> linear_to_legacy(T, [Part | Out], StackRest)
+  end;
+
+%% Accumulate inner tokens for interpolation
+linear_to_legacy([Tok | T], Out, [{interpol, StartMeta, Inner} | Stack]) ->
+  linear_to_legacy(T, Out, [{interpol, StartMeta, [Tok | Inner]} | Stack]);
+
+%% Sigil end and optional modifiers
+linear_to_legacy([{sigil_end, EndMeta, SigilAtom, Delim, Indent} | Rest], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, _Mods, pending_end} | Stack]) ->
+  case Rest of
+    [{sigil_modifiers, _M, Modifiers} | T] ->
+      Parts = lists:reverse(PartsRev),
+      CM = combine_range_meta(Meta, EndMeta),
+      Tok = {sigil, CM, SigilAtom, Parts, Modifiers, Indent, Delim},
+      linear_to_legacy(T, [Tok | Out], Stack);
+    _ ->
+      Parts = lists:reverse(PartsRev),
+      CM = combine_range_meta(Meta, EndMeta),
+      Tok = {sigil, CM, SigilAtom, Parts, [], Indent, Delim},
+      linear_to_legacy(Rest, [Tok | Out], Stack)
+  end;
+
+linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {bin_string, CM, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {list_string, CM, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {bin_heredoc, CM, Indent, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {list_heredoc, CM, Indent, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, _Delim1} | T], Out, [{kw_identifier_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {kw_identifier_unsafe, CM, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+
+%% Pass-through for non-linear tokens
+linear_to_legacy([Tok | T], Out, Stack) ->
+  case Stack of
+    [{interpol, StartMeta, Inner} | Rest] ->
+      linear_to_legacy(T, Out, [{interpol, StartMeta, [Tok | Inner]} | Rest]);
+    _ -> linear_to_legacy(T, [Tok | Out], Stack)
+  end;
+linear_to_legacy([], Out, []) -> {Out, []};
+linear_to_legacy([], Out, Stack) -> {Out, Stack}.
+
+%% Combine range-shaped metas into a single span using the start of the first and end of the second.
+combine_range_meta({{SL, SC}, _SEnd, _SX}, {_EStart, {EL, EC}, _EX}) -> {{SL, SC}, {EL, EC}, nil};
+combine_range_meta(Start, End) -> {Start, End}.
 
 tokenize(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
   error({badarg, tokenize, line_or_column_not_integer, {Line, Column, Scope, Tokens}});
@@ -917,8 +1046,9 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
       case InterScope#toxic_tokenizer.linearize of
         true ->
           %% Linearized quoted keyword identifier
+          {ok, Unescaped} = unescape_tokens(Parts, Line, Column, InterScope),
           StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H},
-          Seq = linearize_parts(Parts, InterScope, kw_identifier),
+          Seq = linearize_parts(Unescaped, InterScope, kw_identifier),
           EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H},
           ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, InterScope)},
           Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
@@ -972,13 +1102,14 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
       case InterScope#toxic_tokenizer.linearize of
         true ->
           %% Linearized normal string/charlist
+          {ok, Unescaped} = unescape_tokens(Parts, Line, Column, InterScope),
           {StartTok, EndTok} = case H of
             $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
                   , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} };
             _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
                   , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} }
           end,
-          Seq = linearize_parts(Parts, InterScope, (if H =:= $' -> charlist; true -> string end)),
+          Seq = linearize_parts(Unescaped, InterScope, (if H =:= $' -> charlist; true -> string end)),
           Emitted = [StartTok] ++ Seq ++ [EndTok],
           NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
           tokenize(Rest, NewLine, NewColumn, InterScope, NewTokens);
