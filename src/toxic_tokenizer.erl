@@ -1765,7 +1765,7 @@ tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   NewTokens =
     case strip_horizontal_space(Rest, 0) of
       {[$/ | _], _} ->
-        [{identifier, {Line, Column, nil}, Atom} | Tokens];
+        [{identifier, make_meta_len(Line, Column, Length, nil, Scope), Atom} | Tokens];
 
       _ ->
         case {Kind, Tokens} of
