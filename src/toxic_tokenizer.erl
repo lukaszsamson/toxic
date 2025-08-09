@@ -1017,7 +1017,7 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
         {ok, [UnescapedPart]} ->
           case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
             {ok, Atom} ->
-              Token = check_call_identifier(Line, Column, H, Atom, NewColumn - Column, Rest, NewScope),
+              Token = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
               TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
               tokenize(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
 
@@ -1512,6 +1512,14 @@ check_call_identifier(Line, Column, Info, Atom, Length, [$[ | _], Scope) ->
   {bracket_identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom};
 check_call_identifier(Line, Column, Info, Atom, Length, _Rest, Scope) ->
   {identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom}.
+
+%% Version for multi-line tokens with explicit end position
+check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, [$( | _], Scope) ->
+  {paren_identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom};
+check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, [$[ | _], Scope) ->
+  {bracket_identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom};
+check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, _Rest, Scope) ->
+  {identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom}.
 
 add_token_with_eol({unary_op, _, _} = Left, T) -> [Left | T];
 add_token_with_eol(Left, [{eol, _} | T]) -> [Left | T];
