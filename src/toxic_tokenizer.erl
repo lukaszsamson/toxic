@@ -158,7 +158,7 @@ tokenize_with_ranges(String, Line, Column, Opts) ->
 ranges_to_legacy(TokensWithRanges) ->
   Collapsed =
     case contains_linear_markers(TokensWithRanges) of
-      true -> lists:reverse(linear_to_legacy(lists:reverse(TokensWithRanges)));
+      true -> linear_to_legacy(TokensWithRanges);
       false -> TokensWithRanges
     end,
   [ranges_token_to_legacy(Token) || Token <- Collapsed].

@@ -4,9 +4,10 @@ defmodule ToxicTest do
 
   defp tokenize(string, opts \\ []) do
     charlist = to_charlist(string)
+    linearize = Keyword.get(opts, :linearize, false)
     {:ok, _, _, _, toxic_tokens_with_ranges, toxic_remaining} =
       :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [
-        {:linearize, true}
+        {:linearize, linearize}
       ])
 
     if Keyword.get(opts, :must_match_elixir, true) do
@@ -19,7 +20,12 @@ defmodule ToxicTest do
       assert Enum.reverse(toxic_tokens) == Enum.reverse(elixir_tokens)
     end
 
-    tokens = Enum.reverse(toxic_tokens_with_ranges)
+    # Linearized tokens are already in forward order, non-linearized need reversing
+    tokens = if linearize do
+      :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges)
+    else
+      Enum.reverse(toxic_tokens_with_ranges)
+    end
     remaining_str = List.to_string(toxic_remaining)
 
     {:ok, tokens, remaining_str}
