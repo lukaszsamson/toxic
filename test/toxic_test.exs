@@ -410,7 +410,7 @@ defmodule ToxicTest do
       assert tokenize("<<\n>>") == {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:eol, {1, 3, 1}}, {:">>", {{2, 1}, {2, 3}, 1}}], ""}
     end
 
-    # TODO
+    # TODO: this is a syntax error
     # test "space between % and {" do
     #   assert tokenize("% {") == {:ok, [{:ternary_op, {2, 1, 1}, :"::"}], ""}
     # end
@@ -478,10 +478,6 @@ defmodule ToxicTest do
       assert tokenize("& /+") == {:ok, [{:identifier, {{1, 1}, {1, 2}, nil}, :&}, {:mult_op, {{1, 3}, {1, 4}, nil}, :/}, {:dual_op, {{1, 4}, {1, 5}, nil}, :+}], ""}
       assert tokenize("&/ +") == {:ok, [{:identifier, {{1, 1}, {1, 2}, nil}, :&}, {:mult_op, {{1, 2}, {1, 3}, nil}, :/}, {:dual_op, {{1, 4}, {1, 5}, nil}, :+}], ""}
     end
-
-    # TODO: is there a test?
-      # # dot
-      # assert tokenize(":.") == {:ok, [{:atom, {1, 1, nil}, :.}], ""}
 
     test "unary operators followed by /" do
       # unary_op3
@@ -1841,8 +1837,16 @@ defmodule ToxicTest do
     test "not in" do
       assert tokenize("not in") == {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in"}], ""}
       assert tokenize("not  in") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
-      # TODO: report to elixir
-      # assert tokenize("not\nin") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
+      # TODO: report to elixir - this is unexpected
+      assert tokenize("not\nin") == {
+        :ok,
+        [
+          {:unary_op, {{1, 1}, {1, 4}, nil}, :not},
+          {:in_op, {{2, 1}, {2, 3}, 1}, :in}
+        ],
+        ""
+      }
+      assert tokenize("not\\\nin") == {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, :"not in"}], ""}
     end
 
     test "in" do
@@ -2712,8 +2716,6 @@ defmodule ToxicTest do
         {:., {{1, 8}, {1, 9}, nil}},
         {:alias, {{1, 9}, {1, 12}, _}, :Baz}
       ], tokens)
-
-      # TODO add dot tests with spaces
     end
 
     test "string" do
