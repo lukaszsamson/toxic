@@ -2352,7 +2352,8 @@ defmodule ToxicTest do
     test "type" do
       assert tokenize("1 :: 3") == {:ok, [
         {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-        {:type_op, {1, 3, nil}, :"::"},
+        # TODO: range is invalid
+        {:type_op, {{1, 3}, {1, 5}, nil}, :"::"},
         {:int, {{1, 6}, {1, 7}, 3}, ~c"3"}
       ], ""}
 
@@ -2376,10 +2377,11 @@ defmodule ToxicTest do
     test "arithmetic" do
       assert tokenize("1 + 2 + 3") == {:ok, [
         {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-        {:dual_op, {1, 3, nil}, :+},
+        # TODO: range is invalid
+        {:dual_op, {{1, 3}, {1, 4}, nil}, :+},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
-        {:dual_op, {1, 7, nil}, :+},
-        {:int, {1, 9, 3}, ~c"3"}
+        {:dual_op, {{1, 7}, {1, 8}, nil}, :+},
+        {:int, {{1, 9}, {1, 10}, 3}, ~c"3"}
       ], ""}
     end
 
@@ -2387,48 +2389,48 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize(":foo+:bar")
       assert match?([
         {:atom, {{1, 1}, {1, 5}, _}, :foo},
-        {:dual_op, {1, 5, nil}, :+},
-        {:atom, {{1, 6}, {1, 9}, _}, :bar}
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:atom, {{1, 6}, {1, 10}, _}, :bar}
       ], tokens)
     end
 
     test "scientific" do
       assert tokenize("1.0e-1") == {:ok, [
-        {:flt, {1, 1, 0.1}, ~c"1.0e-1"}
+        {:flt, {{1, 1}, {1, 7}, 0.1}, ~c"1.0e-1"}
       ], ""}
 
       assert tokenize("1.0E-1") == {:ok, [
-        {:flt, {1, 1, 0.1}, ~c"1.0E-1"}
+        {:flt, {{1, 1}, {1, 7}, 0.1}, ~c"1.0E-1"}
       ], ""}
 
       assert tokenize("1_234.567_8e-10") == {:ok, [
-        {:flt, {1, 1, 1.2345678e-7}, ~c"1_234.567_8e-10"}
+        {:flt, {{1, 1}, {1, 16}, 1.2345678e-7}, ~c"1_234.567_8e-10"}
       ], ""}
     end
 
     test "hex_bin_octal" do
       assert tokenize("0xFF") == {:ok, [
-        {:int, {1, 1, 255}, ~c"0xFF"}
+        {:int, {{1, 1}, {1, 5}, 255}, ~c"0xFF"}
       ], ""}
 
       assert tokenize("0xF_F") == {:ok, [
-        {:int, {1, 1, 255}, ~c"0xF_F"}
+        {:int, {{1, 1}, {1, 6}, 255}, ~c"0xF_F"}
       ], ""}
 
       assert tokenize("0o77") == {:ok, [
-        {:int, {1, 1, 63}, ~c"0o77"}
+        {:int, {{1, 1}, {1, 5}, 63}, ~c"0o77"}
       ], ""}
 
       assert tokenize("0o7_7") == {:ok, [
-        {:int, {1, 1, 63}, ~c"0o7_7"}
+        {:int, {{1, 1}, {1, 6}, 63}, ~c"0o7_7"}
       ], ""}
 
       assert tokenize("0b11") == {:ok, [
-        {:int, {1, 1, 3}, ~c"0b11"}
+        {:int, {{1, 1}, {1, 5}, 3}, ~c"0b11"}
       ], ""}
 
       assert tokenize("0b1_1") == {:ok, [
-        {:int, {1, 1, 3}, ~c"0b1_1"}
+        {:int, {{1, 1}, {1, 6}, 3}, ~c"0b1_1"}
       ], ""}
     end
 
@@ -2465,48 +2467,48 @@ defmodule ToxicTest do
 
     test "kw" do
       {:ok, tokens, ""} = tokenize("do: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 3}, _}, :do}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :do}], tokens)
 
       {:ok, tokens, ""} = tokenize("a@: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 3}, _}, :a@}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :a@}], tokens)
 
       {:ok, tokens, ""} = tokenize("A@: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 3}, _}, :"A@"}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :"A@"}], tokens)
 
       {:ok, tokens, ""} = tokenize("a@b: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :a@b}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :a@b}], tokens)
 
       {:ok, tokens, ""} = tokenize("A@!: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :"A@!"}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :"A@!"}], tokens)
 
       {:ok, tokens, ""} = tokenize("a@!: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :"a@!"}], tokens)
+      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :"a@!"}], tokens)
 
       {:ok, tokens, ""} = tokenize("foo: \"bar\"")
       assert match?([
-        {:kw_identifier, {{1, 1}, {1, 4}, _}, :foo},
+        {:kw_identifier, {{1, 1}, {1, 5}, _}, :foo},
         {:bin_string, {{1, 6}, {1, 11}, nil}, [<<"bar">>]}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("\"+\": \"bar\"")
       assert match?([
-        {:kw_identifier, {{1, 1}, {1, 4}, _}, :+},
+        {:kw_identifier, {{1, 1}, {1, 5}, _}, :+},
         {:bin_string, {{1, 6}, {1, 11}, nil}, [<<"bar">>]}
       ], tokens)
     end
 
     test "int" do
       assert tokenize("123") == {:ok, [
-        {:int, {1, 1, 123}, ~c"123"}
+        {:int, {{1, 1}, {1, 4}, 123}, ~c"123"}
       ], ""}
 
       assert tokenize("123;") == {:ok, [
-        {:int, {1, 1, 123}, ~c"123"},
-        {:";", {1, 4, 0}}
+        {:int, {{1, 1}, {1, 4}, 123}, ~c"123"},
+        {:";", {{1, 4}, {1, 5}, 0}}
       ], ""}
 
       assert tokenize("\n\n123") == {:ok, [
-        {:eol, {{1, 1}, {3, 1}, 2}},
+        {:eol, {1, 1, 2}},
         {:int, {{3, 1}, {3, 4}, 123}, ~c"123"}
       ], ""}
 
@@ -2516,11 +2518,11 @@ defmodule ToxicTest do
       ], ""}
 
       assert tokenize("007") == {:ok, [
-        {:int, {1, 1, 7}, ~c"007"}
+        {:int, {{1, 1}, {1, 4}, 7}, ~c"007"}
       ], ""}
 
       assert tokenize("0100000") == {:ok, [
-        {:int, {1, 1, 100000}, ~c"0100000"}
+        {:int, {{1, 1}, {1, 8}, 100000}, ~c"0100000"}
       ], ""}
     end
 
@@ -2531,11 +2533,11 @@ defmodule ToxicTest do
 
       assert tokenize("12.3;") == {:ok, [
         {:flt, {{1, 1}, {1, 5}, 12.3}, ~c"12.3"},
-        {:";", {1, 5, 0}}
+        {:";", {{1, 5}, {1, 6}, 0}}
       ], ""}
 
       assert tokenize("\n\n12.3") == {:ok, [
-        {:eol, {{1, 1}, {3, 1}, 2}},
+        {:eol, {1, 1, 2}},
         {:flt, {{3, 1}, {3, 5}, 12.3}, ~c"12.3"}
       ], ""}
 
@@ -2545,7 +2547,7 @@ defmodule ToxicTest do
       ], ""}
 
       assert tokenize("00_12.3_00") == {:ok, [
-        {:flt, {1, 1, 12.3}, ~c"00_12.3_00"}
+        {:flt, {{1, 1}, {1, 11}, 12.3}, ~c"00_12.3_00"}
       ], ""}
     end
 
@@ -2565,15 +2567,15 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("a0c()")
       assert match?([
         {:paren_identifier, {{1, 1}, {1, 4}, _}, :a0c},
-        {:"(", {1, 4, nil}},
-        {:")", {1, 5, nil}}
+        {:"(", {{1, 4}, {1, 5}, nil}},
+        {:")", {{1, 5}, {1, 6}, nil}}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("a0c!()")
       assert match?([
         {:paren_identifier, {{1, 1}, {1, 5}, _}, :a0c!},
-        {:"(", {1, 5, nil}},
-        {:")", {1, 6, nil}}
+        {:"(", {{1, 5}, {1, 6}, nil}},
+        {:")", {{1, 6}, {1, 7}, nil}}
       ], tokens)
     end
 
@@ -2585,35 +2587,35 @@ defmodule ToxicTest do
     test "dot" do
       {:ok, tokens, ""} = tokenize("foo.bar.baz")
       assert match?([
-        {:identifier, {1, 1, _}, :foo},
-        {:., {1, 4, nil}},
-        {:identifier, {1, 5, _}, :bar},
-        {:., {1, 8, nil}},
-        {:identifier, {1, 9, _}, :baz}
+        {:identifier, {{1, 1}, {1, 4}, _}, :foo},
+        {:., {{1, 4}, {1, 5}, nil}},
+        {:identifier, {{1, 5}, {1, 8}, _}, :bar},
+        {:., {{1, 8}, {1, 9}, nil}},
+        {:identifier, {{1, 9}, {1, 12}, _}, :baz}
       ], tokens)
     end
 
     test "dot_keyword" do
       {:ok, tokens, ""} = tokenize("foo.do")
       assert match?([
-        {:identifier, {1, 1, _}, :foo},
-        {:., {1, 4, nil}},
-        {:identifier, {1, 5, _}, :do}
+        {:identifier, {{1, 1}, {1, 4}, _}, :foo},
+        {:., {{1, 4}, {1, 5}, nil}},
+        {:identifier, {{1, 5}, {1, 7}, _}, :do}
       ], tokens)
     end
 
     test "newline" do
       {:ok, tokens, ""} = tokenize("foo\n.bar")
       assert match?([
-        {:identifier, {1, 1, _}, :foo},
-        {:., {2, 1, nil}},
-        {:identifier, {2, 2, _}, :bar}
+        {:identifier, {{1, 1}, {1, 4}, _}, :foo},
+        {:., {{2, 1}, {2, 2}, nil}},
+        {:identifier, {{2, 2}, {2, 5}, _}, :bar}
       ], tokens)
 
       assert tokenize("1\n++2") == {:ok, [
         {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-        {:concat_op, {2, 1, 1}, :"++"},
-        {:int, {2, 3, 2}, ~c"2"}
+        {:concat_op, {{2, 1}, {2, 3}, 1}, :"++"},
+        {:int, {{2, 3}, {2, 4}, 2}, ~c"2"}
       ], ""}
     end
 
@@ -2621,7 +2623,7 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo.\n+1")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:., {1, 4, nil}},
+        {:., {{1, 4}, {1, 5}, nil}},
         {:identifier, {{2, 1}, {2, 2}, _}, :+},
         {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
       ], tokens)
@@ -2629,7 +2631,7 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo.#bar\n+1")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:., {1, 4, nil}},
+        {:., {{1, 4}, {1, 5}, nil}},
         {:identifier, {{2, 1}, {2, 2}, _}, :+},
         {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
       ], tokens)
@@ -2639,9 +2641,9 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("f.()")
       assert match?([
         {:identifier, {{1, 1}, {1, 2}, _}, :f},
-        {:dot_call_op, {1, 2, nil}, :.},
-        {:"(", {1, 3, nil}},
-        {:")", {1, 4, nil}}
+        {:dot_call_op, {{1, 2}, {1, 3}, nil}, :.},
+        {:"(", {{1, 3}, {1, 4}, nil}},
+        {:")", {{1, 4}, {1, 5}, nil}}
       ], tokens)
     end
 
@@ -2652,11 +2654,13 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("Foo.Bar.Baz")
       assert match?([
         {:alias, {{1, 1}, {1, 4}, _}, :Foo},
-        {:., {1, 4, nil}},
+        {:., {{1, 4}, {1, 5}, nil}},
         {:alias, {{1, 5}, {1, 8}, _}, :Bar},
-        {:., {1, 8, nil}},
+        {:., {{1, 8}, {1, 9}, nil}},
         {:alias, {{1, 9}, {1, 12}, _}, :Baz}
       ], tokens)
+
+      # TODO add dot tests with spaces
     end
 
     test "string" do
@@ -2665,7 +2669,7 @@ defmodule ToxicTest do
       ], ""}
 
       assert tokenize("\"f\\\"\"") == {:ok, [
-        {:bin_string, {{1, 1}, {1, 5}, nil}, [<<"f\"">>]}
+        {:bin_string, {{1, 1}, {1, 6}, nil}, [<<"f\"">>]}
       ], ""}
     end
 
@@ -2676,7 +2680,7 @@ defmodule ToxicTest do
 
       assert tokenize("\"\"\"\n heredoc\n \"\"\";") == {:ok, [
         {:bin_heredoc, {{1, 1}, {3, 5}, nil}, 1, [<<"heredoc\n">>]},
-        {:";", {3, 5, 0}}
+        {:";", {{3, 5}, {3, 6}, 0}}
       ], ""}
     end
 
@@ -2690,6 +2694,7 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("x ++ y")
       assert match?([
         {:identifier, {{1, 1}, {1, 2}, _}, :x},
+        # TODO: range is invalid
         {:concat_op, {{1, 3}, {1, 5}, nil}, :"++"},
         {:identifier, {{1, 6}, {1, 7}, _}, :y}
       ], tokens)
@@ -2722,6 +2727,7 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo +2")
       assert match?([
         {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
+        # TODO: no range on dual_op
         {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
         {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
@@ -2731,8 +2737,8 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo +\n2")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:dual_op, {1, 5, nil}, :+},
-        {:eol, {{1, 6}, {2, 1}, 1}},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:eol, {1, 6, 1}},
         {:int, {{2, 1}, {2, 2}, 2}, ~c"2"}
       ], tokens)
     end
@@ -2741,7 +2747,7 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo - 2")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:dual_op, {1, 5, nil}, :-},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
         {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
       ], tokens)
     end
@@ -2761,7 +2767,7 @@ defmodule ToxicTest do
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
         {:identifier, {{1, 5}, {1, 6}, nil}, :+},
-        {:mult_op, {1, 6, nil}, :/},
+        {:mult_op, {{1, 6}, {1, 7}, nil}, :/},
         {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
       ], tokens)
     end
@@ -2797,14 +2803,14 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo *2")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:mult_op, {1, 5, nil}, :*},
+        {:mult_op, {{1, 5}, {1, 6}, nil}, :*},
         {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("foo /2")
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-        {:mult_op, {1, 5, nil}, :/},
+        {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
         {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
     end
@@ -2827,18 +2833,18 @@ defmodule ToxicTest do
 
       # Same for brackets
       assert tokenize("[1\n]") == {:ok, [
-        {:"[", {1, 1, nil}},
-        {:int, {1, 2, 1}, ~c"1"},
+        {:"[", {{1, 1}, {1, 2}, nil}},
+        {:int, {{1, 2}, {1, 3}, 1}, ~c"1"},
         {:eol, {1, 3, 1}},
-        {:"]", {2, 1, 1}}
+        {:"]", {{2, 1}, {2, 2}, 1}}
       ], ""}
 
       # And braces
       assert tokenize("{:ok\n}") == {:ok, [
-        {:"{", {1, 1, nil}},
-        {:atom, {1, 2, ~c"ok"}, :ok},
+        {:"{", {{1, 1}, {1, 2}, nil}},
+        {:atom, {{1, 2}, {1, 5}, ~c"ok"}, :ok},
         {:eol, {1, 5, 1}},
-        {:"}", {2, 1, 1}}
+        {:"}", {{2, 1}, {2, 2}, 1}}
       ], ""}
     end
 
@@ -2848,7 +2854,7 @@ defmodule ToxicTest do
         {:at_op, {{1, 1}, {1, 2}, nil}, :@},
         {:identifier, {{1, 2}, {1, 6}, ~c"spec"}, :spec},
         {:paren_identifier, {{1, 7}, {1, 10}, ~c"foo"}, :foo},
-        {:"(", {1, 10, nil}},
+        {:"(", {{1, 10}, {1, 11}, nil}},
         {:identifier, {{1, 11}, {1, 15}, ~c"atom"}, :atom},
         {:")", {{1, 15}, {1, 16}, nil}}
       ], ""}
@@ -2856,11 +2862,11 @@ defmodule ToxicTest do
       # Closing paren should not have count even if there's EOL earlier
       assert tokenize("foo\nbar(baz)") == {:ok, [
         {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-        {:eol, {{1, 4}, {2, 1}, 1}},
-        {:paren_identifier, {2, 1, ~c"bar"}, :bar},
-        {:"(", {2, 4, nil}},
-        {:identifier, {2, 5, ~c"baz"}, :baz},
-        {:")", {2, 8, nil}}
+        {:eol, {1, 4, 1}},
+        {:paren_identifier, {{2, 1}, {2, 4}, ~c"bar"}, :bar},
+        {:"(", {{2, 4}, {2, 5}, nil}},
+        {:identifier, {{2, 5}, {2, 8}, ~c"baz"}, :baz},
+        {:")", {{2, 8}, {2, 9}, nil}}
       ], ""}
     end
 
@@ -2896,7 +2902,7 @@ defmodule ToxicTest do
       code = ~S["f#{oo}"]
       {:ok, tokens, ""} = tokenize(code)
       assert match?([
-        {:bin_string, {{1, 1}, {1, 8}, nil}, [
+        {:bin_string, {{1, 1}, {1, 9}, nil}, [
           <<"f">>,
           {{1, 3, nil}, {1, 7, nil}, [{:identifier, {{1, 5}, {1, 7}, _}, :oo}]}
         ]}
@@ -2908,7 +2914,7 @@ defmodule ToxicTest do
       # Expected result: bin_string with literal "f#{oo}" (escaped interpolation)
       code = ~S["f\#{oo}"]
       assert tokenize(code) == {:ok, [
-        {:bin_string, {{1, 1}, {1, 9}, nil}, [<<"f\#{oo}">>]}
+        {:bin_string, {{1, 1}, {1, 10}, nil}, [<<"f\#{oo}">>]}
       ], ""}
     end
 
@@ -2923,17 +2929,18 @@ defmodule ToxicTest do
 
       {:ok, tokens, ""} = tokenize("&||/2")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
         {:identifier, {{1, 2}, {1, 4}, _}, :"||"},
-        {:mult_op, {1, 4, nil}, :/},
+        {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
       ], tokens)
 
       {:ok, tokens, ""} = tokenize("&or/2")
       assert match?([
-        {:capture_op, {1, 1, nil}, :"&"},
+        {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
+        # TODO: no range on or
         {:identifier, {{1, 2}, {1, 4}, _}, :or},
-        {:mult_op, {1, 4, nil}, :/},
+        {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
       ], tokens)
 
@@ -3023,7 +3030,8 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("~r/foo/ == bar")
       assert match?([
         {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"/">>},
-        {:comp_op, {1, 9, nil}, :"=="},
+        # TODO: range is invalid
+        {:comp_op, {{1, 9}, {1, 11}, nil}, :"=="},
         {:identifier, {{1, 12}, {1, 15}, _}, :bar}
       ], tokens)
 
