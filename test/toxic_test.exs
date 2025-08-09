@@ -445,7 +445,6 @@ defmodule ToxicTest do
     test "capture_op /" do
       assert tokenize("&//") == {:ok, [{:capture_op, {{1, 1}, {1, 2}, nil}, :&}, {:ternary_op, {{1, 2}, {1, 4}, nil}, :"//"}], ""}
       assert tokenize("& //") == {:ok, [{:capture_op, {{1, 1}, {1, 2}, nil}, :&}, {:ternary_op, {{1, 3}, {1, 5}, nil}, :"//"}], ""}
-      # TODO: invalid range
       assert tokenize("&/ /") == {:ok, [{:capture_op, {{1, 1}, {1, 2}, nil}, :&}, {:identifier, {{1, 2}, {1, 3}, nil}, :/}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}], ""}
       assert tokenize("&/+") == {:ok, [{:identifier, {{1, 1}, {1, 2}, nil}, :&}, {:mult_op, {{1, 2}, {1, 3}, nil}, :/}, {:dual_op, {{1, 3}, {1, 4}, nil}, :+}], ""}
       assert tokenize("& /+") == {:ok, [{:identifier, {{1, 1}, {1, 2}, nil}, :&}, {:mult_op, {{1, 3}, {1, 4}, nil}, :/}, {:dual_op, {{1, 4}, {1, 5}, nil}, :+}], ""}
@@ -456,7 +455,6 @@ defmodule ToxicTest do
       # # dot
       # assert tokenize(":.") == {:ok, [{:atom, {1, 1, nil}, :.}], ""}
 
-    # TODO: invalid range
     test "unary operators followed by /" do
       # unary_op3
       assert tokenize("~~~  /") == {:ok, [{:identifier, {{1, 1}, {1, 4}, nil}, :"~~~"}, {:mult_op, {{1, 6}, {1, 7}, nil}, :/}], ""}
@@ -472,7 +470,6 @@ defmodule ToxicTest do
       assert tokenize("-  /") == {:ok, [{:identifier, {{1, 1}, {1, 2}, nil}, :-}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}], ""}
     end
 
-    # TODO: invalid range
     test "operators followed by /" do
       # comp_op3
       assert tokenize("===  /") == {:ok, [{:identifier, {{1, 1}, {1, 4}, nil}, :===}, {:mult_op, {{1, 6}, {1, 7}, nil}, :/}], ""}
@@ -1198,7 +1195,7 @@ defmodule ToxicTest do
 
     test "LF" do
       # TODO: range is wrong
-      assert tokenize("?\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\n"}, ?\n}], ""}
+      assert tokenize("?\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}], ""}
     end
 
     test "CR" do
@@ -1229,12 +1226,12 @@ defmodule ToxicTest do
 
     test "escape LF" do
       # TODO: range is invalid
-      assert tokenize("?\\\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\n"}, ?\n}], ""}
+      assert tokenize("?\\\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}], ""}
     end
 
     test "escape CR LF" do
       # TODO: range is invalid?
-      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
+      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
     end
   end
 
@@ -1737,7 +1734,6 @@ defmodule ToxicTest do
     end
 
     test "dot quote newline" do
-      # TODO: range is invalid
       assert tokenize(".\"foo\nbar\" 1") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {2, 5}, 34}, :"foo\nbar"}, {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}], ""}
     end
 
@@ -2305,7 +2301,6 @@ defmodule ToxicTest do
 
     test "fn" do
       assert tokenize("fn ->\n:ok\nend") == {:ok, [
-        # TODO: no range on fn
         {:fn, {{1, 1}, {1, 3}, nil}},
               {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
               {:eol, {1, 6, 1}},
@@ -2373,7 +2368,6 @@ defmodule ToxicTest do
     test "arithmetic" do
       assert tokenize("1 + 2 + 3") == {:ok, [
         {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-        # TODO: range is invalid
         {:dual_op, {{1, 3}, {1, 4}, nil}, :+},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
         {:dual_op, {{1, 7}, {1, 8}, nil}, :+},
@@ -2690,7 +2684,6 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("x ++ y")
       assert match?([
         {:identifier, {{1, 1}, {1, 2}, _}, :x},
-        # TODO: range is invalid
         {:concat_op, {{1, 3}, {1, 5}, nil}, :"++"},
         {:identifier, {{1, 6}, {1, 7}, _}, :y}
       ], tokens)
@@ -2723,7 +2716,6 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("foo +2")
       assert match?([
         {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-        # TODO: no range on dual_op
         {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
         {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
       ], tokens)
@@ -2934,7 +2926,6 @@ defmodule ToxicTest do
       {:ok, tokens, ""} = tokenize("&or/2")
       assert match?([
         {:capture_op, {{1, 1}, {1, 2}, nil}, :"&"},
-        # TODO: no range on or
         {:identifier, {{1, 2}, {1, 4}, _}, :or},
         {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
         {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
