@@ -1789,10 +1789,8 @@ tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
             add_token_with_eol({in_op, Meta, 'not in'}, T);
 
           {_, _} ->
-            Meta = case Kind of
-              unary_op -> make_meta(Line, Column, Line, Column + Length, nil, Scope);
-              _ -> make_meta_len(Line, Column, Length, nil, Scope)
-            end,
+            PrevEol = previous_was_eol(Tokens),
+            Meta = make_meta_len(Line, Column, Length, PrevEol, Scope),
             add_token_with_eol({Kind, Meta, Atom}, Tokens)
         end
     end,
