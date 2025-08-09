@@ -706,10 +706,10 @@ tokenize("\\\r\n" ++ Rest, Line, _Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, Tokens);
 
 tokenize("\n" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens));
+  tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens, Scope));
 
 tokenize("\r\n" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens));
+  tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens, Scope));
 
 % Others
 
@@ -1085,14 +1085,14 @@ handle_space_sensitive_tokens(String, Line, Column, Scope, Tokens) ->
 
 %% Helpers
 
-eol(_Line, _Column, [{',', {Line, Column, Count}} | Tokens]) ->
-  [{',', {Line, Column, Count + 1}} | Tokens];
-eol(_Line, _Column, [{';', {Line, Column, Count}} | Tokens]) ->
-  [{';', {Line, Column, Count + 1}} | Tokens];
-eol(_Line, _Column, [{eol, {Line, Column, Count}} | Tokens]) ->
-  [{eol, {Line, Column, Count + 1}} | Tokens];
-eol(Line, Column, Tokens) ->
-  [{eol, {Line, Column, 1}} | Tokens].
+eol(_Line, _Column, [{Kind, {Line, Column, Count}} | Tokens], _Scope) 
+  when Kind =:= ','; Kind =:= ';'; Kind =:= eol, is_integer(Line) ->
+  [{Kind, {Line, Column, Count + 1}} | Tokens];
+eol(_Line, _Column, [{Kind, {{Line, Column}, {_EndLine, _EndColumn}, Count}} | Tokens], _Scope)
+  when Kind =:= ','; Kind =:= ';'; Kind =:= eol ->
+  [{Kind, {{Line, Column}, {Line + Count + 1, 1}, Count + 1}} | Tokens];
+eol(Line, Column, Tokens, Scope) ->
+  [{eol, make_meta(Line, Column, Line + 1, 1, 1, Scope)} | Tokens].
 
 is_unnecessary_quote([Part], Scope) when is_list(Part) ->
   case (Scope#toxic_tokenizer.identifier_tokenizer):tokenize(Part) of
@@ -1375,7 +1375,8 @@ reverse_number([], Number, Original) ->
 
 %% Comments
 
-reset_eol([{eol, {Line, Column, _}} | Rest]) -> [{eol, {Line, Column, 0}} | Rest];
+reset_eol([{eol, {Line, Column, _}} | Rest]) when is_integer(Line) -> [{eol, {Line, Column, 0}} | Rest];
+reset_eol([{eol, {{Line, Column}, {EndLine, EndColumn}, _}} | Rest]) -> [{eol, {{Line, Column}, {EndLine, EndColumn}, 0}} | Rest];
 reset_eol(Rest) -> Rest.
 
 tokenize_comment("\r\n" ++ _ = Rest, Acc) ->

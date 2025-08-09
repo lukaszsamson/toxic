@@ -407,7 +407,7 @@ defmodule ToxicTest do
 
     test ">> after eol" do
       # TODO: eol with only position???
-      assert tokenize("<<\n>>") == {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:eol, {1, 3, 1}}, {:">>", {{2, 1}, {2, 3}, 1}}], ""}
+      assert tokenize("<<\n>>") == {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:eol, {{1, 3}, {2, 1}, 1}}, {:">>", {{2, 1}, {2, 3}, 1}}], ""}
     end
 
     # TODO: this is a syntax error
@@ -420,7 +420,7 @@ defmodule ToxicTest do
     end
 
     test "] after eol" do
-      assert tokenize("[\n]") == {:ok, [{:"[", {{1, 1}, {1, 2}, nil}}, {:eol, {1, 2, 1}}, {:"]", {{2, 1}, {2, 2}, 1}}], ""}
+      assert tokenize("[\n]") == {:ok, [{:"[", {{1, 1}, {1, 2}, nil}}, {:eol, {{1, 2}, {2, 1}, 1}}, {:"]", {{2, 1}, {2, 2}, 1}}], ""}
     end
 
     test "{}" do
@@ -428,7 +428,7 @@ defmodule ToxicTest do
     end
 
     test "} after eol" do
-      assert tokenize("{\n}") == {:ok, [{:"{", {{1, 1}, {1, 2}, nil}}, {:eol, {1, 2, 1}}, {:"}", {{2, 1}, {2, 2}, 1}}], ""}
+      assert tokenize("{\n}") == {:ok, [{:"{", {{1, 1}, {1, 2}, nil}}, {:eol, {{1, 2}, {2, 1}, 1}}, {:"}", {{2, 1}, {2, 2}, 1}}], ""}
     end
 
     test "()" do
@@ -436,7 +436,7 @@ defmodule ToxicTest do
     end
 
     test ") after eol" do
-      assert tokenize("(\n)") == {:ok, [{:"(", {{1, 1}, {1, 2}, nil}}, {:eol, {1, 2, 1}}, {:")", {{2, 1}, {2, 2}, 1}}], ""}
+      assert tokenize("(\n)") == {:ok, [{:"(", {{1, 1}, {1, 2}, nil}}, {:eol, {{1, 2}, {2, 1}, 1}}, {:")", {{2, 1}, {2, 2}, 1}}], ""}
     end
 
     test "single-token operators" do
@@ -558,14 +558,14 @@ defmodule ToxicTest do
     test "unary operators at start of line after newline" do
       # Unary minus after newline should have nil EOL meta
       assert tokenize("\n-1") == {:ok, [
-        {:eol, {1, 1, 1}},
+        {:eol, {{1, 1}, {2, 1}, 1}},
         {:dual_op, {{2, 1}, {2, 2}, nil}, :-},
         {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
       ], ""}
 
       # Unary plus after newline should have nil EOL meta
       assert tokenize("\n+1") == {:ok, [
-        {:eol, {1, 1, 1}},
+        {:eol, {{1, 1}, {2, 1}, 1}},
         {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
         {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
       ], ""}
@@ -574,14 +574,14 @@ defmodule ToxicTest do
     test "unary operators with indentation after newline" do
       # Indented unary minus
       assert tokenize("\n  -1") == {:ok, [
-        {:eol, {1, 1, 1}},
+        {:eol, {{1, 1}, {2, 1}, 1}},
         {:dual_op, {{2, 3}, {2, 4}, nil}, :-},
         {:int, {{2, 4}, {2, 5}, 1}, ~c"1"}
       ], ""}
 
       # Indented unary plus
       assert tokenize("\n\t+1") == {:ok, [
-        {:eol, {1, 1, 1}},
+        {:eol, {{1, 1}, {2, 1}, 1}},
         {:dual_op, {{2, 2}, {2, 3}, nil}, :+},
         {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}
       ], ""}
@@ -589,7 +589,7 @@ defmodule ToxicTest do
 
     test "at_op after newline has nil EOL meta" do
       assert tokenize("\n@x") == {:ok, [
-        {:eol, {1, 1, 1}},
+        {:eol, {{1, 1}, {2, 1}, 1}},
         {:at_op, {{2, 1}, {2, 2}, nil}, :@},
         {:identifier, {{2, 2}, {2, 3}, ~c"x"}, :x}
       ], ""}
@@ -657,23 +657,33 @@ defmodule ToxicTest do
     end
 
     test "newlines" do
-      assert tokenize("\n") == {:ok, [{:eol, {1, 1, 1}}], ""}
+      assert tokenize("\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
     end
 
     test "consecutive newlines" do
-      assert tokenize("\n\n") == {:ok, [{:eol, {1, 1, 2}}], ""}
+      assert tokenize("\n\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
+    end
+
+    test "newline after semicolon" do
+      # TODO: should we include consumed newline?
+      assert tokenize(";\n") == {:ok, [";": {{1, 1}, {1, 2}, 1}], ""}
+    end
+
+    test "newline after comma" do
+      # TODO: should we include consumed newline?
+      assert tokenize(",\n") == {:ok, [",": {{1, 1}, {1, 2}, 1}], ""}
     end
 
     test "carriage return + newline" do
-      assert tokenize("\r\n") == {:ok, [{:eol, {1, 1, 1}}], ""}
+      assert tokenize("\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
     end
 
     test "consecutive carriage return + newline" do
-      assert tokenize("\r\n\r\n") == {:ok, [{:eol, {1, 1, 2}}], ""}
+      assert tokenize("\r\n\r\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
     end
 
     test "newlines with horizontal spaces" do
-      assert tokenize("\n  0") == {:ok, [{:eol, {1, 1, 1}}, {:int, {{2, 3}, {2, 4}, 0}, ~c"0"}], ""}
+      assert tokenize("\n  0") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 3}, {2, 4}, 0}, ~c"0"}], ""}
     end
 
     test "escaped newlines are handled" do
@@ -691,7 +701,7 @@ defmodule ToxicTest do
     end
 
     test "newline after escaped newline" do
-      assert tokenize("\\\n\n") == {:ok, [{:eol, {2, 1, 1}}], ""}
+      assert tokenize("\\\n\n") == {:ok, [{:eol, {{2, 1}, {3, 1}, 1}}], ""}
     end
 
     test "horizontal space after escaped newline" do
@@ -699,19 +709,19 @@ defmodule ToxicTest do
     end
 
     test "tokens before newlines" do
-      assert tokenize("0x123\n") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {1, 6, 1}}], ""}
+      assert tokenize("0x123\n") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {2, 1}, 1}}], ""}
     end
 
     test "tokens after newlines" do
-      assert tokenize("\n0x123") == {:ok, [{:eol, {1, 1, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\n0x123") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens before consecutive newlines" do
-      assert tokenize("0x123\n\n") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {1, 6, 2}}], ""}
+      assert tokenize("0x123\n\n") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {3, 1}, 2}}], ""}
     end
 
     test "tokens after consecutive newlines" do
-      assert tokenize("\n\n0x123") == {:ok, [{:eol, {1, 1, 2}}, {:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\n\n0x123") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}, {:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}], ""}
     end
   end
 
@@ -766,7 +776,7 @@ defmodule ToxicTest do
         :ok,
         [
           {:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]},
-          {:eol, {1, 6, 1}},
+          {:eol, {{1, 6}, {2, 1}, 1}},
           {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}
         ],
         ""
@@ -990,7 +1000,7 @@ defmodule ToxicTest do
     end
 
     test "tokens after heredoc next line" do
-      assert tokenize("\"\"\"\nfoo\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}, {:eol, {3, 4, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"\"\"\nfoo\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}, {:eol, {{3, 4}, {4, 1}, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens after heredoc same line" do
@@ -998,7 +1008,7 @@ defmodule ToxicTest do
     end
 
     test "tokens after multiline heredoc" do
-      assert tokenize("\"\"\"\nfoo\nbar\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\nbar\n"]}, {:eol, {4, 4, 1}}, {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"\"\"\nfoo\nbar\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\nbar\n"]}, {:eol, {{4, 4}, {5, 1}, 1}}, {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens after heredoc with escaped LF" do
@@ -1006,7 +1016,7 @@ defmodule ToxicTest do
         :ok,
         [
           {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\n"]},
-          {:eol, {4, 4, 1}},
+          {:eol, {{4, 4}, {5, 1}, 1}},
           {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
         ],
         ""
@@ -1018,7 +1028,7 @@ defmodule ToxicTest do
         :ok,
         [
           {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\r\n"]},
-          {:eol, {4, 4, 1}},
+          {:eol, {{4, 4}, {5, 1}, 1}},
           {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
         ],
         ""
@@ -1026,15 +1036,15 @@ defmodule ToxicTest do
     end
 
     test "tokens after heredoc with LF escape" do
-      assert tokenize("\"\"\"\nfoo\\nbar\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\nbar\n"]}, {:eol, {3, 4, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"\"\"\nfoo\\nbar\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\nbar\n"]}, {:eol, {{3, 4}, {4, 1}, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens after heredoc with CRLF escape" do
-      assert tokenize("\"\"\"\r\nfoo\\r\\nbar\r\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\nbar\r\n"]}, {:eol, {3, 4, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"\"\"\r\nfoo\\r\\nbar\r\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\nbar\r\n"]}, {:eol, {{3, 4}, {4, 1}, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens after escaped final newline" do
-      assert tokenize("\"\"\"\nfoo\\\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]}, {:eol, {3, 4, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"\"\"\nfoo\\\n\"\"\"\n0x123") == {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]}, {:eol, {{3, 4}, {4, 1}, 1}}, {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "with interpolation in the middle of the line" do
@@ -1249,7 +1259,7 @@ defmodule ToxicTest do
     end
 
     test "raw CR LF" do
-      assert tokenize("?\r\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {1, 3, 1}}], ""}
+      assert tokenize("?\r\n") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {{1, 3}, {2, 1}, 1}}], ""}
     end
 
     test "escape" do
@@ -1285,12 +1295,12 @@ defmodule ToxicTest do
 
     test "escaped CR LF" do
       # TODO: elixir tokenizer bug - should not consume the newline, only advance line
-      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
+      assert tokenize("?\\\r\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}}], ""}
     end
 
     test "token after escaped CR LF" do
       # TODO: elixir tokenizer bug - should not consume the newline, only advance line
-      assert tokenize("?\\\r\n1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {1, 4, 1}}], ""}
+      assert tokenize("?\\\r\n1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
     end
   end
 
@@ -1300,7 +1310,7 @@ defmodule ToxicTest do
     end
 
     test "comment after newline" do
-      assert tokenize("\n#foo") == {:ok, [{:eol, {1, 1, 0}}], ""}
+      assert tokenize("\n#foo") == {:ok, [{:eol, {{1, 1}, {2, 1}, 0}}], ""}
     end
 
     test "comment after comma" do
@@ -1316,11 +1326,11 @@ defmodule ToxicTest do
     end
 
     test "comment with LF" do
-      assert tokenize("#foo\n") == {:ok, [{:eol, {1, 1, 1}}], ""}
+      assert tokenize("#foo\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
     end
 
     test "comment with CRLF" do
-      assert tokenize("#foo\r\n") == {:ok, [{:eol, {1, 1, 1}}], ""}
+      assert tokenize("#foo\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
     end
 
     test "code before comment" do
@@ -1329,7 +1339,7 @@ defmodule ToxicTest do
 
     test "code after comment" do
       assert tokenize("# foo\n0x123") ==
-               {:ok, [{:eol, {1, 1, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
+               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
     end
 
     test "multiline comment" do
@@ -2329,16 +2339,16 @@ defmodule ToxicTest do
       assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
       {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
       {:do, {{1, 15}, {1, 17}, nil}},
-      {:eol, {1, 17, 1}},
+      {:eol, {{1, 17}, {2, 1}, 1}},
       {:end, {{2, 1}, {2, 4}, nil}}], ""}
     end
 
     test "try" do
       assert tokenize("try do\n:ok\nend") == {:ok, [{:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
       {:do, {{1, 5}, {1, 7}, nil}},
-      {:eol, {1, 7, 1}},
+      {:eol, {{1, 7}, {2, 1}, 1}},
       {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-      {:eol, {2, 4, 1}},
+      {:eol, {{2, 4}, {3, 1}, 1}},
       {:end, {{3, 1}, {3, 4}, nil}}], ""}
     end
 
@@ -2346,21 +2356,21 @@ defmodule ToxicTest do
       assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
         {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
               {:do, {{1, 5}, {1, 7}, nil}},
-              {:eol, {1, 7, 1}},
+              {:eol, {{1, 7}, {2, 1}, 1}},
               {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-              {:eol, {2, 4, 1}},
+              {:eol, {{2, 4}, {3, 1}, 1}},
               {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
-              {:eol, {3, 7, 1}},
+              {:eol, {{3, 7}, {4, 1}, 1}},
               {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
-              {:eol, {4, 7, 1}},
+              {:eol, {{4, 7}, {5, 1}, 1}},
               {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
-              {:eol, {5, 6, 1}},
+              {:eol, {{5, 6}, {6, 1}, 1}},
               {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
-              {:eol, {6, 4, 1}},
+              {:eol, {{6, 4}, {7, 1}, 1}},
               {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
-              {:eol, {7, 5, 1}},
+              {:eol, {{7, 5}, {8, 1}, 1}},
               {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
-        {:eol, {8, 4, 1}},
+        {:eol, {{8, 4}, {9, 1}, 1}},
         {:end, {{9, 1}, {9, 4}, nil}}], ""}
     end
 
@@ -2368,9 +2378,9 @@ defmodule ToxicTest do
       assert tokenize("fn ->\n:ok\nend") == {:ok, [
         {:fn, {{1, 1}, {1, 3}, nil}},
               {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
-              {:eol, {1, 6, 1}},
+              {:eol, {{1, 6}, {2, 1}, 1}},
               {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-              {:eol, {2, 4, 1}},
+              {:eol, {{2, 4}, {3, 1}, 1}},
               {:end, {{3, 1}, {3, 4}, nil}}], ""}
     end
 
@@ -2563,7 +2573,7 @@ defmodule ToxicTest do
       ], ""}
 
       assert tokenize("\n\n123") == {:ok, [
-        {:eol, {1, 1, 2}},
+        {:eol, {{1, 1}, {3, 1}, 2}},
         {:int, {{3, 1}, {3, 4}, 123}, ~c"123"}
       ], ""}
 
@@ -2592,7 +2602,7 @@ defmodule ToxicTest do
       ], ""}
 
       assert tokenize("\n\n12.3") == {:ok, [
-        {:eol, {1, 1, 2}},
+        {:eol, {{1, 1}, {3, 1}, 2}},
         {:flt, {{3, 1}, {3, 5}, 12.3}, ~c"12.3"}
       ], ""}
 
@@ -2789,7 +2799,7 @@ defmodule ToxicTest do
       assert match?([
         {:identifier, {{1, 1}, {1, 4}, _}, :foo},
         {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-        {:eol, {1, 6, 1}},
+        {:eol, {{1, 6}, {2, 1}, 1}},
         {:int, {{2, 1}, {2, 2}, 2}, ~c"2"}
       ], tokens)
     end
@@ -2871,7 +2881,7 @@ defmodule ToxicTest do
       assert tokenize("foo(\n)") == {:ok, [
         {:paren_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
         {:"(", {{1, 4}, {1, 5}, nil}},
-        {:eol, {1, 5, 1}},
+        {:eol, {{1, 5}, {2, 1}, 1}},
         {:")", {{2, 1}, {2, 2}, 1}}
       ], ""}
 
@@ -2886,7 +2896,7 @@ defmodule ToxicTest do
       assert tokenize("[1\n]") == {:ok, [
         {:"[", {{1, 1}, {1, 2}, nil}},
         {:int, {{1, 2}, {1, 3}, 1}, ~c"1"},
-        {:eol, {1, 3, 1}},
+        {:eol, {{1, 3}, {2, 1}, 1}},
         {:"]", {{2, 1}, {2, 2}, 1}}
       ], ""}
 
@@ -2894,7 +2904,7 @@ defmodule ToxicTest do
       assert tokenize("{:ok\n}") == {:ok, [
         {:"{", {{1, 1}, {1, 2}, nil}},
         {:atom, {{1, 2}, {1, 5}, ~c"ok"}, :ok},
-        {:eol, {1, 5, 1}},
+        {:eol, {{1, 5}, {2, 1}, 1}},
         {:"}", {{2, 1}, {2, 2}, 1}}
       ], ""}
     end
@@ -2913,7 +2923,7 @@ defmodule ToxicTest do
       # Closing paren should not have count even if there's EOL earlier
       assert tokenize("foo\nbar(baz)") == {:ok, [
         {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-        {:eol, {1, 4, 1}},
+        {:eol, {{1, 4}, {2, 1}, 1}},
         {:paren_identifier, {{2, 1}, {2, 4}, ~c"bar"}, :bar},
         {:"(", {{2, 4}, {2, 5}, nil}},
         {:identifier, {{2, 5}, {2, 8}, ~c"baz"}, :baz},
