@@ -1729,6 +1729,42 @@ defmodule ToxicTest do
       assert tokenize(". ") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
     end
 
+    test "dot followed by identifier" do
+      assert tokenize(".id") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id}], ""}
+    end
+
+    test "dot followed by paren identifier" do
+      assert tokenize(".id()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:paren_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
+      {:"(", {{1, 4}, {1, 5}, nil}},
+      {:")", {{1, 5}, {1, 6}, nil}}], ""}
+    end
+
+    test "dot followed by bracket identifier" do
+      assert tokenize(".id[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:bracket_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
+      {:"[", {{1, 4}, {1, 5}, nil}},
+      {:"]", {{1, 5}, {1, 6}, nil}}], ""}
+    end
+
+    test "dot followed by horizontal space" do
+      assert tokenize(". \tid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 4}, {1, 6}, ~c"id"}, :id}], ""}
+    end
+
+    test "dot followed by newline" do
+      assert tokenize(".\nid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}], ""}
+      assert tokenize(".\r\nid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}], ""}
+    end
+
+    test "dot followed by escaped newline" do
+      assert tokenize(".\\\nid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}], ""}
+      assert tokenize(".\\\r\nid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}], ""}
+    end
+
+    test "dot followed by comment" do
+      assert tokenize(".#comment") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
+      assert tokenize(".#comment\n") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
+      assert tokenize(".#comment\nid") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}], ""}
+    end
+
     test "dot three-token operator" do
       # unary_op3
       assert tokenize(".~~~") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~~~"}, :"~~~"}], ""}
@@ -1826,6 +1862,18 @@ defmodule ToxicTest do
 
     test "dot quote newline escape" do
       assert tokenize(".\"foo\\nbar\" 1") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 12}, 34}, :"foo\nbar"}, {:int, {{1, 13}, {1, 14}, 1}, ~c"1"}], ""}
+    end
+
+    test "dot quote paren" do
+      assert tokenize(".\"foo\"()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:paren_identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      {:"(", {{1, 7}, {1, 8}, nil}},
+      {:")", {{1, 8}, {1, 9}, nil}}], ""}
+    end
+
+    test "dot quote bracket" do
+      assert tokenize(".\"foo\"[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:bracket_identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      {:"[", {{1, 7}, {1, 8}, nil}},
+      {:"]", {{1, 8}, {1, 9}, nil}}], ""}
     end
   end
 
