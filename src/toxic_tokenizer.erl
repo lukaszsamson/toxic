@@ -230,6 +230,8 @@ is_linear_type(sigil_end) -> true;
 is_linear_type(sigil_modifiers) -> true;
 is_linear_type(kw_identifier_unsafe_start) -> true;
 is_linear_type(kw_identifier_unsafe_end) -> true;
+is_linear_type(quoted_identifier_start) -> true;
+is_linear_type(quoted_identifier_end) -> true;
 is_linear_type(atom_unsafe_start) -> true;
 is_linear_type(atom_unsafe_end) -> true;
 is_linear_type(atom_safe_start) -> true;
@@ -258,6 +260,10 @@ linear_to_legacy([{sigil_start, Meta, SigilAtom, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [], nil, pending_end} | Stack]);
 linear_to_legacy([{kw_identifier_unsafe_start, Meta, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{kw_identifier_unsafe, Meta, Delim, []} | Stack]);
+
+%% Quoted identifier (from handle_dot) wraps a single identifier token
+linear_to_legacy([{quoted_identifier_start, _Meta, _Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{quoted_identifier, []} | Stack]);
 
 %% Quoted atoms (linearized)
 linear_to_legacy([{atom_unsafe_start, Meta, Delim} | T], Out, Stack) ->
@@ -336,9 +342,19 @@ linear_to_legacy([{atom_safe_end, MetaEnd, _Delim1} | T], Out, [{atom_safe, Meta
   Tok = {atom_safe, CM, lists:reverse(PartsRev)},
   linear_to_legacy(T, [Tok | Out], Stack);
 
+%% Close quoted identifier and emit inner token directly
+linear_to_legacy([{quoted_identifier_end, _Meta, _Delim} | T], Out, [{quoted_identifier, [IdentTok]} | Stack]) ->
+  linear_to_legacy(T, [IdentTok | Out], Stack);
+linear_to_legacy([{quoted_identifier_end, _Meta, _Delim} | T], Out, [{quoted_identifier, Inner} | Stack]) ->
+  %% Fallback: if structure unexpected, drop wrapper and push inner as-is
+  linear_to_legacy(T, lists:reverse(Inner, Out), Stack);
+
 %% Pass-through for non-linear tokens
 linear_to_legacy([Tok | T], Out, Stack) ->
   case Stack of
+    [{quoted_identifier, Inner} | Rest] ->
+      %% Accumulate exactly one identifier-ish token inside
+      linear_to_legacy(T, Out, [{quoted_identifier, [Tok | Inner]} | Rest]);
     [{interpol, StartMeta, Inner} | Rest] ->
       linear_to_legacy(T, Out, [{interpol, StartMeta, [Tok | Inner]} | Rest]);
     _ -> linear_to_legacy(T, [Tok | Out], Stack)
@@ -971,7 +987,7 @@ linearize_part({StartMeta, EndMeta, Tokens}, Scope, Kind) when is_list(Tokens) -
     {begin_interpolation, StartMeta, map_kind(Kind)}
     | linearize_inner_tokens(Tokens, Scope)
   ] ++ [{end_interpolation, EndMeta, map_kind(Kind)}];
-linearize_part(Bin, Scope, _Kind) when is_binary(Bin); is_list(Bin) ->
+linearize_part(Bin, _Scope, _Kind) when is_binary(Bin); is_list(Bin) ->
   %% Convert literal to binary, compute a best-effort fragment meta by length. The tokenizer callers
   %% already pass precise metas for begin/end markers; consumers can rely on them for structure.
   %% Here we emit without a precise fragment meta if unavailable, using nil extra meta for now.
@@ -1287,20 +1303,40 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
           InterScope
       end,
 
-      case unescape_tokens([Part], Line, Column, NewScope) of
-        {ok, [UnescapedPart]} ->
-          case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
-            {ok, Atom} ->
-              Token = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
-              TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
-
+      case InterScope#toxic_tokenizer.linearize of
+        true ->
+          %% Linearized flow: consistent begin/end markers around quoted identifier
+          case unescape_tokens([Part], Line, Column, NewScope) of
+            {ok, [UnescapedPart]} ->
+              case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
+                {ok, Atom} ->
+              StartTok = {quoted_identifier_start, make_meta(Line, Column + 1, Line, Column + 2, nil, NewScope), H},
+                  IdentTok = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
+                  EndTok = {quoted_identifier_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
+                  TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
+                  Emitted = [StartTok, IdentTok, EndTok],
+                  NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, TokensSoFar, lists:reverse(Emitted)),
+                  tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+                {error, Reason} ->
+                  error(Reason, Original, NewScope, Tokens)
+              end;
             {error, Reason} ->
               error(Reason, Original, NewScope, Tokens)
           end;
-
-        {error, Reason} ->
-          error(Reason, Original, NewScope, Tokens)
+        false ->
+          case unescape_tokens([Part], Line, Column, NewScope) of
+            {ok, [UnescapedPart]} ->
+              case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
+                {ok, Atom} ->
+                  Token = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
+                  TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
+                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
+                {error, Reason} ->
+                  error(Reason, Original, NewScope, Tokens)
+              end;
+            {error, Reason} ->
+              error(Reason, Original, NewScope, Tokens)
+          end
       end;
 
     {_NewLine, _NewColumn, _Parts, Rest, NewScope} ->
