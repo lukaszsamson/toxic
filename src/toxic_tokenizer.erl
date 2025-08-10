@@ -182,7 +182,7 @@ make_meta_len(Line, Column, Len, Extra, Scope) when is_integer(Line), is_integer
 %% Map a token with range meta back to legacy meta
 ranges_token_to_legacy({Type, Meta}) ->
   {Type, legacy_meta(Meta)};
-ranges_token_to_legacy({Type, Meta, Value}) when Type =:= bin_string; Type =:= list_string; Type =:= atom_unsafe; Type =:= kw_identifier_unsafe ->
+ranges_token_to_legacy({Type, Meta, Value}) when Type =:= bin_string; Type =:= list_string; Type =:= atom_unsafe; Type =:= atom_safe; Type =:= kw_identifier_unsafe; Type =:= kw_identifier_safe ->
   {Type, legacy_meta(Meta), ranges_convert_parts(Value)};
 ranges_token_to_legacy({Type, Meta, Value}) ->
   {Type, legacy_meta(Meta), Value};
@@ -230,6 +230,10 @@ is_linear_type(sigil_end) -> true;
 is_linear_type(sigil_modifiers) -> true;
 is_linear_type(kw_identifier_unsafe_start) -> true;
 is_linear_type(kw_identifier_unsafe_end) -> true;
+is_linear_type(atom_unsafe_start) -> true;
+is_linear_type(atom_unsafe_end) -> true;
+is_linear_type(atom_safe_start) -> true;
+is_linear_type(atom_safe_end) -> true;
 is_linear_type(begin_interpolation) -> true;
 is_linear_type(end_interpolation) -> true;
 is_linear_type(string_fragment) -> true;
@@ -254,6 +258,12 @@ linear_to_legacy([{sigil_start, Meta, SigilAtom, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [], nil, pending_end} | Stack]);
 linear_to_legacy([{kw_identifier_unsafe_start, Meta, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{kw_identifier_unsafe, Meta, Delim, []} | Stack]);
+
+%% Quoted atoms (linearized)
+linear_to_legacy([{atom_unsafe_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{atom_unsafe, Meta, Delim, []} | Stack]);
+linear_to_legacy([{atom_safe_start, Meta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{atom_safe, Meta, Delim, []} | Stack]);
 
 linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim, Parts} | Stack]) ->
   linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts]} | Stack]);
@@ -316,6 +326,14 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
 linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, _Delim1} | T], Out, [{kw_identifier_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Tok = {kw_identifier_unsafe, CM, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{atom_unsafe_end, MetaEnd, _Delim1} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {atom_unsafe, CM, lists:reverse(PartsRev)},
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{atom_safe_end, MetaEnd, _Delim1} | T], Out, [{atom_safe, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  CM = combine_range_meta(MetaStart, MetaEnd),
+  Tok = {atom_safe, CM, lists:reverse(PartsRev)},
   linear_to_legacy(T, [Tok | Out], Stack);
 
 %% Pass-through for non-linear tokens
@@ -728,27 +746,49 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
           InterScope
       end,
 
-      case unescape_tokens(Parts, Line, Column, NewScope) of
-        {ok, [Part]} when is_binary(Part) ->
-          case unsafe_to_atom(Part, Line, Column, Scope) of
-            {ok, Atom} ->
-      Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-
+      case NewScope#toxic_tokenizer.linearize of
+        true ->
+          case unescape_tokens(Parts, Line, Column, NewScope) of
+            {ok, [Part]} when is_binary(Part) ->
+              case unsafe_to_atom(Part, Line, Column, Scope) of
+                {ok, Atom} ->
+                  Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
+                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+                {error, Reason} ->
+                  error(Reason, Rest, NewScope, Tokens)
+              end;
+            {ok, Unescaped} ->
+              StartType = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_start; false -> atom_unsafe_start end,
+              EndType   = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_end;   false -> atom_unsafe_end   end,
+              StartTok = {StartType, make_meta(Line, Column, Line, Column + 1, nil, NewScope), H},
+              Seq = linearize_parts(Unescaped, NewScope, atom),
+              EndTok = {EndType, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
+              Emitted = [StartTok] ++ Seq ++ [EndTok],
+              NewTokens2 = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+              tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens2);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end;
-
-        {ok, Unescaped} ->
-          Key = case Scope#toxic_tokenizer.existing_atoms_only of
-            true  -> atom_safe;
-            false -> atom_unsafe
-          end,
-          Token = {Key, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Unescaped},
-          tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-
-        {error, Reason} ->
-          error(Reason, Rest, NewScope, Tokens)
+        false ->
+          case unescape_tokens(Parts, Line, Column, NewScope) of
+            {ok, [Part]} when is_binary(Part) ->
+              case unsafe_to_atom(Part, Line, Column, Scope) of
+                {ok, Atom} ->
+                  Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
+                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+                {error, Reason} ->
+                  error(Reason, Rest, NewScope, Tokens)
+              end;
+            {ok, Unescaped} ->
+              Key = case Scope#toxic_tokenizer.existing_atoms_only of
+                true  -> atom_safe;
+                false -> atom_unsafe
+              end,
+              Token = {Key, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Unescaped},
+              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+            {error, Reason} ->
+              error(Reason, Rest, NewScope, Tokens)
+          end
       end;
 
     {error, Reason} ->
@@ -946,6 +986,7 @@ map_kind(charlist) -> charlist;
 map_kind(heredoc) -> heredoc;
 map_kind(sigil) -> sigil;
 map_kind(kw_identifier) -> kw_identifier;
+map_kind(atom) -> atom;
 map_kind(_) -> string.
 
 previous_was_dot([{'.', _} | _]) -> true;
@@ -1014,14 +1055,19 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
             $' -> {list_heredoc_start, make_meta(Line, Column, Line, Column + 3, nil, NewScope), "'''"};
             _  -> {bin_heredoc_start,  make_meta(Line, Column, Line, Column + 3, nil, NewScope), "\"\"\""}
           end,
-          Seq = linearize_parts(Parts, NewScope, heredoc),
-          EndTok = case H of
-            $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
-            _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
-          end,
-          Emitted = [StartTok] ++ Seq ++ [EndTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+          case unescape_tokens(Parts, Line, Column, NewScope) of
+            {ok, Unescaped} ->
+              Seq = linearize_parts(Unescaped, NewScope, heredoc),
+              EndTok = case H of
+                $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
+                _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
+              end,
+              Emitted = [StartTok] ++ Seq ++ [EndTok],
+              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+              tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+            {error, Reason} ->
+              error(Reason, Rest, NewScope, Tokens)
+          end;
         false ->
           case unescape_tokens(Parts, Line, Column, NewScope) of
             {ok, Unescaped} ->
@@ -1046,14 +1092,18 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
       case InterScope#toxic_tokenizer.linearize of
         true ->
           %% Linearized quoted keyword identifier
-          {ok, Unescaped} = unescape_tokens(Parts, Line, Column, InterScope),
-          StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H},
-          Seq = linearize_parts(Unescaped, InterScope, kw_identifier),
-          EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H},
-          ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, InterScope)},
-          Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          tokenize(Rest, NewLine, NewColumn + 1, InterScope, NewTokens);
+          case unescape_tokens(Parts, Line, Column, InterScope) of
+            {ok, Unescaped} ->
+              StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H},
+              Seq = linearize_parts(Unescaped, InterScope, kw_identifier),
+              EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H},
+              ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, InterScope)},
+              Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
+              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+              tokenize(Rest, NewLine, NewColumn + 1, InterScope, NewTokens);
+            {error, Reason} ->
+              error(Reason, Rest, InterScope, Tokens)
+          end;
         false ->
       NewScope = case is_unnecessary_quote(Parts, InterScope) of
         true ->
@@ -1101,18 +1151,22 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
     {NewLine, NewColumn, Parts, Rest, InterScope} ->
       case InterScope#toxic_tokenizer.linearize of
         true ->
-          %% Linearized normal string/charlist
-          {ok, Unescaped} = unescape_tokens(Parts, Line, Column, InterScope),
-          {StartTok, EndTok} = case H of
-            $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
-                  , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} };
-            _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
-                  , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} }
-          end,
-          Seq = linearize_parts(Unescaped, InterScope, (if H =:= $' -> charlist; true -> string end)),
-          Emitted = [StartTok] ++ Seq ++ [EndTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          tokenize(Rest, NewLine, NewColumn, InterScope, NewTokens);
+          %% Linearized normal string/charlist with proper unescape error handling
+          case unescape_tokens(Parts, Line, Column, InterScope) of
+            {ok, Unescaped} ->
+              {StartTok, EndTok} = case H of
+                $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
+                      , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} };
+                _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, InterScope), H}
+                      , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, InterScope), H} }
+              end,
+              Seq = linearize_parts(Unescaped, InterScope, (if H =:= $' -> charlist; true -> string end)),
+              Emitted = [StartTok] ++ Seq ++ [EndTok],
+              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+              tokenize(Rest, NewLine, NewColumn, InterScope, NewTokens);
+            {error, Reason} ->
+              error(Reason, Rest, InterScope, Tokens)
+          end;
         false ->
       NewScope =
         case H of
