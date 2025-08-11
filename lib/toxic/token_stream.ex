@@ -72,7 +72,7 @@ defmodule Toxic.TokenStream do
   @default_opts [
     unescape: true,
     max_batch: 256,
-    eol_mode: :embed,
+    eol_mode: :emit,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer]
   ]
@@ -369,13 +369,24 @@ defmodule Toxic.TokenStream do
   defp driver_opts(opts) do
     [
       unescape: Keyword.get(opts, :unescape, true),
+      linearize: Keyword.get(opts, :linearize, true),
       error_mode: Keyword.get(opts, :error_mode, :tolerant),
       error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
     ]
   end
 
   defp fetch_tokens_from_driver(driver, max_batch, opts) do
-    fetch_tokens_from_driver(driver, max_batch, [], 0, opts)
+    # Fetch a batch from the Erlang driver, then optionally collapse linear markers
+    {tokens, new_driver, eof} = fetch_tokens_from_driver(driver, max_batch, [], 0, opts)
+
+    tokens =
+      if Keyword.get(opts, :linearize, true) do
+        tokens
+      else
+        :toxic_tokenizer.collapse_linear_ranges(tokens)
+      end
+
+    {tokens, new_driver, eof}
   end
 
   defp fetch_tokens_from_driver(driver, max_batch, acc, count, _opts) when count >= max_batch do

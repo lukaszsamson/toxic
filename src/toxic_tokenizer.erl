@@ -2449,11 +2449,12 @@ prune_tokens([], _Opener) ->
 %% Forces produce_ranges=true and linearize=true for streaming compatibility
 %% @spec init_driver(String, Line, Column, Opts) -> {ok, Driver}
 init_driver(String, Line, Column, Opts) when is_list(String) ->
-  init_driver(list_to_binary(String), Line, Column, Opts);
+  init_driver(unicode:characters_to_binary(String), Line, Column, Opts);
 init_driver(String, Line, Column, Opts) when is_binary(String) ->
   % Force required options for streaming
   RequiredOpts = [
-    {produce_ranges, true}
+    {produce_ranges, true},
+    {linearize, true}
   ],
   % Merge with user opts, required opts take precedence
   MergedOpts = merge_opts(Opts, RequiredOpts),
@@ -2472,7 +2473,7 @@ init_driver(String, Line, Column, Opts) when is_binary(String) ->
     line = Line,
     column = Column,
     scope = Scope,
-    mode = normal,
+    mode = [normal],
     error_mode = ErrorMode,
     error_sync = ErrorSync,
     lookahead_cache = [],
@@ -2502,7 +2503,7 @@ init_driver(FunctionSource, Line, Column, Opts) when is_function(FunctionSource)
     line = Line,
     column = Column,
     scope = Scope,
-    mode = normal,
+    mode = [normal],
     error_mode = ErrorMode,
     error_sync = ErrorSync,
     lookahead_cache = [],
@@ -2567,9 +2568,14 @@ scan_token(#toxic_driver{line = Line, column = Column, scope = Scope} = Driver) 
 
 %% @doc Scan single token from charlist using refactored tokenize logic
 %% This is where we use the modified tokenize_single clauses
-scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, scope = Scope, mode = Mode} = Driver) ->
-  case Mode of
+scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, scope = Scope, mode = ModeStack} = Driver) ->
+  ModeHead = case ModeStack of [H | _] -> H; [] -> normal end,
+  ModeTail = case ModeStack of [_ | T] -> T; [] -> [] end,
+  case ModeHead of
     normal ->
+      case maybe_end_interpolation(String, Line, Column, Scope, Driver, ModeTail) of
+        {ok, Tok, Drv1} -> {ok, Tok, Drv1};
+        continue ->
       % Normal tokenization mode
       case tokenize_single(String, Line, Column, Scope) of
         {token, Token, Rest, NewLine, NewColumn, NewScope} ->
@@ -2627,13 +2633,14 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
             line = NewLine,
             column = NewColumn,
             scope = NewScope,
-            mode = {interp, Kind, Quote, Quote, normal}, % TODO: proper mode stack
+                mode = [{interp, Kind, Quote} | ModeStack],
             eof = (Rest =:= [])
           },
-          {ok, Token, UpdatedDriver}
+               {ok, Token, UpdatedDriver}
+          end
       end;
     
-    {interp, Kind, Quote, Delim, _State} ->
+    {interp, Kind, Quote} ->
       % Interpolation mode - use streaming interpolation API
       case toxic_interpolation:extract_stream_event(Line, Column, Scope, true, String, Quote) of
         {fragment, Meta, Binary, Rest, NewLine, NewColumn, NewScope} ->
@@ -2656,7 +2663,7 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
             line = NewLine,
             column = NewColumn,
             scope = NewScope,
-            mode = normal, % TODO: should be a mode stack
+            mode = [normal, {interp, Kind, Quote} | ModeTail],
             eof = (Rest =:= [])
           },
           {ok, Token, UpdatedDriver};
@@ -2676,7 +2683,7 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
             line = NewLine,
             column = NewColumn,
             scope = NewScope,
-            mode = normal,
+            mode = ModeTail,
             eof = (Rest =:= [])
           },
           {ok, Token, UpdatedDriver};
@@ -2689,6 +2696,20 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
           {error_token, {?LOC(Line, Column), "interpolation error: ", []}, Reason, UpdatedDriver}
       end
   end.
+
+%% Helper: if top of tail is interp and next char is '}', emit end_interpolation
+maybe_end_interpolation([$} | Rest], Line, Column, Scope, Driver, [{interp, Kind, Quote} | Tail]) ->
+  EndMeta = make_meta_len(Line, Column, 1, nil, Scope),
+  Tok = {end_interpolation, EndMeta, Kind},
+  Drv1 = Driver#toxic_driver{
+    source = unicode:characters_to_binary(Rest),
+    line = Line,
+    column = Column + 1,
+    mode = [{interp, Kind, Quote} | Tail],
+    eof = (Rest =:= [])
+  },
+  {ok, Tok, Drv1};
+maybe_end_interpolation(_, _Line, _Column, _Scope, _Driver, _Tail) -> continue.
 
 %% =============================================================================
 %% Helper functions for tokenize_single
