@@ -5,7 +5,7 @@
 -module(toxic_tokenizer).
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
--export([tokenize/1, tokenize/3, tokenize/4, invalid_do_error/1, terminator/1]).
+-export([invalid_do_error/1, terminator/1]).
 -export([tokenize_with_ranges/4, ranges_to_legacy/1, collapse_linear_ranges/1]).
 %% Driver API exports
 -export([init_driver/4, next/1, current_terminators/1, peek_missing_terminator/1, scan/5]).
@@ -113,10 +113,10 @@
 -define(xor_op3(T1, T2, T3),
   T1 =:= $^, T2 =:= $^, T3 =:= $^).
 
-tokenize(String, Line, Column, #toxic_tokenizer{} = Scope) ->
-  tokenize(String, Line, Column, Scope, []);
+tokenize_single(String, Line, Column, #toxic_tokenizer{} = Scope) ->
+  tokenize_single(String, Line, Column, Scope, []);
 
-tokenize(String, Line, Column, Opts) ->
+tokenize_single(String, Line, Column, Opts) ->
   IdentifierTokenizer = toxic_config:identifier_tokenizer(),
 
   Scope =
@@ -143,10 +143,10 @@ tokenize(String, Line, Column, Opts) ->
         Acc
     end, #toxic_tokenizer{identifier_tokenizer=IdentifierTokenizer}, Opts),
 
-  tokenize(String, Line, Column, Scope, []).
+  tokenize_single(String, Line, Column, Scope, []).
 
-tokenize(String, Line, Opts) ->
-  tokenize(String, Line, 1, Opts).
+tokenize_single(String, Line, Opts) ->
+  tokenize_single(String, Line, 1, Opts).
 
 %% Public API that returns tokens where metadata carries explicit ranges
 %% in the shape {{StartLine, StartColumn}, {EndLine, EndColumn}, Extra}.
@@ -154,7 +154,7 @@ tokenize(String, Line, Opts) ->
 tokenize_with_ranges(String, Line, Column, Opts) ->
   %% Force range production in scope
   RangedOpts = [{produce_ranges, true} | Opts],
-  tokenize(String, Line, Column, RangedOpts).
+  tokenize_single(String, Line, Column, RangedOpts).
 
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
@@ -368,10 +368,10 @@ linear_to_legacy([], Out, Stack) -> {Out, Stack}.
 combine_range_meta({{SL, SC}, _SEnd, _SX}, {_EStart, {EL, EC}, _EX}) -> {{SL, SC}, {EL, EC}, nil};
 combine_range_meta(Start, End) -> {Start, End}.
 
-tokenize(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
+tokenize_single(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
   error({badarg, tokenize, line_or_column_not_integer, {Line, Column, Scope, Tokens}});
 
-tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
+tokenize_single([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
 
   {CursorColumn, AccTerminators, AccTokens} =
@@ -380,7 +380,7 @@ tokenize([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, T
   AllWarnings = maybe_unicode_lint_warnings(Ascii, Tokens, Warnings),
   {ok, Line, CursorColumn, AllWarnings, AccTokens, AccTerminators};
 
-tokenize([], EndLine, EndColumn, #toxic_tokenizer{terminators=[{Start, {StartLine, StartColumn, _}, _} | _]} = Scope, Tokens) ->
+tokenize_single([], EndLine, EndColumn, #toxic_tokenizer{terminators=[{Start, {StartLine, StartColumn, _}, _} | _]} = Scope, Tokens) ->
   End = terminator(Start),
   Hint = missing_terminator_hint(Start, End, Scope),
   Message = "missing terminator: ~ts",
@@ -395,49 +395,49 @@ tokenize([], EndLine, EndColumn, #toxic_tokenizer{terminators=[{Start, {StartLin
   ],
   error({Meta, [Formatted, Hint], []}, [], Scope, Tokens);
 
-tokenize([], Line, Column, #toxic_tokenizer{} = Scope, Tokens) ->
+tokenize_single([], Line, Column, #toxic_tokenizer{} = Scope, Tokens) ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, warnings=Warnings} = Scope,
   AllWarnings = maybe_unicode_lint_warnings(Ascii, Tokens, Warnings),
   {ok, Line, Column, AllWarnings, Tokens, []};
 
 % VC merge conflict
 
-tokenize(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
+tokenize_single(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
   FirstLine = lists:takewhile(fun(C) -> C =/= $\n andalso C =/= $\r end, Original),
   Reason = {make_meta_len(Line, 1, 1, nil, Scope), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
   error(Reason, Original, Scope, Tokens);
 
 % Base integers
 
-tokenize([$0, $x, H | T], Line, Column, Scope, Tokens) when ?is_hex(H) ->
+tokenize_single([$0, $x, H | T], Line, Column, Scope, Tokens) when ?is_hex(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_hex(T, [H], 1),
   Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
-tokenize([$0, $b, H | T], Line, Column, Scope, Tokens) when ?is_bin(H) ->
+tokenize_single([$0, $b, H | T], Line, Column, Scope, Tokens) when ?is_bin(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_bin(T, [H], 1),
   Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
-tokenize([$0, $o, H | T], Line, Column, Scope, Tokens) when ?is_octal(H) ->
+tokenize_single([$0, $o, H | T], Line, Column, Scope, Tokens) when ?is_octal(H) ->
   {Rest, Number, OriginalRepresentation, Length} = tokenize_octal(T, [H], 1),
   Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  tokenize(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
 % Comments
 
-tokenize([$# | String], Line, Column, Scope, Tokens) ->
+tokenize_single([$# | String], Line, Column, Scope, Tokens) ->
   case tokenize_comment(String, [$#]) of
     {error, Char} ->
       error_comment(Char, [$# | String], Line, Column, Scope, Tokens);
     {Rest, Comment} ->
       preserve_comments(Line, Column, Tokens, Comment, Rest, Scope),
-      tokenize(Rest, Line, Column, Scope, reset_eol(Tokens))
+      yield(Rest, Line, Column, Scope, reset_eol(Tokens))
   end;
 
 % Sigils
 
-tokenize([$~, H | _T] = Original, Line, Column, Scope, Tokens) when ?is_upcase(H) orelse ?is_downcase(H) ->
+tokenize_single([$~, H | _T] = Original, Line, Column, Scope, Tokens) when ?is_upcase(H) orelse ?is_downcase(H) ->
   tokenize_sigil(Original, Line, Column, Scope, Tokens);
 
 % Char tokens
@@ -448,7 +448,7 @@ tokenize([$~, H | _T] = Original, Line, Column, Scope, Tokens) when ?is_upcase(H
 % toxic_errors.erl as by default {char, _, _} tokens are "hijacked" by Erlang
 % and printed with Erlang syntax ($a) in the parser's error messages.
 
-tokenize([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
   Char = toxic_interpolation:unescape_map(H),
 
   NewScope = if
@@ -479,9 +479,9 @@ tokenize([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
       % Regular escaped char
       {{char, make_meta_len(Line, Column, 3, [$?, $\\, H], Scope), Char}, T, Line, Column + 3}
   end,
-  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
-tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$?, Char | T], Line, Column, Scope, Tokens) ->
   NewScope = case handle_char(Char) of
     {Escape, Name} ->
       Msg = io_lib:format("found ? followed by code point 0x~.16B (~ts), please use ?~ts instead",
@@ -500,97 +500,97 @@ tokenize([$?, Char | T], Line, Column, Scope, Tokens) ->
       % Regular char
       {{char, make_meta_len(Line, Column, 2, [$?, Char], Scope), Char}, T, Line, Column + 2}
   end,
-  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
 % Heredocs
 
-tokenize("\"\"\"" ++ T, Line, Column, Scope, Tokens) ->
+tokenize_single("\"\"\"" ++ T, Line, Column, Scope, Tokens) ->
   handle_heredocs(T, Line, Column, $", Scope, Tokens);
 
 %% TODO: Remove me in Elixir v2.0
-tokenize("'''" ++ T, Line, Column, Scope, Tokens) ->
+tokenize_single("'''" ++ T, Line, Column, Scope, Tokens) ->
   NewScope = prepend_warning(Line, Column, "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead", Scope),
   handle_heredocs(T, Line, Column, $', NewScope, Tokens);
 
 % Strings
 
-tokenize([$" | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$" | T], Line, Column, Scope, Tokens) ->
   handle_strings(T, Line, Column + 1, $", Scope, Tokens);
 
 %% TODO: Remove me in Elixir v2.0
-tokenize([$' | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$' | T], Line, Column, Scope, Tokens) ->
   handle_strings(T, Line, Column + 1, $', Scope, Tokens);
 
 % Operator atoms
 
-tokenize(".:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '.'} | Tokens]);
+tokenize_single(".:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '.'} | Tokens]);
 
-tokenize("<<>>:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
-tokenize("%{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 4, Scope, [{kw_identifier, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
-tokenize("%:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
-tokenize("&:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '&'} | Tokens]);
-tokenize("{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 3, Scope, [{kw_identifier, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
-tokenize("..//:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
+tokenize_single("<<>>:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
+tokenize_single("%{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 4, Scope, [{kw_identifier, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
+tokenize_single("%:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
+tokenize_single("&:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '&'} | Tokens]);
+tokenize_single("{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 3, Scope, [{kw_identifier, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
+tokenize_single("..//:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
+  yield(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
 
-tokenize(":<<>>" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
-tokenize(":%{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 4, Scope, [{atom, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
-tokenize(":%" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 2, Scope, [{atom, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
-tokenize(":{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 3, Scope, [{atom, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
-tokenize(":..//" ++ Rest, Line, Column, Scope, Tokens) ->
-  tokenize(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
+tokenize_single(":<<>>" ++ Rest, Line, Column, Scope, Tokens) ->
+  yield(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
+tokenize_single(":%{}" ++ Rest, Line, Column, Scope, Tokens) ->
+  yield(Rest, Line, Column + 4, Scope, [{atom, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
+tokenize_single(":%" ++ Rest, Line, Column, Scope, Tokens) ->
+  yield(Rest, Line, Column + 2, Scope, [{atom, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
+tokenize_single(":{}" ++ Rest, Line, Column, Scope, Tokens) ->
+  yield(Rest, Line, Column + 3, Scope, [{atom, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
+tokenize_single(":..//" ++ Rest, Line, Column, Scope, Tokens) ->
+  yield(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
 
 % ## Three Token Operators
-tokenize([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
+tokenize_single([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
     ?unary_op3(T1, T2, T3); ?comp_op3(T1, T2, T3); ?and_op3(T1, T2, T3); ?or_op3(T1, T2, T3);
     ?arrow_op3(T1, T2, T3); ?xor_op3(T1, T2, T3); ?concat_op3(T1, T2, T3); ?ellipsis_op3(T1, T2, T3) ->
   Token = {atom, make_meta_len(Line, Column, 4, nil, Scope), list_to_atom([T1, T2, T3])},
-  tokenize(Rest, Line, Column + 4, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 4, Scope, [Token | Tokens]);
 
 % ## Two Token Operators
 
-tokenize([$:, $:, $: | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$:, $:, $: | Rest], Line, Column, Scope, Tokens) ->
   Message = "atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity",
   NewScope = prepend_warning(Line, Column, Message, Scope),
   Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), '::'},
-  tokenize(Rest, Line, Column + 3, NewScope, [Token | Tokens]);
+  yield(Rest, Line, Column + 3, NewScope, [Token | Tokens]);
 
-tokenize([$:, T1, T2 | Rest], Line, Column, Scope, Tokens) when
+tokenize_single([$:, T1, T2 | Rest], Line, Column, Scope, Tokens) when
     ?comp_op2(T1, T2); ?rel_op2(T1, T2); ?and_op(T1, T2); ?or_op(T1, T2);
     ?arrow_op(T1, T2); ?in_match_op(T1, T2); ?concat_op(T1, T2); ?power_op(T1, T2);
     ?stab_op(T1, T2); ?range_op(T1, T2) ->
   Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), list_to_atom([T1, T2])},
-  tokenize(Rest, Line, Column + 3, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 3, Scope, [Token | Tokens]);
 
 % ## Single Token Operators
-tokenize([$:, T | Rest], Line, Column, Scope, Tokens) when
+tokenize_single([$:, T | Rest], Line, Column, Scope, Tokens) when
     ?at_op(T); ?unary_op(T); ?capture_op(T); ?dual_op(T); ?mult_op(T);
     ?rel_op(T); ?match_op(T); ?pipe_op(T); T =:= $. ->
   Token = {atom, make_meta_len(Line, Column, 2, nil, Scope), list_to_atom([T])},
-  tokenize(Rest, Line, Column + 2, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 2, Scope, [Token | Tokens]);
 
 % ## Stand-alone tokens
 
-tokenize("=>" ++ Rest, Line, Column, Scope, Tokens) ->
+tokenize_single("=>" ++ Rest, Line, Column, Scope, Tokens) ->
   EOL = previous_was_eol(Tokens),
   Token = {assoc_op, make_meta_len(Line, Column, 2, EOL, Scope), '=>'},
-  tokenize(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
+  yield(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
 
-tokenize("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
+tokenize_single("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
       Token = {identifier, make_meta_len(Line, Column, 4, nil, Scope), '..//'},
-      tokenize(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
+      tokenize_single(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
     {_, _} ->
       unexpected_token(String, Line, Column, Scope, Tokens)
   end;
@@ -598,48 +598,48 @@ tokenize("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
 % ## Ternary operator
 
 % ## Three token operators
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?unary_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?unary_op3(T1, T2, T3) ->
   handle_unary_op(Rest, Line, Column, unary_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?ellipsis_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?ellipsis_op3(T1, T2, T3) ->
   handle_unary_op(Rest, Line, Column, ellipsis_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?comp_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?comp_op3(T1, T2, T3) ->
   handle_op(Rest, Line, Column, comp_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?and_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?and_op3(T1, T2, T3) ->
   NewScope = maybe_warn_too_many_of_same_char([T1, T2, T3], Rest, Line, Column, Scope),
   handle_op(Rest, Line, Column, and_op, 3, list_to_atom([T1, T2, T3]), NewScope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?or_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?or_op3(T1, T2, T3) ->
   NewScope = maybe_warn_too_many_of_same_char([T1, T2, T3], Rest, Line, Column, Scope),
   handle_op(Rest, Line, Column, or_op, 3, list_to_atom([T1, T2, T3]), NewScope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?xor_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?xor_op3(T1, T2, T3) ->
   NewScope = maybe_warn_too_many_of_same_char([T1, T2, T3], Rest, Line, Column, Scope),
   handle_op(Rest, Line, Column, xor_op, 3, list_to_atom([T1, T2, T3]), NewScope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?concat_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?concat_op3(T1, T2, T3) ->
   NewScope = maybe_warn_too_many_of_same_char([T1, T2, T3], Rest, Line, Column, Scope),
   handle_op(Rest, Line, Column, concat_op, 3, list_to_atom([T1, T2, T3]), NewScope, Tokens);
 
-tokenize([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?arrow_op3(T1, T2, T3) ->
+tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?arrow_op3(T1, T2, T3) ->
   handle_op(Rest, Line, Column, arrow_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
 % ## Containers + punctuation tokens
-tokenize([$, | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$, | Rest], Line, Column, Scope, Tokens) ->
   Token = {',', make_meta_len(Line, Column, 1, 0, Scope)},
-  tokenize(Rest, Line, Column + 1, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 1, Scope, [Token | Tokens]);
 
-tokenize([$<, $< | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$<, $< | Rest], Line, Column, Scope, Tokens) ->
   Token = {'<<', make_meta_len(Line, Column, 2, nil, Scope)},
   handle_terminator(Rest, Line, Column + 2, Scope, Token, Tokens);
 
-tokenize([$>, $> | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$>, $> | Rest], Line, Column, Scope, Tokens) ->
   Token = {'>>', make_meta_len(Line, Column, 2, previous_was_eol(Tokens), Scope)},
   handle_terminator(Rest, Line, Column + 2, Scope, Token, Tokens);
 
-tokenize([${ | Rest], Line, Column, Scope, [{'%', _} | _] = Tokens) ->
+tokenize_single([${ | Rest], Line, Column, Scope, [{'%', _} | _] = Tokens) ->
   Message =
     "unexpected space between % and {\n\n"
     "If you want to define a map, write %{...}, with no spaces.\n"
@@ -647,56 +647,56 @@ tokenize([${ | Rest], Line, Column, Scope, [{'%', _} | _] = Tokens) ->
     "Syntax error before: ",
   error({?LOC(Line, Column), Message, [${]}, Rest, Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when T =:= $(; T =:= ${; T =:= $[ ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when T =:= $(; T =:= ${; T =:= $[ ->
   Token = {list_to_atom([T]), make_meta_len(Line, Column, 1, nil, Scope)},
   handle_terminator(Rest, Line, Column + 1, Scope, Token, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when T =:= $); T =:= $}; T =:= $] ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when T =:= $); T =:= $}; T =:= $] ->
   Token = {list_to_atom([T]), make_meta_len(Line, Column, 1, previous_was_eol(Tokens), Scope)},
   handle_terminator(Rest, Line, Column + 1, Scope, Token, Tokens);
 
 % ## Two Token Operators
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?ternary_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?ternary_op(T1, T2) ->
   Op = list_to_atom([T1, T2]),
   Token = {ternary_op, make_meta_len(Line, Column, 2, previous_was_eol(Tokens), Scope), Op},
-  tokenize(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
+  yield(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?power_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?power_op(T1, T2) ->
   handle_op(Rest, Line, Column, power_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?range_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?range_op(T1, T2) ->
   handle_op(Rest, Line, Column, range_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?concat_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?concat_op(T1, T2) ->
   handle_op(Rest, Line, Column, concat_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?arrow_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?arrow_op(T1, T2) ->
   handle_op(Rest, Line, Column, arrow_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?comp_op2(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?comp_op2(T1, T2) ->
   handle_op(Rest, Line, Column, comp_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?rel_op2(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?rel_op2(T1, T2) ->
   handle_op(Rest, Line, Column, rel_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?and_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?and_op(T1, T2) ->
   handle_op(Rest, Line, Column, and_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?or_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?or_op(T1, T2) ->
   handle_op(Rest, Line, Column, or_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?in_match_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?in_match_op(T1, T2) ->
   handle_op(Rest, Line, Column, in_match_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?type_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?type_op(T1, T2) ->
   handle_op(Rest, Line, Column, type_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
-tokenize([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?stab_op(T1, T2) ->
+tokenize_single([T1, T2 | Rest], Line, Column, Scope, Tokens) when ?stab_op(T1, T2) ->
   handle_op(Rest, Line, Column, stab_op, 2, list_to_atom([T1, T2]), Scope, Tokens);
 
 % ## Single Token Operators
 
-tokenize([$& | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$& | Rest], Line, Column, Scope, Tokens) ->
   Kind =
     case strip_horizontal_space(Rest, 0) of
       {[Int | _], 0} when ?is_digit(Int) ->
@@ -713,32 +713,32 @@ tokenize([$& | Rest], Line, Column, Scope, Tokens) ->
     end,
 
   Token = {Kind, make_meta_len(Line, Column, 1, nil, Scope), '&'},
-  tokenize(Rest, Line, Column + 1, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + 1, Scope, [Token | Tokens]);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?at_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?at_op(T) ->
   handle_unary_op(Rest, Line, Column, at_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?unary_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?unary_op(T) ->
   handle_unary_op(Rest, Line, Column, unary_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?rel_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?rel_op(T) ->
   handle_op(Rest, Line, Column, rel_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?dual_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?dual_op(T) ->
   handle_unary_op(Rest, Line, Column, dual_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?mult_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?mult_op(T) ->
   handle_op(Rest, Line, Column, mult_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?match_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?match_op(T) ->
   handle_op(Rest, Line, Column, match_op, 1, list_to_atom([T]), Scope, Tokens);
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?pipe_op(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?pipe_op(T) ->
   handle_op(Rest, Line, Column, pipe_op, 1, list_to_atom([T]), Scope, Tokens);
 
 % Non-operator Atoms
 
-tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote(H) ->
+tokenize_single([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote(H) ->
   Scope = case H == $' of
     true ->
       prepend_warning(Line, Column, "single quotes around atoms are deprecated. Use double quotes instead", BaseScope);
@@ -771,7 +771,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
               case unsafe_to_atom(Part, Line, Column, Scope) of
                 {ok, Atom} ->
                   Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+                  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
                 {error, Reason} ->
                   error(Reason, Rest, NewScope, Tokens)
               end;
@@ -783,7 +783,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
               EndTok = {EndType, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
               Emitted = [StartTok] ++ Seq ++ [EndTok],
               NewTokens2 = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens2);
+              yield(Rest, NewLine, NewColumn, NewScope, NewTokens2);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end;
@@ -793,7 +793,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
               case unsafe_to_atom(Part, Line, Column, Scope) of
                 {ok, Atom} ->
                   Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+                  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
                 {error, Reason} ->
                   error(Reason, Rest, NewScope, Tokens)
               end;
@@ -803,7 +803,7 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
                 false -> atom_unsafe
               end,
               Token = {Key, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Unescaped},
-              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end
@@ -814,17 +814,17 @@ tokenize([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote
       interpolation_error(Reason, Original, Scope, Tokens, Message, [Line], Line, Column + 1, [H], [H])
   end;
 
-tokenize([$: | String] = Original, Line, Column, Scope, Tokens) ->
+tokenize_single([$: | String] = Original, Line, Column, Scope, Tokens) ->
   case tokenize_identifier(String, Line, Column, Scope, false) of
     {_Kind, Unencoded, Atom, Rest, Length, Ascii, _Special} ->
       NewScope = maybe_warn_for_ambiguous_bang_before_equals(atom, Unencoded, Rest, Line, Column, Scope),
       TrackedScope = track_ascii(Ascii, NewScope),
       Token = {atom, make_meta_len(Line, Column, 1 + Length, Unencoded, TrackedScope), Atom},
-      tokenize(Rest, Line, Column + 1 + Length, TrackedScope, [Token | Tokens]);
+      yield(Rest, Line, Column + 1 + Length, TrackedScope, [Token | Tokens]);
     empty when Scope#toxic_tokenizer.cursor_completion == false ->
       unexpected_token(Original, Line, Column, Scope, Tokens);
     empty ->
-      tokenize([], Line, Column, Scope, Tokens);
+      tokenize_single([], Line, Column, Scope, Tokens);
     {unexpected_token, Length} ->
       unexpected_token(lists:nthtail(Length - 1, String), Line, Column + Length - 1, Scope, Tokens);
     {error, Reason} ->
@@ -835,7 +835,7 @@ tokenize([$: | String] = Original, Line, Column, Scope, Tokens) ->
 % We use int and flt otherwise elixir_parser won't format them
 % properly in case of errors.
 
-tokenize([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
+tokenize_single([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
       case tokenize_number(T, [H], 1, false) of
     {error, Reason, Original} ->
       error({?LOC(Line, Column), Reason, Original}, T, Scope, Tokens);
@@ -843,7 +843,7 @@ tokenize([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
       if
         Number == 0, (I =:= $x) orelse (I =:= $o) orelse (I =:= $b), Rest == [],
         Scope#toxic_tokenizer.cursor_completion /= false ->
-          tokenize([], Line, Column, Scope, Tokens);
+          tokenize_single([], Line, Column, Scope, Tokens);
 
         true ->
           Msg =
@@ -859,70 +859,70 @@ tokenize([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
       end;
     {Rest, Number, Original, Length} when is_integer(Number) ->
       Token = {int, make_meta_len(Line, Column, Length, Number, Scope), Original},
-      tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
+      yield(Rest, Line, Column + Length, Scope, [Token | Tokens]);
     {Rest, Number, Original, Length} ->
       Token = {flt, make_meta_len(Line, Column, Length, Number, Scope), Original},
-      tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens])
+      yield(Rest, Line, Column + Length, Scope, [Token | Tokens])
   end;
 
 % Spaces
 
-tokenize([T | Rest], Line, Column, Scope, Tokens) when ?is_horizontal_space(T) ->
+tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?is_horizontal_space(T) ->
   {Remaining, Stripped} = strip_horizontal_space(Rest, 0),
   handle_space_sensitive_tokens(Remaining, Line, Column + 1 + Stripped, Scope, Tokens);
 
 % End of line
 
-tokenize(";" ++ Rest, Line, Column, Scope, []) ->
-  tokenize(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)}]);
+tokenize_single(";" ++ Rest, Line, Column, Scope, []) ->
+  yield(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)}]);
 
-tokenize(";" ++ Rest, Line, Column, Scope, [Top | _] = Tokens) when element(1, Top) /= ';' ->
-  tokenize(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)} | Tokens]);
+tokenize_single(";" ++ Rest, Line, Column, Scope, [Top | _] = Tokens) when element(1, Top) /= ';' ->
+  yield(Rest, Line, Column + 1, Scope, [{';', make_meta_len(Line, Column, 1, 0, Scope)} | Tokens]);
 
-tokenize("\\" = Original, Line, Column, Scope, Tokens) ->
+tokenize_single("\\" = Original, Line, Column, Scope, Tokens) ->
   error({make_meta_len(Line, Column, 1, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
-tokenize("\\\n" = Original, Line, Column, Scope, Tokens) ->
+tokenize_single("\\\n" = Original, Line, Column, Scope, Tokens) ->
   error({make_meta_len(Line, Column, 2, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
-tokenize("\\\r\n" = Original, Line, Column, Scope, Tokens) ->
+tokenize_single("\\\r\n" = Original, Line, Column, Scope, Tokens) ->
   error({make_meta_len(Line, Column, 3, nil, Scope), "invalid escape \\ at end of file", []}, Original, Scope, Tokens);
 
-tokenize("\\\n" ++ Rest, Line, _Column, Scope, Tokens) ->
+tokenize_single("\\\n" ++ Rest, Line, _Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, Tokens);
 
-tokenize("\\\r\n" ++ Rest, Line, _Column, Scope, Tokens) ->
+tokenize_single("\\\r\n" ++ Rest, Line, _Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, Tokens);
 
-tokenize("\n" ++ Rest, Line, Column, Scope, Tokens) ->
+tokenize_single("\n" ++ Rest, Line, Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens, Scope));
 
-tokenize("\r\n" ++ Rest, Line, Column, Scope, Tokens) ->
+tokenize_single("\r\n" ++ Rest, Line, Column, Scope, Tokens) ->
   tokenize_eol(Rest, Line, Scope, eol(Line, Column, Tokens, Scope));
 
 % Others
 
-tokenize([$%, $( | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$%, $( | Rest], Line, Column, Scope, Tokens) ->
   Reason = {make_meta_len(Line, Column, 2, nil, Scope), "expected %{ to define a map, got: ", [$%, $(]},
   error(Reason, Rest, Scope, Tokens);
 
-tokenize([$%, $[ | Rest], Line, Column, Scope, Tokens) ->
+tokenize_single([$%, $[ | Rest], Line, Column, Scope, Tokens) ->
   Reason = {make_meta_len(Line, Column, 2, nil, Scope), "expected %{ to define a map, got: ", [$%, $[]},
   error(Reason, Rest, Scope, Tokens);
 
-tokenize([$%, ${ | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$%, ${ | T], Line, Column, Scope, Tokens) ->
   Token = {'{', make_meta_len(Line, Column, 2, nil, Scope)},
   handle_terminator(T, Line, Column + 2, Scope, Token, [{'%{}', make_meta_len(Line, Column, 2, nil, Scope)} | Tokens]);
 
-tokenize([$% | T], Line, Column, Scope, Tokens) ->
-  tokenize(T, Line, Column + 1, Scope, [{'%', make_meta_len(Line, Column, 1, nil, Scope)} | Tokens]);
+tokenize_single([$% | T], Line, Column, Scope, Tokens) ->
+  tokenize_single(T, Line, Column + 1, Scope, [{'%', make_meta_len(Line, Column, 1, nil, Scope)} | Tokens]);
 
-tokenize([$. | T], Line, Column, Scope, Tokens) ->
+tokenize_single([$. | T], Line, Column, Scope, Tokens) ->
   tokenize_dot(T, Line, Column + 1, make_meta_len(Line, Column, 1, nil, Scope), Scope, Tokens);
 
 % Identifiers
 
-tokenize(String, Line, Column, OriginalScope, Tokens) ->
+tokenize_single(String, Line, Column, OriginalScope, Tokens) ->
   case tokenize_identifier(String, Line, Column, OriginalScope, not previous_was_dot(Tokens)) of
     {Kind, Unencoded, Atom, Rest, Length, Ascii, Special} ->
       HasAt = lists:member(at, Special),
@@ -931,7 +931,7 @@ tokenize(String, Line, Column, OriginalScope, Tokens) ->
       case Rest of
         [$: | T] when ?is_space(hd(T)) ->
           Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, Unencoded, Scope), Atom},
-          tokenize(T, Line, Column + Length + 1, Scope, [Token | Tokens]);
+          yield(T, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
         [$: | T] when hd(T) =/= $: ->
           AtomName = atom_to_list(Atom) ++ [$:],
@@ -951,7 +951,7 @@ tokenize(String, Line, Column, OriginalScope, Tokens) ->
         _ when Kind == identifier ->
           NewScope = maybe_warn_for_ambiguous_bang_before_equals(identifier, Unencoded, Rest, Line, Column, Scope),
           Token = check_call_identifier(Line, Column, Unencoded, Atom, Length, Rest, Scope),
-          tokenize(Rest, Line, Column + Length, NewScope, [Token | Tokens]);
+          yield(Rest, Line, Column + Length, NewScope, [Token | Tokens]);
 
         _ ->
           unexpected_token(String, Line, Column, Scope, Tokens)
@@ -965,8 +965,8 @@ tokenize(String, Line, Column, OriginalScope, Tokens) ->
 
     empty  ->
       case String of
-        [$~, L] when ?is_upcase(L); ?is_downcase(L) -> tokenize([], Line, Column, OriginalScope, Tokens);
-        [$~] -> tokenize([], Line, Column, OriginalScope, Tokens);
+        [$~, L] when ?is_upcase(L); ?is_downcase(L) -> yield([], Line, Column, OriginalScope, Tokens);
+        [$~] -> yield([], Line, Column, OriginalScope, Tokens);
         _ -> unexpected_token(String, Line, Column, OriginalScope, Tokens)
       end;
 
@@ -1023,7 +1023,7 @@ unexpected_token([T | Rest], Line, Column, Scope, Tokens) ->
 tokenize_eol(Rest, Line, Scope, Tokens) ->
   {StrippedRest, Column} = strip_horizontal_space(Rest, Scope#toxic_tokenizer.column),
   IndentedScope = Scope#toxic_tokenizer{indentation=Column-1},
-  tokenize(StrippedRest, Line + 1, Column, IndentedScope, Tokens).
+  yield(StrippedRest, Line + 1, Column, IndentedScope, Tokens).
 
 strip_horizontal_space([H | T], Counter) when ?is_horizontal_space(H) ->
   strip_horizontal_space(T, Counter + 1);
@@ -1082,7 +1082,7 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
               end,
               Emitted = [StartTok] ++ Seq ++ [EndTok],
               NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end;
@@ -1090,7 +1090,7 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
           case unescape_tokens(Parts, Line, Column, NewScope) of
             {ok, Unescaped} ->
               Token = {heredoc_type(H), make_meta(Line, Column, NewLine, NewColumn, nil, NewScope), NewColumn - 4, Unescaped},
-              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
             {error, Reason} ->
               error(Reason, Rest, Scope, Tokens)
@@ -1137,7 +1137,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
               ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, NewScope)},
               Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
               NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              tokenize(Rest, NewLine, NewColumn + 1, NewScope, NewTokens);
+              yield(Rest, NewLine, NewColumn + 1, NewScope, NewTokens);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end;
@@ -1147,7 +1147,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
               case unsafe_to_atom(Part, Line, Column - 1, Scope) of
                 {ok, Atom} ->
                   Token = {kw_identifier, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Atom},
-                  tokenize(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
+                  yield(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
                 {error, Reason} ->
                   error(Reason, Rest, NewScope, Tokens)
               end;
@@ -1158,7 +1158,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
                 false -> kw_identifier_unsafe
               end,
               Token = {Key, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Unescaped},
-              tokenize(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
+              yield(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
 
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
@@ -1192,7 +1192,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
               Seq = linearize_parts(Unescaped, NewScope, (if H =:= $' -> charlist; true -> string end)),
               Emitted = [StartTok] ++ Seq ++ [EndTok],
               NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
           end;
@@ -1200,7 +1200,7 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
           case unescape_tokens(Parts, Line, Column, NewScope) of
             {ok, Unescaped} ->
               Token = {string_type(H), make_meta(Line, Column - 1, NewLine, NewColumn, nil, NewScope), Unescaped},
-              tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
+              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
@@ -1210,28 +1210,28 @@ handle_strings(T, Line, Column, H, Scope, Tokens) ->
 
 handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
   Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
-  tokenize(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
 handle_unary_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
       Token = {identifier, make_meta_len(Line, Column, Length, nil, Scope), Op},
-      tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
+      yield(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
       %% For unary operators, Elixir does not carry EOL counts in meta
       Token = {Kind, make_meta_len(Line, Column, Length, nil, Scope), Op},
-      tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens])
+      yield(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens])
   end.
 
 handle_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
   Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
-  tokenize(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
 
 handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
       Token = {identifier, make_meta_len(Line, Column, Length, nil, Scope), Op},
-      tokenize(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
+      yield(Remaining, Line, Column + Length + Extra, Scope, [Token | Tokens]);
     {Remaining, Extra} ->
       NewScope =
         %% TODO: Remove these deprecations on Elixir v2.0
@@ -1253,7 +1253,7 @@ handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
         end,
 
       Token = {Kind, make_meta_len(Line, Column, Length, previous_was_eol(Tokens), Scope), Op},
-      tokenize(Remaining, Line, Column + Length + Extra, NewScope, add_token_with_eol(Token, Tokens))
+      yield(Remaining, Line, Column + Length + Extra, NewScope, add_token_with_eol(Token, Tokens))
   end.
 
 % ## Three Token Operators
@@ -1278,7 +1278,7 @@ handle_dot([$., T | Rest], Line, Column, DotInfo, Scope, Tokens) when
 % ## Exception for .( as it needs to be treated specially in the parser
 handle_dot([$., $( | Rest], Line, Column, DotInfo, Scope, Tokens) ->
   TokensSoFar = add_token_with_eol({dot_call_op, DotInfo, '.'}, Tokens),
-  tokenize([$( | Rest], Line, Column, Scope, TokensSoFar);
+  yield([$( | Rest], Line, Column, Scope, TokensSoFar);
 
 handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) when ?is_quote(H) ->
   Scope = case H == $' of
@@ -1318,7 +1318,7 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
                   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
                   Emitted = [StartTok, IdentTok, EndTok],
                   NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, TokensSoFar, lists:reverse(Emitted)),
-                  tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+                  yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
                 {error, Reason} ->
                   error(Reason, Original, NewScope, Tokens)
               end;
@@ -1332,7 +1332,7 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
                 {ok, Atom} ->
                   Token = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
                   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-                  tokenize(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
+                  yield(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
                 {error, Reason} ->
                   error(Reason, Original, NewScope, Tokens)
               end;
@@ -1350,33 +1350,35 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
 
 handle_dot([$. | Rest], Line, Column, DotInfo, Scope, Tokens) ->
   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-  tokenize(Rest, Line, Column, Scope, TokensSoFar).
+  yield(Rest, Line, Column, Scope, TokensSoFar).
 
 handle_call_identifier(Rest, Line, Column, DotInfo, Length, UnencodedOp, Scope, Tokens) ->
   Token = check_call_identifier(Line, Column, UnencodedOp, list_to_atom(UnencodedOp), Length, Rest, Scope),
   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-  tokenize(Rest, Line, Column + Length, Scope, [Token | TokensSoFar]).
+  yield(Rest, Line, Column + Length, Scope, [Token | TokensSoFar]).
 
 % ## Ambiguous unary/binary operators tokens
 % Keywords are not ambiguous operators
 handle_space_sensitive_tokens([Sign, $:, Space | _] = String, Line, Column, Scope, Tokens) when ?dual_op(Sign), ?is_space(Space) ->
-  tokenize(String, Line, Column, Scope, Tokens);
+  % TODO: should we recurse here or yield?
+  tokenize_single(String, Line, Column, Scope, Tokens);
 
 % But everything else, except other operators, are
 handle_space_sensitive_tokens([Sign, NotMarker | T], Line, Column, Scope, [{identifier, _, _} = H | Tokens]) when
     ?dual_op(Sign), not(?is_space(NotMarker)), NotMarker =/= Sign, NotMarker =/= $/, NotMarker =/= $> ->
   Rest = [NotMarker | T],
   DualOpToken = {dual_op, make_meta_len(Line, Column, 1, nil, Scope), list_to_atom([Sign])},
-  tokenize(Rest, Line, Column + 1, Scope, [DualOpToken, setelement(1, H, op_identifier) | Tokens]);
+  yield(Rest, Line, Column + 1, Scope, [DualOpToken, setelement(1, H, op_identifier) | Tokens]);
 
 % Handle cursor completion
 handle_space_sensitive_tokens([], Line, Column,
                               #toxic_tokenizer{cursor_completion=Cursor} = Scope,
                               [{identifier, Info, Identifier} | Tokens]) when Cursor /= false ->
-  tokenize([$(], Line, Column+1, Scope, [{paren_identifier, Info, Identifier} | Tokens]);
+  tokenize_single([$(], Line, Column+1, Scope, [{paren_identifier, Info, Identifier} | Tokens]);
 
 handle_space_sensitive_tokens(String, Line, Column, Scope, Tokens) ->
-  tokenize(String, Line, Column, Scope, Tokens).
+  % TODO: should we recurse here or yield?
+  tokenize_single(String, Line, Column, Scope, Tokens).
 
 %% Helpers
 
@@ -1814,7 +1816,7 @@ tokenize_alias(Rest, Line, Column, Unencoded, Atom, Length, Ascii, Special, Scop
 
     true ->
       AliasesToken = {alias, make_meta_len(Line, Column, Length, Unencoded, Scope), Atom},
-      tokenize(Rest, Line, Column + Length, Scope, [AliasesToken | Tokens])
+      yield(Rest, Line, Column + Length, Scope, [AliasesToken | Tokens])
   end.
 
 %% Check if it is a call identifier (paren | bracket | do)
@@ -1879,7 +1881,7 @@ handle_terminator(Rest, _, _, Scope, {'(', {Line, Column, _}}, [{alias, _, Alias
 
   error({?LOC(Line, Column), Reason, ["("]}, atom_to_list(Alias) ++ [$( | Rest], Scope, Tokens);
 handle_terminator(Rest, Line, Column, #toxic_tokenizer{terminators=none} = Scope, Token, Tokens) ->
-  tokenize(Rest, Line, Column, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column, Scope, [Token | Tokens]);
 handle_terminator(Rest, Line, Column, Scope, Token, Tokens) ->
   #toxic_tokenizer{terminators=Terminators} = Scope,
 
@@ -1887,7 +1889,7 @@ handle_terminator(Rest, Line, Column, Scope, Token, Tokens) ->
     {error, Reason} ->
       error(Reason, atom_to_list(element(1, Token)) ++ Rest, Scope, Tokens);
     {ok, New} ->
-      tokenize(Rest, Line, Column, New, [Token | Tokens])
+      yield(Rest, Line, Column, New, [Token | Tokens])
   end.
 
 check_terminator({Start, Meta}, Terminators, Scope)
@@ -2075,12 +2077,12 @@ tokenize_keyword(terminator, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
 
 tokenize_keyword(token, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   Token = {Atom, make_meta_len(Line, Column, Length, nil, Scope)},
-  tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(block, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   Meta = make_meta_len(Line, Column, Length, nil, Scope),
   Token = {block_identifier, Meta, Atom},
-  tokenize(Rest, Line, Column + Length, Scope, [Token | Tokens]);
+  yield(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   NewTokens =
@@ -2108,7 +2110,7 @@ tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
         end
     end,
 
-  tokenize(Rest, Line, Column + Length, Scope, NewTokens).
+  yield(Rest, Line, Column + Length, Scope, NewTokens).
 
 tokenize_sigil([$~ | T], Line, Column, Scope, Tokens) ->
   case tokenize_sigil_name(T, [], Line, Column + 1, Scope, Tokens) of
@@ -2159,7 +2161,7 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
           EndTok = {sigil_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>, NewColumn - 4},
           Emitted = [StartTok] ++ Seq ++ [EndTok],
           NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          tokenize(Rest, NewLine, NewColumn, NewScope, NewTokens);
+          yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
         false ->
           Indentation = NewColumn - 4,
           add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, NewScope, Tokens, Indentation, <<H, H, H>>)
@@ -2182,7 +2184,7 @@ tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, S
           ModsTok = case Modifiers of [] -> []; _ -> [{sigil_modifiers, make_meta(NewLine, NewColumn, NewLine, NewColumn + length(Modifiers), nil, NewScope), Modifiers}] end,
           Emitted = [StartTok] ++ Seq ++ [EndTok | ModsTok],
           NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          tokenize(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
+          yield(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
         false ->
           Indentation = nil,
           add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, tokens_to_binary(Parts), Rest, NewScope, Tokens, Indentation, <<H>>)
@@ -2204,7 +2206,8 @@ tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Toke
 
 % Incomplete sigil.
 tokenize_sigil_contents([], _SigilName, Line, Column, Scope, Tokens) ->
-  tokenize([], Line, Column, Scope, Tokens).
+  % TODO: should we recurse here or yield? No tokens to yield, but we need to update the driver
+  tokenize_single([], Line, Column, Scope, Tokens).
 
 add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope, Tokens, Indentation, Delimiter) ->
   TokenColumn = Column - 1 - length(SigilName),
@@ -2218,7 +2221,7 @@ add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope,
       {Final, Modifiers} = collect_modifiers(Rest, []),
       NewColumnWithModifiers = NewColumn + length(Modifiers),
       Token = {sigil, make_meta(Line, TokenColumn, NewLine, NewColumnWithModifiers, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
-      tokenize(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
+      tokenize_single(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
 
     {error, Reason} ->
       error(Reason, Rest, Scope, Tokens)
@@ -2487,20 +2490,168 @@ next(#toxic_driver{eof = true} = Driver) ->
 next(#toxic_driver{source = <<>>} = Driver) ->
   {eof, Driver#toxic_driver{eof = true}};
 next(#toxic_driver{} = Driver) ->
-  % Single token scanning logic will be implemented in Phase 2
-  % For now, fall back to batch tokenization for compatibility
+  % Use the new scan_token implementation
+  case scan_token(Driver) of
+    {ok, Token, Driver1} -> {ok, Token, Driver1};
+    {eof, Driver1} -> {eof, Driver1};
+    {error_token, Meta, Reason, Driver1} ->
+      case Driver#toxic_driver.error_mode of
+        tolerant -> {error_token, Meta, Reason, Driver1};
+        strict -> {eof, Driver1#toxic_driver{eof = true}}
+      end
+  end.
+
+%% @doc Scan exactly one token from the driver state
+%% @spec scan_token(Driver) -> {ok, Token, Driver1} | {eof, Driver1} | {error_token, Meta, Reason, Driver1}
+scan_token(#toxic_driver{eof = true} = Driver) ->
+  {eof, Driver};
+scan_token(#toxic_driver{source = <<>>} = Driver) ->
+  {eof, Driver#toxic_driver{eof = true}};
+scan_token(#toxic_driver{source = Source} = Driver) 
+    when is_binary(Source), byte_size(Source) > 0 ->
+  % Convert binary to charlist for existing tokenize logic
+  try
+    Charlist = unicode:characters_to_list(Source),
+    scan_token_from_charlist(Charlist, Driver)
+  catch
+    _:_ ->
+      % Invalid UTF-8, fallback to original implementation
+      fallback_next_token(Driver)
+  end;
+scan_token(#toxic_driver{source = SourceFun} = Driver) when is_function(SourceFun) ->
+  % For function sources, we need more sophisticated handling
+  % For now, fallback to original implementation
+  fallback_next_token(Driver);
+scan_token(Driver) ->
   fallback_next_token(Driver).
+
+%% @doc Scan single token from charlist using refactored tokenize logic
+%% This is where we use the modified tokenize_single clauses
+scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, scope = Scope} = Driver) ->
+  %% Use existing batch tokenizer once, then derive the first token and rest accurately
+  ScopeOpts = [
+    {produce_ranges, true},
+    {linearize, true},
+    {unescape, Scope#toxic_tokenizer.unescape}
+  ],
+  case tokenize_with_ranges(String, Line, Column, ScopeOpts) of
+    {ok, _NewLineAll, _NewColumnAll, _Warnings, [], _Remaining} ->
+      {eof, Driver#toxic_driver{eof = true}};
+    {ok, _NewLineAll, _NewColumnAll, _Warnings, [FirstToken | _], _RemainingTail} ->
+      EndPos = case FirstToken of
+        {_T, {{_SL, _SC}, {EL, EC}, _X}} -> {EL, EC};
+        {_T, {{_SL, _SC}, {EL, EC}, _X}, _Val} -> {EL, EC}
+      end,
+      {_Consumed, Rest} = split_at_position(String, Line, Column, EndPos),
+      UpdatedDriver = Driver#toxic_driver{
+        source = unicode:characters_to_binary(Rest),
+        %% Reset offset to 0 for the new source chunk to avoid byte/char skew
+        offset = 0,
+        line = element(1, EndPos),
+        column = element(2, EndPos)
+      },
+      {ok, FirstToken, UpdatedDriver};
+    {error, Reason, Rest, _Warnings, _TokensSoFar} ->
+      %% Emit error token and advance to provided Rest
+      UpdatedDriver = Driver#toxic_driver{
+        source = unicode:characters_to_binary(Rest),
+        offset = 0
+      },
+      %% Reason already contains location info prepared by tokenizer
+      {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver}
+  end.
+
+%% =============================================================================
+%% Driver input consumption helpers
+%% =============================================================================
+
+%% @doc Non-consuming peek of N codepoints from driver source
+%% @spec driver_peek(Driver, N) -> {ListOfCPs, Driver}
+driver_peek(#toxic_driver{source = Source} = Driver, N) when is_binary(Source) ->
+  case unicode:characters_to_list(Source) of
+    {error, _, _} -> {[], Driver};
+    {incomplete, _, _} -> {[], Driver};
+    Charlist when is_list(Charlist) ->
+      Peeked = lists:sublist(Charlist, N),
+      {Peeked, Driver}
+  end;
+driver_peek(#toxic_driver{source = SourceFun} = Driver, N) when is_function(SourceFun) ->
+  % For function sources, we'd need to fetch and cache
+  % For now, return empty 
+  {[], Driver}.
+
+%% @doc Consume N codepoints from driver source  
+%% @spec driver_take(Driver, N) -> {TakenCPs, Driver1}
+driver_take(#toxic_driver{source = Source} = Driver, N) when is_binary(Source) ->
+  case unicode:characters_to_list(Source) of
+    {error, _, _} -> {[], Driver};
+    {incomplete, _, _} -> {[], Driver};
+    Charlist when is_list(Charlist) ->
+      {Taken, Rest} = case length(Charlist) of
+        Len when Len =< N -> {Charlist, []};
+        _ -> {lists:sublist(Charlist, N), lists:nthtail(N, Charlist)}
+      end,
+      % Update position tracking
+      {NewLine, NewColumn, ConsumedBytes} = update_position_from_chars(Taken, Driver#toxic_driver.line, Driver#toxic_driver.column),
+      UpdatedDriver = Driver#toxic_driver{
+        source = case Rest of
+          [] -> <<>>;
+          _ -> unicode:characters_to_binary(Rest)
+        end,
+        offset = Driver#toxic_driver.offset + ConsumedBytes,
+        line = NewLine,
+        column = NewColumn
+      },
+      {Taken, UpdatedDriver}
+  end;
+driver_take(#toxic_driver{source = SourceFun} = Driver, N) when is_function(SourceFun) ->
+  % For function sources, more complex logic needed
+  {[], Driver}.
+
+%% @doc Consume codepoints while predicate is true
+%% @spec driver_take_while(Driver, Pred) -> {TakenCPs, Driver1}
+driver_take_while(#toxic_driver{source = Source} = Driver, Pred) when is_binary(Source) ->
+  case unicode:characters_to_list(Source) of
+    {error, _, _} -> {[], Driver};
+    {incomplete, _, _} -> {[], Driver};
+    Charlist when is_list(Charlist) ->
+      {Taken, Rest} = lists:splitwith(Pred, Charlist),
+      % Update position tracking
+      {NewLine, NewColumn, ConsumedBytes} = update_position_from_chars(Taken, Driver#toxic_driver.line, Driver#toxic_driver.column),
+      UpdatedDriver = Driver#toxic_driver{
+        source = case Rest of
+          [] -> <<>>;
+          _ -> unicode:characters_to_binary(Rest)
+        end,
+        offset = Driver#toxic_driver.offset + ConsumedBytes,
+        line = NewLine,
+        column = NewColumn
+      },
+      {Taken, UpdatedDriver}
+  end;
+driver_take_while(#toxic_driver{source = SourceFun} = Driver, Pred) when is_function(SourceFun) ->
+  % For function sources, more complex logic needed
+  {[], Driver}.
+
+%% @doc Helper to update line/column position from consumed characters
+%% Returns {NewLine, NewColumn, ConsumedBytes}
+update_position_from_chars(Chars, Line, Column) ->
+  update_position_from_chars(Chars, Line, Column, 0).
+
+update_position_from_chars([], Line, Column, Bytes) ->
+  {Line, Column, Bytes};
+update_position_from_chars([$\n | Rest], Line, _Column, Bytes) ->
+  update_position_from_chars(Rest, Line + 1, 1, Bytes + 1);
+update_position_from_chars([$\r | Rest], Line, Column, Bytes) ->
+  % Handle \r but don't advance line (will be handled by \n if CRLF)
+  update_position_from_chars(Rest, Line, Column, Bytes + 1);
+update_position_from_chars([_Char | Rest], Line, Column, Bytes) ->
+  update_position_from_chars(Rest, Line, Column + 1, Bytes + 1).
 
 %% @doc Get current terminator stack from driver
 %% @spec current_terminators(Driver) -> [{Start, Meta, Indent}]
-current_terminators(#toxic_driver{scope = Scope}) ->
-  % Extract terminators from scope
-  case Scope of
-    #toxic_tokenizer{terminators = Terminators} -> 
-      Terminators;
-    _ -> 
-      []
-  end.
+current_terminators(#toxic_driver{scope = #toxic_tokenizer{terminators = Terminators}}) ->
+  Terminators.
 
 %% @doc Peek at potentially missing terminator
 %% @spec peek_missing_terminator(Driver) -> End | nil
@@ -2570,67 +2721,52 @@ scan_loop(Driver, EmitFun) ->
 
 %% Fallback to batch tokenization for compatibility during Phase 1
 %% This will be replaced with proper single-token scanning in Phase 2
-fallback_next_token(#toxic_driver{source = Source, line = Line, column = Column, 
-                                 scope = Scope, offset = Offset} = Driver) ->
-  % Extract remaining source from offset
-  Remaining = binary:part(Source, Offset, byte_size(Source) - Offset),
-  
-  if Remaining =:= <<>> ->
+fallback_next_token(#toxic_driver{source = Source, line = Line, column = Column, scope = Scope} = Driver) ->
+  if Source =:= <<>> ->
     {eof, Driver#toxic_driver{eof = true}};
   true ->
-    % Convert to charlist for existing tokenizer
-    Charlist = binary_to_list(Remaining),
-    
-    % Use existing tokenizer with forced options
+    Charlist = binary_to_list(Source),
     ScopeOpts = [
       {produce_ranges, true},
       {linearize, true},
       {unescape, Scope#toxic_tokenizer.unescape}
     ],
-    
     case tokenize_with_ranges(Charlist, Line, Column, ScopeOpts) of
-      {ok, _NewLine, _NewColumn, _Warnings, [], _Remaining} ->
-        % No tokens produced, EOF
+      {ok, _NL, _NC, _W, [], _Rem} ->
         {eof, Driver#toxic_driver{eof = true}};
-      
-      {ok, _NewLine, _NewColumn, _Warnings, [FirstToken | _], _Remaining2} ->
-        % Extract position info from first token to calculate consumed bytes
-        {_Type, {{_StartLine, _StartCol}, {EndLine, EndCol}, _Extra}, _Value} = FirstToken,
-        
-        % Calculate consumed bytes based on end position of first token
-        % This is an approximation - in a proper implementation we'd track byte positions
-        ConsumedChars = case EndLine of
-          Line -> EndCol - Column;
-          _ -> 
-            % Multi-line token - approximate
-            (EndLine - Line) * 50 + EndCol  % Rough approximation
+      {ok, _NL, _NC, _W, [FirstToken | _], _Rem2} ->
+        EndPos = case FirstToken of
+          {_T, {{_SL, _SC}, {EL, EC}, _X}} -> {EL, EC};
+          {_T, {{_SL, _SC}, {EL, EC}, _X}, _Val} -> {EL, EC}
         end,
-        
-        NewOffset = min(Offset + ConsumedChars, byte_size(Source)),
-        IsEOF = (NewOffset >= byte_size(Source)),
-        
+        {_Consumed, Rest} = split_at_position(Charlist, Line, Column, EndPos),
         UpdatedDriver = Driver#toxic_driver{
-          offset = NewOffset,
-          line = EndLine, 
-          column = EndCol,
-          eof = IsEOF
+          source = unicode:characters_to_binary(Rest),
+          offset = 0,
+          line = element(1, EndPos),
+          column = element(2, EndPos),
+          eof = (Rest =:= [])
         },
         {ok, FirstToken, UpdatedDriver};
-        
-      {error, Meta, Reason, _Rest, _Tokens} ->
-        % Handle error according to error mode
-        case Driver#toxic_driver.error_mode of
-          tolerant ->
-            % Advance by one byte and return error token
-            _ErrorToken = {error_token, Meta, Reason},
-            UpdatedDriver = Driver#toxic_driver{
-              offset = min(Offset + 1, byte_size(Source)),
-              column = Column + 1
-            },
-            {error_token, Meta, Reason, UpdatedDriver};
-          strict ->
-            % Return EOF on error in strict mode
-            {eof, Driver#toxic_driver{eof = true}}
-        end
+      {error, Reason, Rest, _W, _Ts} ->
+        UpdatedDriver = Driver#toxic_driver{
+          source = unicode:characters_to_binary(Rest),
+          offset = 0
+        },
+        {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver}
     end
   end.
+
+%% Split a charlist at the absolute end position; returns {Consumed, Rest}
+split_at_position(String, StartLine, StartCol, {EndLine, EndCol}) ->
+  split_at_position(String, StartLine, StartCol, EndLine, EndCol, []).
+
+split_at_position(Rest, Line, Col, Line, Col, Acc) ->
+  {lists:reverse(Acc), Rest};
+split_at_position([H | T], Line, Col, EndLine, EndCol, Acc) ->
+  case H of
+    $\n -> split_at_position(T, Line + 1, 1, EndLine, EndCol, [H | Acc]);
+    _ -> split_at_position(T, Line, Col + 1, EndLine, EndCol, [H | Acc])
+  end;
+split_at_position([], _Line, _Col, _EndLine, _EndCol, Acc) ->
+  {lists:reverse(Acc), []}.

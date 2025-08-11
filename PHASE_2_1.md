@@ -23,9 +23,28 @@ IMPORTANT: Do NOT create a brand-new character-dispatching tokenizer. We must re
 
 In other words: keep the clause structure and recognition logic; remove only the tail calls like `tokenize(Rest, ...)` that build lists. Replace them with Driver updates and a single-token return. This preserves all battle-tested dispatch logic and avoids re-implementing the lexer from scratch.
 
+Pragmatic path to minimize churn: add `tokenize_single/4`
+
+- Create a new function `tokenize_single(String, Line, Column, Scope)` that mirrors the dispatcher of `tokenize/5` but returns exactly one token (or eof/error) with the remaining tail:
+  - Return shapes:
+    - `{token, Token, Rest, NewLine, NewColumn, NewScope}`
+    - `{eof, NewLine, NewColumn, NewScope}`
+    - `{error, Meta, Reason, Rest, NewLine, NewColumn, NewScope}`
+- Mechanically derive each clause from the existing `tokenize/5` clause by:
+  1) Keeping the same head and guards
+  2) Producing the first token that the clause would have prepended to `Tokens`
+  3) Computing `Rest`, `NewLine`, `NewColumn`, `NewScope`
+  4) Returning `{token, ...}` instead of tail-calling `tokenize/5`
+- Do NOT delete or heavily modify `tokenize/5`; keep it as-is for legacy and for validation. `scan_token/1` should call `tokenize_single/4` once per token.
+
 ## B. Replace recursion in tokenize/5 family (PRESERVE EXISTING CLAUSES)
 
-All clauses of `tokenize(String, Line, Column, Scope, Tokens)` and helper functions that call it recursively must be reworked to operate on driver state and return a single token. Do not introduce a second dispatcher. Instead, refactor each existing clause to stop recursing and instead yield exactly one token and an updated Driver.
+Preferred approach: implement `tokenize_single/4` using the existing dispatch patterns and leave `tokenize/5` untouched. If you choose to inline `Driver` updates into each existing clause, ensure you do not re-create a new dispatcher; reuse each clause head and emit one token.
+
+Validation status (current tree):
+- Driver API (`init_driver/4`, `next/1`, `current_terminators/1`, `peek_missing_terminator/1`, `scan/5`) present.
+- `scan_token/1` currently falls back to `tokenize_with_ranges/4` and splits the source; acceptable as temporary but must be replaced with a call to `tokenize_single/4` once implemented.
+- `tokenize/5` clauses are still recursive and untouched. Action: derive `tokenize_single/4` and wire `scan_token_from_charlist/2` to it.
 
 Key areas to transform:
 
