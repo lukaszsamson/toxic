@@ -6,7 +6,7 @@
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
 -export([invalid_do_error/1, terminator/1]).
--export([tokenize_with_ranges/4, ranges_to_legacy/1, collapse_linear_ranges/1]).
+-export([ranges_to_legacy/1, collapse_linear_ranges/1]).
 %% Driver API exports
 -export([init_driver/4, next/1, current_terminators/1, peek_missing_terminator/1, scan/5]).
 
@@ -362,6 +362,15 @@ combine_range_meta(Start, End) -> {Start, End}.
 
 tokenize_single(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
   error({badarg, tokenize, line_or_column_not_integer, {Line, Column, Scope, Tokens}});
+
+tokenize_single(String, Line, Column, #toxic_tokenizer{mode = [{interp, string, _Delim, _Frames} | _]} = Scope, Tokens) when is_list(String) ->
+  toxic_interpolation:extract_single(String, Line, Column, Scope, Tokens);
+
+tokenize_single([$}], Line, Column, #toxic_tokenizer{mode = [normal | _]} = Scope, Tokens) ->
+  # TODO: yield(end_interpolation)
+  # TODO: pop normal mode from the stack
+  # TODO: pop terminator from the stack
+
 
 tokenize_single([], Line, Column, #toxic_tokenizer{cursor_completion=Cursor} = Scope, Tokens) when Cursor /= false ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, terminators=Terminators, warnings=Warnings} = Scope,
@@ -739,6 +748,10 @@ tokenize_single([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?i
       BaseScope
   end,
 
+  # TODO: yield(begin_atom) instead of calling extract
+  # TODO: push interpolation mode onto the stack
+  # TODO: push opening terminator onto the stack
+
   case toxic_interpolation:extract(Line, Column + 2, Scope, true, T, H) of
     {NewLine, NewColumn, Parts, Rest, InterScope} ->
       NewScope = case is_unnecessary_quote(Parts, InterScope) of
@@ -1094,6 +1107,9 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
   end.
 
 handle_strings(T, Line, Column, H, Scope, Tokens) ->
+  # TODO: yield(begin_bin|liststring) instead of calling extract
+  # TODO: push interpolation mode onto the stack
+  # TODO: push opening terminator onto the stack
   case toxic_interpolation:extract(Line, Column, Scope, true, T, H) of
     {error, Reason} ->
       interpolation_error(Reason, [H | T], Scope, Tokens, " (for string starting at line ~B)", [Line], Line, Column-1, [H], [H]);
@@ -1280,6 +1296,9 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
     false ->
       BaseScope
   end,
+  # TODO: yield(begin_identifier) instead of calling extract
+  # TODO: push interpolation mode onto the stack
+  # TODO: push opening terminator onto the stack
 
   case toxic_interpolation:extract(Line, Column + 1, Scope, true, T, H) of
     {NewLine, NewColumn, [Part], Rest, InterScope} when is_list(Part) ->
@@ -1497,6 +1516,10 @@ extract_heredoc_with_interpolation(Line, Column, Scope, Interpol, T, H) ->
       %% We prepend a new line so we can transparently remove
       %% spaces later. This new line is removed by calling "tl"
       %% in the final heredoc body three lines below.
+      # TODO: yield(begin_heredoc) instead of calling extract
+      # TODO: push interpolation mode onto the stack
+      # TODO: push opening terminator onto the stack
+
       case toxic_interpolation:extract(Line, Column, Scope, Interpol, [$\n|Headerless], [H,H,H]) of
         {NewLine, NewColumn, Parts0, Rest, InterScope} ->
           Indent = NewColumn - 4,
@@ -2165,6 +2188,10 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
 
 tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, Scope, Tokens)
     when ?is_sigil(H) ->
+  # TODO: yield(begin_sigil) instead of calling extract
+  # TODO: push interpolation mode onto the stack
+  # TODO: push opening terminator onto the stack
+
   case toxic_interpolation:extract(Line, Column + 1, Scope, ?is_downcase(S), T, sigil_terminator(H)) of
     {NewLine, NewColumn, Parts, Rest, NewScope} ->
       case NewScope#toxic_tokenizer.linearize of

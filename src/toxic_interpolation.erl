@@ -16,27 +16,27 @@ extract(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_i
 
 %% Terminators
 
-extract([], _Buffer, _Output, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([], _Buffer, _Output, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
 
-extract([], Buffer, Output, Line, Column, Scope, _Interpol, _Last) ->
+extract_single([], Buffer, Output, Line, Column, Scope, _Interpol, _Last) ->
   finish_extraction([], Buffer, Output, Line, Column, Scope);
 
-extract([Last | Rest], Buffer, Output, Line, Column, Scope, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([Last | Rest], Buffer, Output, Line, Column, Scope, _Interpol, Last) when is_integer(Line), is_integer(Column) ->
   finish_extraction(Rest, Buffer, Output, Line, Column + 1, Scope);
 
 %% Going through the string
 
-extract([$\\, $\r, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\, $\r, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n, $\r, $\\ | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\\, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\, $\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n, $\\ | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\n | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_nl(Rest, [$\n | Buffer], Output, Line, Scope, Interpol, Last);
 
-extract([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   NewScope =
     %% TODO: Remove this on Elixir v2.0
     case Interpol of
@@ -49,13 +49,16 @@ extract([$\\, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
 
   extract(Rest, [Last | Buffer], Output, Line, Column+2, NewScope, Interpol, Last);
 
-extract([$\\, Last, Last, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, [Last, Last, Last] = All) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\, Last, Last, Last | Rest], Buffer, Output, Line, Column, Scope, Interpol, [Last, Last, Last] = All) when is_integer(Line), is_integer(Column) ->
   extract(Rest, [Last, Last, Last | Buffer], Output, Line, Column+4, Scope, Interpol, All);
 
-extract([$\\, $#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\, $#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
   extract(Rest, [${, $#, $\\ | Buffer], Output, Line, Column+3, Scope, true, Last);
 
-extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when is_integer(Line), is_integer(Column) ->
+  %  TODO: yield here emitting string part and begin interpolation
+  % push interpolation mode onto the stack
+  % push opening terminator onto the stack
   Output1 = build_string(Buffer, Output),
   case toxic_tokenizer:tokenize(Rest, Line, Column + 2, Scope#toxic_tokenizer{terminators=[]}) of
     {error, {Location, _, "}"}, [$} | NewRest], Warnings, Tokens} ->
@@ -77,16 +80,16 @@ extract([$#, ${ | Rest], Buffer, Output, Line, Column, Scope, true, Last) when i
       {error, {string, Line, Column, "missing interpolation terminator: \"}\"", []}}
   end;
 
-extract([$\\ | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single([$\\ | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_char(Rest, [$\\ | Buffer], Output, Line, Column + 1, Scope, Interpol, Last);
 
 %% Catch all clause
 
-extract([Char1, Char2 | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
+extract_single([Char1, Char2 | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
     when Char1 =< 255, Char2 =< 255, is_integer(Line), is_integer(Column) ->
   extract([Char2 | Rest], [Char1 | Buffer], Output, Line, Column + 1, Scope, Interpol, Last);
 
-extract(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
+extract_single(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) when is_integer(Line), is_integer(Column) ->
   extract_char(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last).
 
 extract_char(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
