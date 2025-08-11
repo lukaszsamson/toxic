@@ -4,6 +4,19 @@ Goal: Refactor the recursive, list-producing tokenizer into a driver-compatible,
 
 This plan lists all code areas to update with concrete instructions for a coder model.
 
+## Current progress (validated)
+
+- Driver wired to single-token path:
+  - `scan_token_from_charlist/2` now calls `tokenize_single/4` and updates driver state with `{token|eof|error, ...}`. Good.
+  - `yield/5` helper implemented to convert accumulated token list into a single `{token, ...}` return. Good.
+  - Fallback path still exists but main path is single-token. Acceptable during Phase 2.1.
+- Dispatcher refactor started:
+  - `tokenize/5` was renamed to `tokenize_single/5` and many clauses now call `yield/5` instead of recursing. Good.
+
+What remains to finish Phase 2.1:
+- Eliminate remaining recursive calls to `tokenize_single/5` and helper re-entry. Replace with `yield/5` or explicit `{error, ...}` returns.
+- Ensure all helper paths (`handle_*`, `tokenize_dot/…`, `handle_op/…`) return via `yield/5` or `{error, …}` without re-entering the dispatcher.
+
 ## A. Introduce scan_token/1 and driver loop entry points (REUSE tokenize/5 DISPATCH)
 
 - Add a new internal function:
@@ -45,6 +58,26 @@ Validation status (current tree):
 - Driver API (`init_driver/4`, `next/1`, `current_terminators/1`, `peek_missing_terminator/1`, `scan/5`) present.
 - `scan_token/1` currently falls back to `tokenize_with_ranges/4` and splits the source; acceptable as temporary but must be replaced with a call to `tokenize_single/4` once implemented.
 - `tokenize/5` clauses are still recursive and untouched. Action: derive `tokenize_single/4` and wire `scan_token_from_charlist/2` to it.
+
+Updated status after wiring:
+- `scan_token_from_charlist/2` now calls `tokenize_single/4` (done).
+- `yield/5` implemented (done).
+- Remaining recursive calls to remove (approximate line refs in `src/toxic_tokenizer.erl`):
+  - 589–596: `"..//"` special-case — replace `tokenize_single(Remaining, ...)` with `yield(Remaining, ...)` (already have `Token`).
+  - 817–833: `[$: | String]` atoms path — case `empty` uses `tokenize_single([], ...)`; replace with `yield([], Line, Column, Scope, Tokens)`.
+  - 838–866: numbers — case for cursor-completion uses `tokenize_single([], ...)`; replace with `yield([], ...)`.
+  - 917–921: percent opener — change `tokenize_single(T, ...)` to `yield(T, ...)` with the built `'{%'` opener token in Tokens.
+  - 920–1050: `tokenize_dot/6` and its recursion — ensure it does not call back into `tokenize_dot/6` or `tokenize_single/5` to continue; the last step must call `handle_dot/…` and end with `yield/5`.
+  - 1281: `handle_dot([$., $( | Rest], ...)` currently uses `yield([$( | Rest], ...)` (good); verify all branches end in `yield` and remove any final `tokenize_single(String, ...)` (see ~1364, ~1381 lines).
+  - 1364: trailing `tokenize_single(String, Line, Column, Scope, Tokens).` — replace with `unexpected_token(String, Line, Column, Scope, Tokens)` or a specific error return appropriate for the dot-fallback.
+  - 1377–1381: `handle_space_sensitive_tokens` uses `tokenize_single([$(], ...)` — replace with `yield([$(], ...)`.
+  - 1213, 1228, 1234, 1256, 1321, 1335, 1353, 1358, 1819, 1884, 1892, 2080, 2085, 2113, 2164, 2187: verify each still-recursive helper ends with `yield/5` and no re-entry to the dispatcher.
+
+Instructions for each change:
+- When you see `tokenize_single(Rest, NewLine, NewColumn, NewScope, [Token | Tokens])`, replace with `yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens])`.
+- When you see `tokenize_single([], Line, Column, Scope, Tokens)`, replace with `yield([], Line, Column, Scope, Tokens)`.
+- If a helper currently “continues” scanning (calls `tokenize_*` again), terminate the helper by returning a single token via `yield/5`. Any additional scanning belongs to the next driver `next/1` call.
+- For error flows, prefer existing `error(Reason, Rest, Scope, Tokens)` (scan_token handles both error tuple shapes). If you must synthesize, use `{error, Meta, Reason, Rest, NewLine, NewColumn, NewScope}`.
 
 Key areas to transform:
 
