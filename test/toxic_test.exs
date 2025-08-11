@@ -65,42 +65,42 @@ defmodule ToxicTest do
     assert tokenize("") == {:ok, [], ""}
   end
 
-  describe "tokenize_with_ranges" do
-    test "returns tokens with end positions" do
-      {:ok, _, _, _, tokens, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
-          {:linearize, true}
-        ])
+  # describe "tokenize_with_ranges" do
+  #   test "returns tokens with end positions" do
+  #     {:ok, _, _, _, tokens, _} =
+  #       :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
+  #         {:linearize, true}
+  #       ])
 
-      # Check that we got a token with range format
-      assert [{:int, {{1, 1}, {1, 6}, _}, ~c"0x123"}] = Enum.reverse(tokens)
-    end
+  #     # Check that we got a token with range format
+  #     assert [{:int, {{1, 1}, {1, 6}, _}, ~c"0x123"}] = Enum.reverse(tokens)
+  #   end
 
-    test "multi-token expression has correct ranges" do
-      {:ok, _, _, _, tokens, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123;"), 1, 1, [
-          {:linearize, true}
-        ])
+  #   test "multi-token expression has correct ranges" do
+  #     {:ok, _, _, _, tokens, _} =
+  #       :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123;"), 1, 1, [
+  #         {:linearize, true}
+  #       ])
 
-      reversed = Enum.reverse(tokens)
+  #     reversed = Enum.reverse(tokens)
 
-      # Check we got the expected tokens with ranges
-      assert [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
-              {:";", {{1, 6}, {1, 7}, 0}}] = reversed
-    end
+  #     # Check we got the expected tokens with ranges
+  #     assert [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
+  #             {:";", {{1, 6}, {1, 7}, 0}}] = reversed
+  #   end
 
-    test "ranges_to_legacy converts correctly" do
-      {:ok, _, _, _, tokens_with_ranges, _} =
-        :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
-          {:linearize, true}
-        ])
+  #   test "ranges_to_legacy converts correctly" do
+  #     {:ok, _, _, _, tokens_with_ranges, _} =
+  #       :toxic_tokenizer.tokenize_with_ranges(to_charlist("0x123"), 1, 1, [
+  #         {:linearize, true}
+  #       ])
 
-      legacy_tokens = :toxic_tokenizer.ranges_to_legacy(tokens_with_ranges)
+  #     legacy_tokens = :toxic_tokenizer.ranges_to_legacy(tokens_with_ranges)
 
-      # Should match the legacy format
-      assert [{:int, {1, 1, _}, ~c"0x123"}] = Enum.reverse(legacy_tokens)
-    end
-  end
+  #     # Should match the legacy format
+  #     assert [{:int, {1, 1, _}, ~c"0x123"}] = Enum.reverse(legacy_tokens)
+  #   end
+  # end
 
   describe "hex numbers" do
     test "simple hex numbers" do

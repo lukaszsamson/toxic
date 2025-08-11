@@ -4,7 +4,7 @@
 
 % Handle string and string-like interpolations.
 -module(toxic_interpolation).
--export([extract/6, unescape_string/1, unescape_string/2,
+-export([extract/6, extract_stream_event/6, unescape_string/1, unescape_string/2,
 unescape_tokens/1, unescape_map/1]).
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
@@ -13,6 +13,75 @@ unescape_tokens/1, unescape_map/1]).
 
 extract(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_integer(Column) ->
   extract(String, [], [], Line, Column, Scope, Interpol, Last).
+
+%% Original extract implementation - keep for compatibility
+extract(String, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
+  extract_single(String, Buffer, Output, Line, Column, Scope, Interpol, Last).
+
+%% Streaming interpolation API - emit events instead of collecting parts
+%% Returns: {event_type(), EventData, Rest, NewLine, NewColumn, NewScope}
+%% Event types:
+%%   {fragment, Meta, Binary} - raw string content  
+%%   {begin_interpolation, Meta, Kind} - start of #{...}
+%%   {end_interpolation, Meta, Kind} - end of interpolation
+%%   {done, Meta, Terminator} - string complete
+%%   {error, Meta, Reason} - parse error
+
+extract_stream_event(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_integer(Column) ->
+  extract_stream_next(String, [], Line, Column, Scope, Interpol, Last).
+
+%% Stream processing - accumulate buffer until we hit a significant event
+extract_stream_next([], Buffer, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) ->
+  {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
+
+extract_stream_next([], Buffer, Line, Column, Scope, _Interpol, _Last) ->
+  % EOF reached - emit final fragment if any, then done
+  case Buffer of
+    [] -> {done, make_meta_pos(Line, Column), [], [], Line, Column, Scope};
+    _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
+  end;
+
+extract_stream_next([Last | Rest], Buffer, Line, Column, Scope, _Interpol, Last) ->
+  % Found terminator - emit fragment if any, then done
+  case Buffer of
+    [] -> {done, make_meta_pos(Line, Column + 1), Last, Rest, Line, Column + 1, Scope};
+    _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column, Scope}
+  end;
+
+extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, Last) ->
+  % Found interpolation start - emit fragment if any, then begin_interpolation
+  case Buffer of
+    [] -> {begin_interpolation, make_meta_pos(Line, Column), string, Rest, Line, Column + 2, Scope};
+    _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [$#, ${ | Rest], Line, Column, Scope}
+  end;
+
+extract_stream_next([$\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+  % Handle newlines
+  extract_stream_next(Rest, [$\n | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
+
+extract_stream_next([$\\, $\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+  % Handle escaped newlines
+  extract_stream_next(Rest, [$\n, $\\ | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
+
+extract_stream_next([$\\, $\r, $\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+  % Handle escaped CRLF
+  extract_stream_next(Rest, [$\n, $\r, $\\ | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
+
+extract_stream_next([$\\, Last | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+  % Handle escaped terminator
+  extract_stream_next(Rest, [Last, $\\ | Buffer], Line, Column + 2, Scope, Interpol, Last);
+
+extract_stream_next([$\\, $#, ${ | Rest], Buffer, Line, Column, Scope, true, Last) ->
+  % Handle escaped interpolation start
+  extract_stream_next(Rest, [${, $#, $\\ | Buffer], Line, Column + 3, Scope, true, Last);
+
+extract_stream_next([Char | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+  % Regular character - add to buffer and continue
+  extract_stream_next(Rest, [Char | Buffer], Line, Column + 1, Scope, Interpol, Last).
+
+%% Helper to create simple positional metadata
+make_meta_pos(Line, Column) ->
+  {Line, Column, nil}.
 
 %% Terminators
 
