@@ -9,30 +9,6 @@ defmodule Toxic.TokenStream do
   - Lookahead, pushback, and incremental lexing support
   """
 
-  # Extract Erlang record definition and create Elixir record
-  require Record
-  Record.defrecord(:toxic_driver, Record.extract(:toxic_driver, from: "src/toxic_tokenizer.hrl"))
-  
-  # Make record macros available for access and manipulation
-  # Usage examples:
-  # - Access: toxic_driver(driver, :line)
-  # - Pattern match: toxic_driver(line: line) = driver
-  # - Update: toxic_driver(driver, line: new_line)
-
-  @typedoc "Driver record type extracted from Erlang"
-  @type toxic_driver :: record(:toxic_driver,
-    source: binary() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof),
-    offset: non_neg_integer(),
-    line: pos_integer(),
-    column: pos_integer(),
-    scope: term(),
-    mode: :normal | {:interp, atom(), atom(), atom(), term()},
-    error_mode: :strict | :tolerant,
-    error_sync: [atom()],
-    lookahead_cache: [term()],
-    eof: boolean()
-  )
-
   @typedoc "Token with ranged meta; shapes match tokenizer"
   # TODO: better typespec with detailed types
   @type token :: tuple()
@@ -50,7 +26,7 @@ defmodule Toxic.TokenStream do
   @type t :: %__MODULE__{
           buffer: :queue.queue(token),
           push: [token],
-          driver: toxic_driver(),
+          driver: Toxic.Driver.t(),
           opts: options,
           eof: boolean(),
           error: term() | nil
@@ -64,6 +40,7 @@ defmodule Toxic.TokenStream do
   defstruct buffer: :queue.new(),
             push: [],
             driver: nil,
+            source: nil,
             opts: [],
             eof: false,
             error: nil
@@ -90,12 +67,10 @@ defmodule Toxic.TokenStream do
   @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
     opts = Keyword.merge(@default_opts, opts)
-    
-    # Initialize driver using the new API
-    {:ok, driver} = :toxic_tokenizer.init_driver(normalize_source_for_driver(source), line, column, driver_opts(opts))
 
     %__MODULE__{
-      driver: driver,
+      driver: Toxic.Driver.new(),
+      source: source,
       opts: opts
     }
   end
@@ -279,16 +254,16 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  @doc """
-  Get the current absolute position (start of next token).
-  """
-  @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
-  def position(%__MODULE__{driver: driver} = stream) do
-    # Extract position from driver record using record macros
-    line = toxic_driver(driver, :line)
-    column = toxic_driver(driver, :column)
-    {{line, column}, stream}
-  end
+  # @doc """
+  # Get the current absolute position (start of next token).
+  # """
+  # @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
+  # def position(%__MODULE__{driver: driver} = stream) do
+  #   # Extract position from driver record using record macros
+  #   line = toxic_driver(driver, :line)
+  #   column = toxic_driver(driver, :column)
+  #   {{line, column}, stream}
+  # end
 
   @doc """
   Convert the stream to an Elixir Stream for enumeration.
@@ -317,20 +292,20 @@ defmodule Toxic.TokenStream do
     new(slice_source, line_base, column_base, opts)
   end
 
-  @doc """
-  Re-lex a range of the input.
-  """
-  @spec relex_range(t(), non_neg_integer(), non_neg_integer(), iodata()) :: t()
-  def relex_range(%__MODULE__{} = stream, _start_offset, _end_offset, new_content) do
-    # TODO: real implementation
-    # This is a complex operation that would require:
-    # 1. Invalidating buffered tokens in the range
-    # 2. Re-lexing the new content
-    # 3. Splicing the results
-    # For now, create a new stream with the new content
-    {{line, column}, _} = position(stream)
-    new(new_content, line, column, stream.opts)
-  end
+  # @doc """
+  # Re-lex a range of the input.
+  # """
+  # @spec relex_range(t(), non_neg_integer(), non_neg_integer(), iodata()) :: t()
+  # def relex_range(%__MODULE__{} = stream, _start_offset, _end_offset, new_content) do
+  #   # TODO: real implementation
+  #   # This is a complex operation that would require:
+  #   # 1. Invalidating buffered tokens in the range
+  #   # 2. Re-lexing the new content
+  #   # 3. Splicing the results
+  #   # For now, create a new stream with the new content
+  #   {{line, column}, _} = position(stream)
+  #   new(new_content, line, column, stream.opts)
+  # end
 
   @doc """
   Get the current terminator stack.
@@ -369,55 +344,50 @@ defmodule Toxic.TokenStream do
   defp driver_opts(opts) do
     [
       unescape: Keyword.get(opts, :unescape, true),
-      linearize: Keyword.get(opts, :linearize, true),
       error_mode: Keyword.get(opts, :error_mode, :tolerant),
       error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
     ]
   end
 
-  defp fetch_tokens_from_driver(driver, max_batch, opts) do
+  defp fetch_tokens_from_driver(stream, max_batch, opts) do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
-    {tokens, new_driver, eof} = fetch_tokens_from_driver(driver, max_batch, [], 0, opts)
+    # TODO: slicing source
+    source_string = normalize_source_for_driver(stream.source)
+    {tokens, source_string, new_driver, eof} = fetch_tokens_from_driver(stream.driver, source_string, max_batch, [], 0, opts)
 
-    tokens =
-      if Keyword.get(opts, :linearize, true) do
-        tokens
-      else
-        :toxic_tokenizer.collapse_linear_ranges(tokens)
-      end
-
-    {tokens, new_driver, eof}
+    {tokens, source_string,  new_driver, eof}
   end
 
-  defp fetch_tokens_from_driver(driver, max_batch, acc, count, _opts) when count >= max_batch do
-    {Enum.reverse(acc), driver, false}
+  defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, _opts) when count >= max_batch do
+    {Enum.reverse(acc), source_string, driver, false}
   end
 
-  defp fetch_tokens_from_driver(driver, max_batch, acc, count, opts) do
-    case :toxic_tokenizer.next(driver) do
-      {:ok, token, new_driver} ->
+  defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
+
+    case Toxic.Driver.next(source_string, driver) |> dbg do
+      {:ok, token, source_string, driver} ->
         processed_token = process_token(token, %__MODULE__{opts: opts})
         if processed_token == nil do
           # Skip nil tokens (e.g., filtered EOL) and continue
-          fetch_tokens_from_driver(new_driver, max_batch, acc, count, opts)
+          fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts)
         else
-          fetch_tokens_from_driver(new_driver, max_batch, [processed_token | acc], count + 1, opts)
+          fetch_tokens_from_driver(driver, source_string, max_batch, [processed_token | acc], count + 1, opts)
         end
-      
-      {:eof, new_driver} ->
-        {Enum.reverse(acc), new_driver, true}
-      
-      {:error_token, meta, reason, new_driver} ->
+
+      {:eof, driver} ->
+        {Enum.reverse(acc), [], driver, true}
+
+      {:error_token, meta, reason, driver} ->
         error_token = {:error_token, meta, reason}
-        fetch_tokens_from_driver(new_driver, max_batch, [error_token | acc], count + 1, opts)
+        fetch_tokens_from_driver(driver, source_string, max_batch, [error_token | acc], count + 1, opts)
     end
   end
 
   defp refill_buffer(%__MODULE__{eof: true} = stream), do: stream
-  defp refill_buffer(%__MODULE__{driver: driver, opts: opts} = stream) do
+  defp refill_buffer(%__MODULE__{opts: opts} = stream) do
     max_batch = Keyword.get(opts, :max_batch, 256)
-    
-    {tokens, new_driver, eof} = fetch_tokens_from_driver(driver, max_batch, opts)
+
+    {tokens, source, new_driver, eof} = fetch_tokens_from_driver(stream, max_batch, opts) |> dbg
 
     new_buffer = Enum.reduce(tokens, stream.buffer, fn token, buf ->
       :queue.in(token, buf)
@@ -425,10 +395,11 @@ defmodule Toxic.TokenStream do
 
     # Only set EOF if driver is at EOF AND we got no new tokens
     stream_eof = eof and tokens == []
-    
+
     %{stream |
       buffer: new_buffer,
       driver: new_driver,
+      source: source,
       eof: stream_eof
     }
   end

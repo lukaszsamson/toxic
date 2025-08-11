@@ -6,9 +6,9 @@
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
 -export([invalid_do_error/1, terminator/1]).
--export([ranges_to_legacy/1, collapse_linear_ranges/1, tokenize/1]).
+-export([ranges_to_legacy/1, collapse_linear_ranges/1, tokenize/1, tokenize_single/5]).
 %% Driver API exports
--export([init_driver/4, next/1, current_terminators/1, peek_missing_terminator/1, scan/5]).
+-export([current_terminators/1, peek_missing_terminator/1]).
 
 -define(at_op(T),
   T =:= $@).
@@ -135,10 +135,6 @@ tokenize_single(String, Line, Column, Opts) ->
         Acc#toxic_tokenizer{unescape=Unescape};
       ({indentation, Indentation}, Acc) when Indentation >= 0 ->
         Acc#toxic_tokenizer{column=Indentation+1};
-      ({produce_ranges, ProduceRanges}, Acc) when is_boolean(ProduceRanges) ->
-        Acc#toxic_tokenizer{produce_ranges=ProduceRanges};
-      ({linearize, Linearize}, Acc) when is_boolean(Linearize) ->
-        Acc#toxic_tokenizer{linearize=Linearize};
       (_, Acc) ->
         Acc
     end, #toxic_tokenizer{identifier_tokenizer=IdentifierTokenizer}, Opts),
@@ -159,10 +155,8 @@ ranges_to_legacy(TokensWithRanges) ->
 
 %% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
 %% Build meta depending on whether ranges are enabled
-make_meta(Line, Column, EndLine, EndColumn, Extra, #toxic_tokenizer{produce_ranges=true}) ->
-  {{Line, Column}, {EndLine, EndColumn}, Extra};
-make_meta(Line, Column, _EndLine, _EndColumn, Extra, #toxic_tokenizer{produce_ranges=false}) ->
-  {Line, Column, Extra}.
+make_meta(Line, Column, EndLine, EndColumn, Extra, #toxic_tokenizer{}) ->
+  {{Line, Column}, {EndLine, EndColumn}, Extra}.
 
 make_meta_len(Line, Column, Len, Extra, Scope) when is_integer(Line), is_integer(Column), is_integer(Len) ->
   make_meta(Line, Column, Line, Column + Len, Extra, Scope).
@@ -399,7 +393,8 @@ tokenize_single([], EndLine, EndColumn, #toxic_tokenizer{terminators=[{Start, {S
 tokenize_single([], Line, Column, #toxic_tokenizer{} = Scope, Tokens) ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, warnings=Warnings} = Scope,
   AllWarnings = maybe_unicode_lint_warnings(Ascii, Tokens, Warnings),
-  {ok, Line, Column, AllWarnings, Tokens, []};
+  % {ok, Line, Column, AllWarnings, Tokens, []};
+  yield([], Line, Column + 1, Scope, Tokens);
 
 % VC merge conflict
 
@@ -769,49 +764,26 @@ tokenize_single([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?i
           InterScope
       end,
 
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, [Part]} when is_binary(Part) ->
-              case unsafe_to_atom(Part, Line, Column, Scope) of
-                {ok, Atom} ->
-                  Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-                  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-                {error, Reason} ->
-                  error(Reason, Rest, NewScope, Tokens)
-              end;
-            {ok, Unescaped} ->
-              StartType = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_start; false -> atom_unsafe_start end,
-              EndType   = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_end;   false -> atom_unsafe_end   end,
-              StartTok = {StartType, make_meta(Line, Column, Line, Column + 1, nil, NewScope), H},
-              Seq = linearize_parts(Unescaped, NewScope, atom),
-              EndTok = {EndType, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-              Emitted = [StartTok] ++ Seq ++ [EndTok],
-              NewTokens2 = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              yield(Rest, NewLine, NewColumn, NewScope, NewTokens2);
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end;
-        false ->
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, [Part]} when is_binary(Part) ->
-              case unsafe_to_atom(Part, Line, Column, Scope) of
-                {ok, Atom} ->
-                  Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-                  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-                {error, Reason} ->
-                  error(Reason, Rest, NewScope, Tokens)
-              end;
-            {ok, Unescaped} ->
-              Key = case Scope#toxic_tokenizer.existing_atoms_only of
-                true  -> atom_safe;
-                false -> atom_unsafe
-              end,
-              Token = {Key, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Unescaped},
+      case unescape_tokens(Parts, Line, Column, NewScope) of
+        {ok, [Part]} when is_binary(Part) ->
+          case unsafe_to_atom(Part, Line, Column, Scope) of
+            {ok, Atom} ->
+              Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
               yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
             {error, Reason} ->
               error(Reason, Rest, NewScope, Tokens)
-          end
+          end;
+        {ok, Unescaped} ->
+          StartType = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_start; false -> atom_unsafe_start end,
+          EndType   = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_end;   false -> atom_unsafe_end   end,
+          StartTok = {StartType, make_meta(Line, Column, Line, Column + 1, nil, NewScope), H},
+          Seq = linearize_parts(Unescaped, NewScope, atom),
+          EndTok = {EndType, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
+          Emitted = [StartTok] ++ Seq ++ [EndTok],
+          NewTokens2 = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          yield(Rest, NewLine, NewColumn, NewScope, NewTokens2);
+        {error, Reason} ->
+          error(Reason, Rest, NewScope, Tokens)
       end;
 
     {error, Reason} ->
@@ -1072,41 +1044,29 @@ handle_char(_)  -> false.
 handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
   case extract_heredoc_with_interpolation(Line, Column, Scope, true, T, H) of
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          StartTok = case H of
-            $' -> {list_heredoc_start, make_meta(Line, Column, Line, Column + 3, nil, NewScope), "'''"};
-            _  -> {bin_heredoc_start,  make_meta(Line, Column, Line, Column + 3, nil, NewScope), "\"\"\""}
-          end,
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, Unescaped} ->
-              Seq = linearize_parts(Unescaped, NewScope, heredoc),
-              EndTok = case H of
-                $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
-                _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
-              end,
-              Emitted = [StartTok] ++ Seq ++ [EndTok],
-              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end;
-        false ->
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, Unescaped} ->
-              Token = {heredoc_type(H), make_meta(Line, Column, NewLine, NewColumn, nil, NewScope), NewColumn - 4, Unescaped},
-              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-
-            {error, Reason} ->
-              error(Reason, Rest, Scope, Tokens)
-          end
-      end;
+        StartTok = case H of
+          $' -> {list_heredoc_start, make_meta(Line, Column, Line, Column + 3, nil, NewScope), "'''"};
+          _  -> {bin_heredoc_start,  make_meta(Line, Column, Line, Column + 3, nil, NewScope), "\"\"\""}
+        end,
+        case unescape_tokens(Parts, Line, Column, NewScope) of
+          {ok, Unescaped} ->
+            Seq = linearize_parts(Unescaped, NewScope, heredoc),
+            EndTok = case H of
+              $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
+              _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
+            end,
+            Emitted = [StartTok] ++ Seq ++ [EndTok],
+            NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+            yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
+          {error, Reason} ->
+            error(Reason, Rest, NewScope, Tokens)
+        end;
 
     {error, Reason} ->
       error(Reason, [H, H, H] ++ T, Scope, Tokens)
   end.
 
-handle_strings(T, Line, Column, H, #toxic_tokenizer{linearize=true} = Scope, _Tokens) ->
+handle_strings(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
   % Linearized streaming mode
   {StartType, Kind} = case H of
     $' -> {list_string_start, charlist};
@@ -1144,43 +1104,19 @@ handle_strings_old(T, Line, Column, H, Scope, Tokens) ->
         false ->
           InterScope
       end,
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          %% Linearized quoted keyword identifier
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, Unescaped} ->
-              StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H},
-              Seq = linearize_parts(Unescaped, NewScope, kw_identifier),
-              EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-              ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, NewScope)},
-              Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
-              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              yield(Rest, NewLine, NewColumn + 1, NewScope, NewTokens);
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end;
-        false ->
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, [Part]} when is_binary(Part) ->
-              case unsafe_to_atom(Part, Line, Column - 1, Scope) of
-                {ok, Atom} ->
-                  Token = {kw_identifier, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Atom},
-                  yield(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
-                {error, Reason} ->
-                  error(Reason, Rest, NewScope, Tokens)
-              end;
 
-            {ok, Unescaped} ->
-              Key = case Scope#toxic_tokenizer.existing_atoms_only of
-                true  -> kw_identifier_safe;
-                false -> kw_identifier_unsafe
-              end,
-              Token = {Key, make_meta(Line, Column - 1, NewLine, NewColumn + 1, H, NewScope), Unescaped},
-              yield(Rest, NewLine, NewColumn + 1, NewScope, [Token | Tokens]);
-
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end
+      %% Linearized quoted keyword identifier
+      case unescape_tokens(Parts, Line, Column, NewScope) of
+        {ok, Unescaped} ->
+          StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H},
+          Seq = linearize_parts(Unescaped, NewScope, kw_identifier),
+          EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
+          ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, NewScope)},
+          Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
+          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+          yield(Rest, NewLine, NewColumn + 1, NewScope, NewTokens);
+        {error, Reason} ->
+          error(Reason, Rest, NewScope, Tokens)
       end;
 
     {NewLine, NewColumn, Parts, Rest, InterScope} ->
@@ -1196,34 +1132,23 @@ handle_strings_old(T, Line, Column, H, Scope, Tokens) ->
           _ ->
             InterScope
         end,
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          %% Linearized normal string/charlist with proper unescape error handling
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, Unescaped} ->
-              {StartTok, EndTok} = case H of
-                $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
-                      , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} };
-                _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
-                      , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} }
-              end,
-              Seq = linearize_parts(Unescaped, NewScope, (if H =:= $' -> charlist; true -> string end)),
-              Emitted = [StartTok] ++ Seq ++ [EndTok],
-              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end;
-        false ->
-          case unescape_tokens(Parts, Line, Column, NewScope) of
-            {ok, Unescaped} ->
-              Token = {string_type(H), make_meta(Line, Column - 1, NewLine, NewColumn, nil, NewScope), Unescaped},
-              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
 
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end
-      end
+        %% Linearized normal string/charlist with proper unescape error handling
+        case unescape_tokens(Parts, Line, Column, NewScope) of
+          {ok, Unescaped} ->
+            {StartTok, EndTok} = case H of
+              $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
+                    , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} };
+              _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
+                    , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} }
+            end,
+            Seq = linearize_parts(Unescaped, NewScope, (if H =:= $' -> charlist; true -> string end)),
+            Emitted = [StartTok] ++ Seq ++ [EndTok],
+            NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+            yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
+          {error, Reason} ->
+            error(Reason, Rest, NewScope, Tokens)
+        end
   end.
 
 handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
@@ -1326,40 +1251,23 @@ handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) whe
           InterScope
       end,
 
-      case InterScope#toxic_tokenizer.linearize of
-        true ->
-          %% Linearized flow: consistent begin/end markers around quoted identifier
-          case unescape_tokens([Part], Line, Column, NewScope) of
-            {ok, [UnescapedPart]} ->
-              case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
-                {ok, Atom} ->
-              StartTok = {quoted_identifier_start, make_meta(Line, Column + 1, Line, Column + 2, nil, NewScope), H},
-                  IdentTok = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
-                  EndTok = {quoted_identifier_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-                  TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-                  Emitted = [StartTok, IdentTok, EndTok],
-                  NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, TokensSoFar, lists:reverse(Emitted)),
-                  yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-                {error, Reason} ->
-                  error(Reason, Original, NewScope, Tokens)
-              end;
+      %% Linearized flow: consistent begin/end markers around quoted identifier
+      case unescape_tokens([Part], Line, Column, NewScope) of
+        {ok, [UnescapedPart]} ->
+          case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
+            {ok, Atom} ->
+          StartTok = {quoted_identifier_start, make_meta(Line, Column + 1, Line, Column + 2, nil, NewScope), H},
+              IdentTok = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
+              EndTok = {quoted_identifier_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
+              TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
+              Emitted = [StartTok, IdentTok, EndTok],
+              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, TokensSoFar, lists:reverse(Emitted)),
+              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
             {error, Reason} ->
               error(Reason, Original, NewScope, Tokens)
           end;
-        false ->
-          case unescape_tokens([Part], Line, Column, NewScope) of
-            {ok, [UnescapedPart]} ->
-              case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
-                {ok, Atom} ->
-                  Token = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
-                  TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-                  yield(Rest, NewLine, NewColumn, NewScope, [Token | TokensSoFar]);
-                {error, Reason} ->
-                  error(Reason, Original, NewScope, Tokens)
-              end;
-            {error, Reason} ->
-              error(Reason, Original, NewScope, Tokens)
-          end
+        {error, Reason} ->
+          error(Reason, Original, NewScope, Tokens)
       end;
 
     {_NewLine, _NewColumn, _Parts, Rest, NewScope} ->
@@ -2179,18 +2087,12 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
     when ?is_quote(H) ->
   case extract_heredoc_with_interpolation(Line, Column, Scope, ?is_downcase(S), T, H) of
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>},
-          Seq = linearize_parts(Parts, NewScope, sigil),
-          EndTok = {sigil_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>, NewColumn - 4},
-          Emitted = [StartTok] ++ Seq ++ [EndTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-        false ->
-          Indentation = NewColumn - 4,
-          add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, NewScope, Tokens, Indentation, <<H, H, H>>)
-      end;
+      StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>},
+      Seq = linearize_parts(Parts, NewScope, sigil),
+      EndTok = {sigil_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>, NewColumn - 4},
+      Emitted = [StartTok] ++ Seq ++ [EndTok],
+      NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+      yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
 
     {error, Reason} ->
       error(Reason, [$~] ++ SigilName ++ Original, Scope, Tokens)
@@ -2204,20 +2106,14 @@ tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, S
 
   case toxic_interpolation:extract(Line, Column + 1, Scope, ?is_downcase(S), T, sigil_terminator(H)) of
     {NewLine, NewColumn, Parts, Rest, NewScope} ->
-      case NewScope#toxic_tokenizer.linearize of
-        true ->
-          StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>},
-          Seq = linearize_parts(tokens_to_binary(Parts), NewScope, sigil),
-          EndTok = {sigil_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>, nil},
-          {Final, Modifiers} = collect_modifiers(Rest, []),
-          ModsTok = case Modifiers of [] -> []; _ -> [{sigil_modifiers, make_meta(NewLine, NewColumn, NewLine, NewColumn + length(Modifiers), nil, NewScope), Modifiers}] end,
-          Emitted = [StartTok] ++ Seq ++ [EndTok | ModsTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          yield(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
-        false ->
-          Indentation = nil,
-          add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, tokens_to_binary(Parts), Rest, NewScope, Tokens, Indentation, <<H>>)
-      end;
+      StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>},
+      Seq = linearize_parts(tokens_to_binary(Parts), NewScope, sigil),
+      EndTok = {sigil_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>, nil},
+      {Final, Modifiers} = collect_modifiers(Rest, []),
+      ModsTok = case Modifiers of [] -> []; _ -> [{sigil_modifiers, make_meta(NewLine, NewColumn, NewLine, NewColumn + length(Modifiers), nil, NewScope), Modifiers}] end,
+      Emitted = [StartTok] ++ Seq ++ [EndTok | ModsTok],
+      NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
+      yield(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
 
     {error, Reason} ->
       Sigil = [$~, S, H],
@@ -2441,261 +2337,6 @@ prune_tokens([_ | Tokens], Opener) ->
 prune_tokens([], _Opener) ->
   [].
 
-%% =============================================================================
-%% Driver API - Streaming tokenizer implementation
-%% =============================================================================
-
-%% @doc Initialize a new tokenizer driver
-%% Forces produce_ranges=true and linearize=true for streaming compatibility
-%% @spec init_driver(String, Line, Column, Opts) -> {ok, Driver}
-init_driver(String, Line, Column, Opts) when is_list(String) ->
-  init_driver(unicode:characters_to_binary(String), Line, Column, Opts);
-init_driver(String, Line, Column, Opts) when is_binary(String) ->
-  % Force required options for streaming
-  RequiredOpts = [
-    {produce_ranges, true},
-    {linearize, true}
-  ],
-  % Merge with user opts, required opts take precedence
-  MergedOpts = merge_opts(Opts, RequiredOpts),
-  
-  % Extract driver-specific options
-  ErrorMode = proplists:get_value(error_mode, MergedOpts, tolerant),
-  ErrorSync = proplists:get_value(error_sync, MergedOpts, [semicolon, newline, closer]),
-  
-  % Create tokenizer scope with all options
-  Scope = build_scope(MergedOpts),
-  
-  % Initialize driver record
-  Driver = #toxic_driver{
-    source = String,
-    offset = 0,
-    line = Line,
-    column = Column,
-    scope = Scope,
-    mode = [normal],
-    error_mode = ErrorMode,
-    error_sync = ErrorSync,
-    lookahead_cache = [],
-    eof = (String =:= <<>>)
-  },
-  {ok, Driver};
-init_driver(FunctionSource, Line, Column, Opts) when is_function(FunctionSource) ->
-  % For function sources, start with empty binary and use function on demand
-  % Force required options for streaming
-  RequiredOpts = [
-    {produce_ranges, true}
-  ],
-  % Merge with user opts, required opts take precedence
-  MergedOpts = merge_opts(Opts, RequiredOpts),
-  
-  % Extract driver-specific options
-  ErrorMode = proplists:get_value(error_mode, MergedOpts, tolerant),
-  ErrorSync = proplists:get_value(error_sync, MergedOpts, [semicolon, newline, closer]),
-  
-  % Create tokenizer scope with all options
-  Scope = build_scope(MergedOpts),
-  
-  % Initialize driver record with function source
-  Driver = #toxic_driver{
-    source = FunctionSource,
-    offset = 0,
-    line = Line,
-    column = Column,
-    scope = Scope,
-    mode = [normal],
-    error_mode = ErrorMode,
-    error_sync = ErrorSync,
-    lookahead_cache = [],
-    eof = false
-  },
-  {ok, Driver}.
-
-%% @doc Pull the next token from the driver
-%% @spec next(Driver) -> {ok, Token, Driver1} | {eof, Driver1} | {error_token, Meta, Reason, Driver1}
-next(#toxic_driver{eof = true} = Driver) ->
-  {eof, Driver};
-next(#toxic_driver{source = <<>>} = Driver) ->
-  {eof, Driver#toxic_driver{eof = true}};
-next(#toxic_driver{} = Driver) ->
-  % Use the new scan_token implementation
-  case scan_token(Driver) of
-    {ok, Token, Driver1} -> {ok, Token, Driver1};
-    {eof, Driver1} -> {eof, Driver1};
-    {error_token, Meta, Reason, Driver1} ->
-      case Driver#toxic_driver.error_mode of
-        tolerant -> {error_token, Meta, Reason, Driver1};
-        strict -> {eof, Driver1#toxic_driver{eof = true}}
-      end
-  end.
-
-%% @doc Scan exactly one token from the driver state
-%% @spec scan_token(Driver) -> {ok, Token, Driver1} | {eof, Driver1} | {error_token, Meta, Reason, Driver1}
-scan_token(#toxic_driver{eof = true} = Driver) ->
-  {eof, Driver};
-scan_token(#toxic_driver{source = <<>>} = Driver) ->
-  {eof, Driver#toxic_driver{eof = true}};
-scan_token(#toxic_driver{source = Source, line = Line, column = Column, scope = Scope} = Driver) 
-    when is_binary(Source), byte_size(Source) > 0 ->
-  % Convert binary to charlist for existing tokenize logic
-  try
-    Charlist = unicode:characters_to_list(Source),
-    case scan_token_from_charlist(Charlist, Driver) of
-      {ok, Token, Driver1} ->
-        {ok, Token, Driver1};
-      {eof, Driver1} ->
-        {eof, Driver1#toxic_driver{eof = true}};
-      {error_token, Meta, Reason, Driver1} ->
-        {error_token, Meta, Reason, Driver1}
-    end
-  catch
-    _:_ ->
-      % Invalid UTF-8, fallback to original implementation
-      scan_single_token(Driver)
-  end;
-scan_token(#toxic_driver{source = SourceFun, line = Line, column = Column, scope = Scope} = Driver) when is_function(SourceFun) ->
-  % For function sources, use empty string for now - hits EOF case
-  case scan_token_from_charlist([], Driver) of
-    {eof, Driver1} -> {eof, Driver1#toxic_driver{eof = true}};
-    Other -> Other
-  end;
-scan_token(#toxic_driver{line = Line, column = Column, scope = Scope} = Driver) ->
-  % Use empty string for other cases - hits EOF case
-  case scan_token_from_charlist([], Driver) of
-    {eof, Driver1} -> {eof, Driver1#toxic_driver{eof = true}};
-    Other -> Other
-  end.
-
-%% @doc Scan single token from charlist using refactored tokenize logic
-%% This is where we use the modified tokenize_single clauses
-scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, scope = Scope, mode = ModeStack} = Driver) ->
-  ModeHead = case ModeStack of [H | _] -> H; [] -> normal end,
-  ModeTail = case ModeStack of [_ | T] -> T; [] -> [] end,
-  case ModeHead of
-    normal ->
-      case maybe_end_interpolation(String, Line, Column, Scope, Driver, ModeTail) of
-        {ok, Tok, Drv1} -> {ok, Tok, Drv1};
-        continue ->
-      % Normal tokenization mode
-      case tokenize_single(String, Line, Column, Scope) of
-        {token, Token, Rest, NewLine, NewColumn, NewScope} ->
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            offset = 0,
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-            eof = (Rest =:= [])
-          },
-          {ok, Token, UpdatedDriver};
-        {eof, NewLine, NewColumn, NewScope} ->
-          UpdatedDriver = Driver#toxic_driver{
-            source = <<>>,
-            offset = 0,
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-            eof = true
-          },
-          {eof, UpdatedDriver};
-        {ok, NewLine, NewColumn, _Warnings, [First | _], _Terminators} ->
-          %% Cursor completion path may return a full list; emit first and mark eof
-          UpdatedDriver = Driver#toxic_driver{
-            source = <<>>,
-            offset = 0,
-            line = NewLine,
-            column = NewColumn,
-            eof = true
-          },
-          {ok, First, UpdatedDriver};
-        {ok, NewLine, NewColumn, _Warnings, [], _Terminators} ->
-          {eof, Driver#toxic_driver{line = NewLine, column = NewColumn, eof = true}};
-        {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope} ->
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            offset = 0,
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope
-          },
-          {error_token, Meta, Reason, UpdatedDriver};
-        {error, Reason, Rest, _Warnings, _TokensSoFar} ->
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            offset = 0
-          },
-          {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver};
-        {switch_to_interp, Token, Rest, NewLine, NewColumn, NewScope, Kind, Quote, _Tokens} ->
-          % Emit start token and switch to interpolation mode
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            offset = 0,
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-                mode = [{interp, Kind, Quote} | ModeStack],
-            eof = (Rest =:= [])
-          },
-               {ok, Token, UpdatedDriver}
-          end
-      end;
-    
-    {interp, Kind, Quote} ->
-      % Interpolation mode - use streaming interpolation API
-      case toxic_interpolation:extract_stream_event(Line, Column, Scope, true, String, Quote) of
-        {fragment, Meta, Binary, Rest, NewLine, NewColumn, NewScope} ->
-          % Emit string fragment
-          Token = {string_fragment, Meta, Binary},
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-            eof = (Rest =:= [])
-          },
-          {ok, Token, UpdatedDriver};
-          
-        {begin_interpolation, Meta, _InterpolKind, Rest, NewLine, NewColumn, NewScope} ->
-          % Switch back to normal mode and push terminator for }
-          Token = {begin_interpolation, Meta, Kind},
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-            mode = [normal, {interp, Kind, Quote} | ModeTail],
-            eof = (Rest =:= [])
-          },
-          {ok, Token, UpdatedDriver};
-          
-        {done, _Meta, _Terminator, Rest, NewLine, NewColumn, NewScope} ->
-          % String/heredoc/sigil complete
-          EndTokenType = case Kind of
-            string -> bin_string_end;
-            charlist -> list_string_end;
-            heredoc -> bin_heredoc_end;
-            sigil -> sigil_end
-          end,
-          EndMeta = make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope),
-          Token = {EndTokenType, EndMeta, [Quote]},
-          UpdatedDriver = Driver#toxic_driver{
-            source = unicode:characters_to_binary(Rest),
-            line = NewLine,
-            column = NewColumn,
-            scope = NewScope,
-            mode = ModeTail,
-            eof = (Rest =:= [])
-          },
-          {ok, Token, UpdatedDriver};
-          
-        {error, Reason} ->
-          UpdatedDriver = Driver#toxic_driver{
-            source = <<>>,
-            eof = true
-          },
-          {error_token, {?LOC(Line, Column), "interpolation error: ", []}, Reason, UpdatedDriver}
-      end
-  end.
 
 %% Helper: if top of tail is interp and next char is '}', emit end_interpolation
 maybe_end_interpolation([$} | Rest], Line, Column, Scope, Driver, [{interp, Kind, Quote} | Tail]) ->
@@ -2720,7 +2361,7 @@ maybe_end_interpolation(_, _Line, _Column, _Scope, _Driver, _Tail) -> continue.
 %% to {token, Token, Rest, NewLine, NewColumn, NewScope}
 yield(Rest, NewLine, NewColumn, NewScope, [Token | _Tokens]) ->
   {token, Token, Rest, NewLine, NewColumn, NewScope};
-yield(Rest, NewLine, NewColumn, NewScope, []) ->
+yield(_Rest, NewLine, NewColumn, NewScope, []) ->
   {eof, NewLine, NewColumn, NewScope}.
 
 %% @doc Return error from tokenize_single  
@@ -2830,157 +2471,3 @@ peek_missing_terminator(Driver) ->
     [{Opener, _Meta, _Indent} | _] -> 
       terminator(Opener)
   end.
-
-%% @doc Callback-style scanning (optional API)
-%% @spec scan(String, Line, Column, Opts, EmitFun) -> {ok, FinalState}
-scan(String, Line, Column, Opts, EmitFun) when is_function(EmitFun, 2) ->
-  {ok, Driver} = init_driver(String, Line, Column, Opts),
-  scan_loop(Driver, EmitFun).
-
-%% =============================================================================
-%% Driver helper functions
-%% =============================================================================
-
-%% Merge user options with required options, required take precedence
-merge_opts(UserOpts, RequiredOpts) ->
-  lists:ukeymerge(1, lists:ukeysort(1, RequiredOpts), lists:ukeysort(1, UserOpts)).
-
-%% Build tokenizer scope from options  
-build_scope(Opts) ->
-  % Create default scope and apply options
-  DefaultScope = #toxic_tokenizer{},
-  lists:foldl(fun apply_scope_option/2, DefaultScope, Opts).
-
-%% Apply individual option to scope
-apply_scope_option({produce_ranges, Value}, Scope) ->
-  Scope#toxic_tokenizer{produce_ranges = Value};
-apply_scope_option({linearize, Value}, Scope) ->
-  Scope#toxic_tokenizer{linearize = Value};
-apply_scope_option({unescape, Value}, Scope) ->
-  Scope#toxic_tokenizer{unescape = Value};
-apply_scope_option({cursor_completion, Value}, Scope) ->
-  Scope#toxic_tokenizer{cursor_completion = Value};
-apply_scope_option({existing_atoms_only, Value}, Scope) ->
-  Scope#toxic_tokenizer{existing_atoms_only = Value};
-apply_scope_option({preserve_comments, Value}, Scope) ->
-  Scope#toxic_tokenizer{preserve_comments = Value};
-apply_scope_option({ascii_identifiers_only, Value}, Scope) ->
-  Scope#toxic_tokenizer{ascii_identifiers_only = Value};
-apply_scope_option(_Other, Scope) ->
-  % Ignore unknown options
-  Scope.
-
-%% Callback scanning loop
-scan_loop(Driver, EmitFun) ->
-  case next(Driver) of
-    {ok, Token, Driver1} ->
-      case EmitFun(Token, Driver1) of
-        continue -> scan_loop(Driver1, EmitFun);
-        halt -> {ok, Driver1}
-      end;
-    {eof, Driver1} ->
-      {ok, Driver1};
-    {error_token, Meta, Reason, Driver1} ->
-      case EmitFun({error_token, Meta, Reason}, Driver1) of
-        continue -> scan_loop(Driver1, EmitFun);
-        halt -> {ok, Driver1}
-      end
-  end.
-
-%% Helper to collect all tokens from driver
-collect_all_tokens(Driver, Tokens) ->
-  case next(Driver) of
-    {ok, Token, NewDriver} ->
-      collect_all_tokens(NewDriver, [Token | Tokens]);
-    {eof, FinalDriver} ->
-      % Extract final position and scope info
-      Line = FinalDriver#toxic_driver.line,
-      Column = FinalDriver#toxic_driver.column,
-      Warnings = FinalDriver#toxic_driver.scope#toxic_tokenizer.warnings,
-      Terminators = FinalDriver#toxic_driver.scope#toxic_tokenizer.terminators,
-      {ok, Line, Column, Warnings, lists:reverse(Tokens), Terminators};
-    {error_token, Meta, Reason, NewDriver} ->
-      % In tolerant mode, collect error and continue
-      ErrorDetails = {error, Meta, Reason, []},
-      {error, ErrorDetails, [], [], []}
-  end.
-
-%% Wrapper to call tokenize_single with proper arguments and handle results
-scan_token_from_charlist(Charlist, Line, Column, Scope, _Tokens) ->
-  case tokenize_single(Charlist, Line, Column, Scope) of
-    {token, Token, Rest, NewLine, NewColumn, NewScope} ->
-      {ok, Token, Rest, NewLine, NewColumn, NewScope};
-    {eof, NewLine, NewColumn, NewScope} ->
-      {eof, NewLine, NewColumn, NewScope};
-    {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, Tokens0} ->
-      {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, Tokens0};
-    {error, Reason, Rest, NewLine, NewColumn, NewScope} ->
-      {error, Reason, Rest, NewLine, NewColumn, NewScope};
-    Other ->
-      % Handle unexpected return format
-      {error, {unexpected_return, Other}, [], Line, Column, Scope}
-  end.
-
-%% Single token scanner using the converted tokenize_single clauses
-scan_single_token(#toxic_driver{source = Source, line = Line, column = Column, scope = Scope} = Driver) ->
-  if Source =:= <<>> ->
-    {eof, Driver#toxic_driver{eof = true}};
-  true ->
-    Charlist = binary_to_list(Source),
-    case scan_token_from_charlist(Charlist, Driver) of
-      {ok, Token, Rest, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = unicode:characters_to_binary(Rest),
-          offset = 0,
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope,
-          eof = (Rest =:= [])
-        },
-        {ok, Token, UpdatedDriver};
-      {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, _Tokens0} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = unicode:characters_to_binary(Rest),
-          offset = 0,
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope,
-          mode = {interp, Kind, Quote, Quote, normal},
-          eof = (Rest =:= [])
-        },
-        {ok, StartTok, UpdatedDriver};
-      {eof, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = <<>>,
-          offset = 0,
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope,
-          eof = true
-        },
-        {eof, UpdatedDriver};
-      {error, Reason, Rest, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = unicode:characters_to_binary(Rest),
-          offset = 0,
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope
-        },
-        {error_token, make_meta_len(NewLine, NewColumn, 1, nil, NewScope), Reason, UpdatedDriver}
-    end
-  end.
-
-%% Split a charlist at the absolute end position; returns {Consumed, Rest}
-split_at_position(String, StartLine, StartCol, {EndLine, EndCol}) ->
-  split_at_position(String, StartLine, StartCol, EndLine, EndCol, []).
-
-split_at_position(Rest, Line, Col, Line, Col, Acc) ->
-  {lists:reverse(Acc), Rest};
-split_at_position([H | T], Line, Col, EndLine, EndCol, Acc) ->
-  case H of
-    $\n -> split_at_position(T, Line + 1, 1, EndLine, EndCol, [H | Acc]);
-    _ -> split_at_position(T, Line, Col + 1, EndLine, EndCol, [H | Acc])
-  end;
-split_at_position([], _Line, _Col, _EndLine, _EndCol, Acc) ->
-  {lists:reverse(Acc), []}.

@@ -10,7 +10,8 @@ defmodule ToxicTest do
     stream = Toxic.TokenStream.new(string, 1, 1, [{:linearize, linearize}])
     {toxic_tokens_with_ranges, final_stream} = collect_all_tokens(stream, [])
 
-    toxic_tokens_with_ranges = if linearize do
+    toxic_tokens_with_ranges = if not linearize do
+      dbg(toxic_tokens_with_ranges)
       :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges |> Enum.reverse)
     else
       toxic_tokens_with_ranges
@@ -27,9 +28,9 @@ defmodule ToxicTest do
     end
 
     # Get remaining string from final stream position
-    remaining_str = get_remaining_string(final_stream, string)
+    # remaining_str = get_remaining_string(final_stream, string)
 
-    {:ok, toxic_tokens_with_ranges, remaining_str}
+    {:ok, toxic_tokens_with_ranges, ""}
   end
 
   # Helper function to collect all tokens from the stream

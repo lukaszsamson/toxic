@@ -78,7 +78,5 @@
   column=1,
   mismatch_hints=[],
   warnings=[],
-  produce_ranges=false,
-  linearize=false,
   mode=normal  % normal | {interp, Kind, Quote, Delim, State} for interpolation mode
 }).
