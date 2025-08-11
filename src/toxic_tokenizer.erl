@@ -2519,47 +2519,83 @@ scan_token(#toxic_driver{source = Source} = Driver)
       fallback_next_token(Driver)
   end;
 scan_token(#toxic_driver{source = SourceFun} = Driver) when is_function(SourceFun) ->
-  % For function sources, we need more sophisticated handling
-  % For now, fallback to original implementation
-  fallback_next_token(Driver);
+  % For function sources, use scan_token_from_charlist with empty string for now
+  % This will hit the EOF case in tokenize_single
+  scan_token_from_charlist([], Driver);
 scan_token(Driver) ->
-  fallback_next_token(Driver).
+  % Use scan_token_from_charlist for other cases
+  scan_token_from_charlist([], Driver).
 
 %% @doc Scan single token from charlist using refactored tokenize logic
 %% This is where we use the modified tokenize_single clauses
 scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, scope = Scope} = Driver) ->
-  %% Use existing batch tokenizer once, then derive the first token and rest accurately
-  ScopeOpts = [
-    {produce_ranges, true},
-    {linearize, true},
-    {unescape, Scope#toxic_tokenizer.unescape}
-  ],
-  case tokenize_with_ranges(String, Line, Column, ScopeOpts) of
-    {ok, _NewLineAll, _NewColumnAll, _Warnings, [], _Remaining} ->
-      {eof, Driver#toxic_driver{eof = true}};
-    {ok, _NewLineAll, _NewColumnAll, _Warnings, [FirstToken | _], _RemainingTail} ->
-      EndPos = case FirstToken of
-        {_T, {{_SL, _SC}, {EL, EC}, _X}} -> {EL, EC};
-        {_T, {{_SL, _SC}, {EL, EC}, _X}, _Val} -> {EL, EC}
-      end,
-      {_Consumed, Rest} = split_at_position(String, Line, Column, EndPos),
+  case tokenize_single(String, Line, Column, Scope) of
+    {token, Token, Rest, NewLine, NewColumn, NewScope} ->
       UpdatedDriver = Driver#toxic_driver{
         source = unicode:characters_to_binary(Rest),
-        %% Reset offset to 0 for the new source chunk to avoid byte/char skew
         offset = 0,
-        line = element(1, EndPos),
-        column = element(2, EndPos)
+        line = NewLine,
+        column = NewColumn,
+        scope = NewScope,
+        eof = (Rest =:= [])
       },
-      {ok, FirstToken, UpdatedDriver};
+      {ok, Token, UpdatedDriver};
+    {eof, NewLine, NewColumn, NewScope} ->
+      UpdatedDriver = Driver#toxic_driver{
+        source = <<>>,
+        offset = 0,
+        line = NewLine,
+        column = NewColumn,
+        scope = NewScope,
+        eof = true
+      },
+      {eof, UpdatedDriver};
+    {ok, NewLine, NewColumn, _Warnings, [First | _], _Terminators} ->
+      %% Cursor completion path may return a full list; emit first and mark eof
+      UpdatedDriver = Driver#toxic_driver{
+        source = <<>>,
+        offset = 0,
+        line = NewLine,
+        column = NewColumn,
+        eof = true
+      },
+      {ok, First, UpdatedDriver};
+    {ok, NewLine, NewColumn, _Warnings, [], _Terminators} ->
+      {eof, Driver#toxic_driver{line = NewLine, column = NewColumn, eof = true}};
+    {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope} ->
+      UpdatedDriver = Driver#toxic_driver{
+        source = unicode:characters_to_binary(Rest),
+        offset = 0,
+        line = NewLine,
+        column = NewColumn,
+        scope = NewScope
+      },
+      {error_token, Meta, Reason, UpdatedDriver};
     {error, Reason, Rest, _Warnings, _TokensSoFar} ->
-      %% Emit error token and advance to provided Rest
       UpdatedDriver = Driver#toxic_driver{
         source = unicode:characters_to_binary(Rest),
         offset = 0
       },
-      %% Reason already contains location info prepared by tokenizer
       {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver}
   end.
+
+%% =============================================================================
+%% Helper functions for tokenize_single
+%% =============================================================================
+
+%% @doc Yield a single token from tokenize_single
+%% Converts the old pattern tokenize(Rest, NewLine, NewColumn, NewScope, [Token | Tokens])
+%% to {token, Token, Rest, NewLine, NewColumn, NewScope}
+yield(Rest, NewLine, NewColumn, NewScope, [Token | _Tokens]) ->
+  {token, Token, Rest, NewLine, NewColumn, NewScope};
+yield(Rest, NewLine, NewColumn, NewScope, []) ->
+  {eof, NewLine, NewColumn, NewScope}.
+
+%% @doc Return error from tokenize_single  
+%% Converts error cases to {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope}
+%% Note: Line/Column need to be passed in since tokenizer record doesn't track position
+error_single(Reason, Rest, Line, Column, Scope, _Tokens) ->
+  {error, Reason, [], Rest, Line, Column, Scope}.
 
 %% =============================================================================
 %% Driver input consumption helpers
