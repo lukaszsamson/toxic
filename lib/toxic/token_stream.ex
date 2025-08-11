@@ -9,6 +9,30 @@ defmodule Toxic.TokenStream do
   - Lookahead, pushback, and incremental lexing support
   """
 
+  # Extract Erlang record definition and create Elixir record
+  require Record
+  Record.defrecord(:toxic_driver, Record.extract(:toxic_driver, from: "src/toxic_tokenizer.hrl"))
+  
+  # Make record macros available for access and manipulation
+  # Usage examples:
+  # - Access: toxic_driver(driver, :line)
+  # - Pattern match: toxic_driver(line: line) = driver
+  # - Update: toxic_driver(driver, line: new_line)
+
+  @typedoc "Driver record type extracted from Erlang"
+  @type toxic_driver :: record(:toxic_driver,
+    source: binary() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof),
+    offset: non_neg_integer(),
+    line: pos_integer(),
+    column: pos_integer(),
+    scope: term(),
+    mode: :normal | {:interp, atom(), atom(), atom(), term()},
+    error_mode: :strict | :tolerant,
+    error_sync: [atom()],
+    lookahead_cache: [term()],
+    eof: boolean()
+  )
+
   @typedoc "Token with ranged meta; shapes match tokenizer"
   # TODO: better typespec with detailed types
   @type token :: tuple()
@@ -26,7 +50,7 @@ defmodule Toxic.TokenStream do
   @type t :: %__MODULE__{
           buffer: :queue.queue(token),
           push: [token],
-          driver: term(),
+          driver: toxic_driver(),
           opts: options,
           eof: boolean(),
           error: term() | nil
@@ -260,9 +284,9 @@ defmodule Toxic.TokenStream do
   """
   @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
   def position(%__MODULE__{driver: driver} = stream) do
-    # Extract position from driver record (Erlang record access)
-    line = :erlang.element(4, driver)    # line is 4th field in record
-    column = :erlang.element(5, driver)  # column is 5th field in record
+    # Extract position from driver record using record macros
+    line = toxic_driver(driver, :line)
+    column = toxic_driver(driver, :column)
     {{line, column}, stream}
   end
 
