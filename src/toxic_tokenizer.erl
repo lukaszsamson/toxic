@@ -2504,8 +2504,8 @@ current_terminators(#toxic_driver{scope = Scope}) ->
 
 %% @doc Peek at potentially missing terminator
 %% @spec peek_missing_terminator(Driver) -> End | nil
-peek_missing_terminator(#toxic_driver{scope = Scope}) ->
-  case current_terminators(#toxic_driver{scope = Scope}) of
+peek_missing_terminator(Driver) ->
+  case current_terminators(Driver) of
     [] -> 
       nil;
     [{Opener, _Meta, _Indent} | _] -> 
@@ -2589,11 +2589,11 @@ fallback_next_token(#toxic_driver{source = Source, line = Line, column = Column,
     ],
     
     case tokenize_with_ranges(Charlist, Line, Column, ScopeOpts) of
-      {ok, NewLine, NewColumn, _Warnings, [], _Remaining} ->
+      {ok, _NewLine, _NewColumn, _Warnings, [], _Remaining} ->
         % No tokens produced, EOF
         {eof, Driver#toxic_driver{eof = true}};
       
-      {ok, NewLine, NewColumn, _Warnings, [FirstToken | _], _Remaining2} ->
+      {ok, _NewLine, _NewColumn, _Warnings, [FirstToken | _], _Remaining2} ->
         % Extract position info from first token to calculate consumed bytes
         {_Type, {{_StartLine, _StartCol}, {EndLine, EndCol}, _Extra}, _Value} = FirstToken,
         
@@ -2622,7 +2622,7 @@ fallback_next_token(#toxic_driver{source = Source, line = Line, column = Column,
         case Driver#toxic_driver.error_mode of
           tolerant ->
             % Advance by one byte and return error token
-            ErrorToken = {error_token, Meta, Reason},
+            _ErrorToken = {error_token, Meta, Reason},
             UpdatedDriver = Driver#toxic_driver{
               offset = min(Offset + 1, byte_size(Source)),
               column = Column + 1
