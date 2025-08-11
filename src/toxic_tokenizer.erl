@@ -148,14 +148,6 @@ tokenize_single(String, Line, Column, Opts) ->
 tokenize_single(String, Line, Opts) ->
   tokenize_single(String, Line, 1, Opts).
 
-%% Public API that returns tokens where metadata carries explicit ranges
-%% in the shape {{StartLine, StartColumn}, {EndLine, EndColumn}, Extra}.
-%% End positions are exclusive.
-tokenize_with_ranges(String, Line, Column, Opts) ->
-  %% Force range production in scope
-  RangedOpts = [{produce_ranges, true} | Opts],
-  tokenize_single(String, Line, Column, RangedOpts).
-
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
   Collapsed =
