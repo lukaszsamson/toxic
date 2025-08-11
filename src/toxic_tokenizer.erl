@@ -1106,21 +1106,17 @@ handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
       error(Reason, [H, H, H] ++ T, Scope, Tokens)
   end.
 
-handle_strings(T, Line, Column, H, Scope, Tokens) ->
-  % Emit string start token and switch to interpolation mode
-  StartTokenType = case H of
-    $' -> list_string_start;
-    $" -> bin_string_start
+handle_strings(T, Line, Column, H, #toxic_tokenizer{linearize=true} = Scope, _Tokens) ->
+  % Linearized streaming mode
+  {StartType, Kind} = case H of
+    $' -> {list_string_start, charlist};
+    $" -> {bin_string_start, string}
   end,
-  
-  % Create start token 
-  Token = {StartTokenType, make_meta_len(Line, Column - 1, 1, nil, Scope), [H]},
-  
-  % Update scope to switch to interpolation mode
-  NewScope = Scope#toxic_tokenizer{mode = {interp, string, H, H, normal}},
-  
-  % Return the start token and updated scope
-  yield(T, Line, Column, NewScope, [Token | Tokens]).
+  StartTok = {StartType, make_meta(Line, Column - 1, Line, Column, nil, Scope), H},
+  {switch_to_interp, StartTok, T, Line, Column, Scope, Kind, H, []};
+handle_strings(T, Line, Column, H, Scope, Tokens) ->
+  % Non-linearized mode uses the old implementation to emit container tokens
+  handle_strings_old(T, Line, Column, H, Scope, Tokens).
 
 handle_strings_old(T, Line, Column, H, Scope, Tokens) ->
   % Keep old implementation for fallback
@@ -2457,8 +2453,7 @@ init_driver(String, Line, Column, Opts) when is_list(String) ->
 init_driver(String, Line, Column, Opts) when is_binary(String) ->
   % Force required options for streaming
   RequiredOpts = [
-    {produce_ranges, true},
-    {linearize, true}
+    {produce_ranges, true}
   ],
   % Merge with user opts, required opts take precedence
   MergedOpts = merge_opts(Opts, RequiredOpts),
@@ -2488,8 +2483,7 @@ init_driver(FunctionSource, Line, Column, Opts) when is_function(FunctionSource)
   % For function sources, start with empty binary and use function on demand
   % Force required options for streaming
   RequiredOpts = [
-    {produce_ranges, true},
-    {linearize, true}
+    {produce_ranges, true}
   ],
   % Merge with user opts, required opts take precedence
   MergedOpts = merge_opts(Opts, RequiredOpts),
@@ -2545,33 +2539,13 @@ scan_token(#toxic_driver{source = Source, line = Line, column = Column, scope = 
   % Convert binary to charlist for existing tokenize logic
   try
     Charlist = unicode:characters_to_list(Source),
-    case scan_token_from_charlist(Charlist, Line, Column, Scope, []) of
-      {ok, Token, Rest, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = unicode:characters_to_binary(Rest),
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope,
-          eof = (Rest =:= [])
-        },
-        {ok, Token, UpdatedDriver};
-      {eof, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = <<>>,
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope,
-          eof = true
-        },
-        {eof, UpdatedDriver};
-      {error, Reason, Rest, NewLine, NewColumn, NewScope} ->
-        UpdatedDriver = Driver#toxic_driver{
-          source = unicode:characters_to_binary(Rest),
-          line = NewLine,
-          column = NewColumn,
-          scope = NewScope
-        },
-        {error_token, make_meta_len(NewLine, NewColumn, 1, nil, NewScope), Reason, UpdatedDriver}
+    case scan_token_from_charlist(Charlist, Driver) of
+      {ok, Token, Driver1} ->
+        {ok, Token, Driver1};
+      {eof, Driver1} ->
+        {eof, Driver1#toxic_driver{eof = true}};
+      {error_token, Meta, Reason, Driver1} ->
+        {error_token, Meta, Reason, Driver1}
     end
   catch
     _:_ ->
@@ -2580,28 +2554,14 @@ scan_token(#toxic_driver{source = Source, line = Line, column = Column, scope = 
   end;
 scan_token(#toxic_driver{source = SourceFun, line = Line, column = Column, scope = Scope} = Driver) when is_function(SourceFun) ->
   % For function sources, use empty string for now - hits EOF case
-  case scan_token_from_charlist([], Line, Column, Scope, []) of
-    {eof, NewLine, NewColumn, NewScope} ->
-      UpdatedDriver = Driver#toxic_driver{
-        line = NewLine,
-        column = NewColumn, 
-        scope = NewScope,
-        eof = true
-      },
-      {eof, UpdatedDriver};
+  case scan_token_from_charlist([], Driver) of
+    {eof, Driver1} -> {eof, Driver1#toxic_driver{eof = true}};
     Other -> Other
   end;
 scan_token(#toxic_driver{line = Line, column = Column, scope = Scope} = Driver) ->
   % Use empty string for other cases - hits EOF case
-  case scan_token_from_charlist([], Line, Column, Scope, []) of
-    {eof, NewLine, NewColumn, NewScope} ->
-      UpdatedDriver = Driver#toxic_driver{
-        line = NewLine,
-        column = NewColumn,
-        scope = NewScope,
-        eof = true
-      },
-      {eof, UpdatedDriver};
+  case scan_token_from_charlist([], Driver) of
+    {eof, Driver1} -> {eof, Driver1#toxic_driver{eof = true}};
     Other -> Other
   end.
 
@@ -2612,71 +2572,70 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
     normal ->
       % Normal tokenization mode
       case tokenize_single(String, Line, Column, Scope) of
-    {token, Token, Rest, NewLine, NewColumn, NewScope} ->
-      UpdatedDriver = Driver#toxic_driver{
-        source = unicode:characters_to_binary(Rest),
-        offset = 0,
-        line = NewLine,
-        column = NewColumn,
-        scope = NewScope,
-        eof = (Rest =:= [])
-      },
-      {ok, Token, UpdatedDriver};
-    {eof, NewLine, NewColumn, NewScope} ->
-      UpdatedDriver = Driver#toxic_driver{
-        source = <<>>,
-        offset = 0,
-        line = NewLine,
-        column = NewColumn,
-        scope = NewScope,
-        eof = true
-      },
-      {eof, UpdatedDriver};
-    {ok, NewLine, NewColumn, _Warnings, [First | _], _Terminators} ->
-      %% Cursor completion path may return a full list; emit first and mark eof
-      UpdatedDriver = Driver#toxic_driver{
-        source = <<>>,
-        offset = 0,
-        line = NewLine,
-        column = NewColumn,
-        eof = true
-      },
-      {ok, First, UpdatedDriver};
-    {ok, NewLine, NewColumn, _Warnings, [], _Terminators} ->
-      {eof, Driver#toxic_driver{line = NewLine, column = NewColumn, eof = true}};
-    {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope} ->
-      UpdatedDriver = Driver#toxic_driver{
-        source = unicode:characters_to_binary(Rest),
-        offset = 0,
-        line = NewLine,
-        column = NewColumn,
-        scope = NewScope
-      },
-      {error_token, Meta, Reason, UpdatedDriver};
-    {error, Reason, Rest, _Warnings, _TokensSoFar} ->
-      UpdatedDriver = Driver#toxic_driver{
-        source = unicode:characters_to_binary(Rest),
-        offset = 0
-      },
-      {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver};
-      
-    {switch_to_interp, Token, Rest, NewLine, NewColumn, NewScope, Kind, Quote, _Tokens} ->
-      % Emit start token and switch to interpolation mode
-      UpdatedDriver = Driver#toxic_driver{
-        source = unicode:characters_to_binary(Rest),
-        offset = 0,
-        line = NewLine,
-        column = NewColumn,
-        scope = NewScope,
-        mode = {interp, Kind, Quote, Quote, normal}, % TODO: proper mode stack
-        eof = (Rest =:= [])
-      },
-      {ok, Token, UpdatedDriver}
+        {token, Token, Rest, NewLine, NewColumn, NewScope} ->
+          UpdatedDriver = Driver#toxic_driver{
+            source = unicode:characters_to_binary(Rest),
+            offset = 0,
+            line = NewLine,
+            column = NewColumn,
+            scope = NewScope,
+            eof = (Rest =:= [])
+          },
+          {ok, Token, UpdatedDriver};
+        {eof, NewLine, NewColumn, NewScope} ->
+          UpdatedDriver = Driver#toxic_driver{
+            source = <<>>,
+            offset = 0,
+            line = NewLine,
+            column = NewColumn,
+            scope = NewScope,
+            eof = true
+          },
+          {eof, UpdatedDriver};
+        {ok, NewLine, NewColumn, _Warnings, [First | _], _Terminators} ->
+          %% Cursor completion path may return a full list; emit first and mark eof
+          UpdatedDriver = Driver#toxic_driver{
+            source = <<>>,
+            offset = 0,
+            line = NewLine,
+            column = NewColumn,
+            eof = true
+          },
+          {ok, First, UpdatedDriver};
+        {ok, NewLine, NewColumn, _Warnings, [], _Terminators} ->
+          {eof, Driver#toxic_driver{line = NewLine, column = NewColumn, eof = true}};
+        {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope} ->
+          UpdatedDriver = Driver#toxic_driver{
+            source = unicode:characters_to_binary(Rest),
+            offset = 0,
+            line = NewLine,
+            column = NewColumn,
+            scope = NewScope
+          },
+          {error_token, Meta, Reason, UpdatedDriver};
+        {error, Reason, Rest, _Warnings, _TokensSoFar} ->
+          UpdatedDriver = Driver#toxic_driver{
+            source = unicode:characters_to_binary(Rest),
+            offset = 0
+          },
+          {error_token, {?LOC(Line, Column), "lexing error: ", []}, Reason, UpdatedDriver};
+        {switch_to_interp, Token, Rest, NewLine, NewColumn, NewScope, Kind, Quote, _Tokens} ->
+          % Emit start token and switch to interpolation mode
+          UpdatedDriver = Driver#toxic_driver{
+            source = unicode:characters_to_binary(Rest),
+            offset = 0,
+            line = NewLine,
+            column = NewColumn,
+            scope = NewScope,
+            mode = {interp, Kind, Quote, Quote, normal}, % TODO: proper mode stack
+            eof = (Rest =:= [])
+          },
+          {ok, Token, UpdatedDriver}
       end;
     
     {interp, Kind, Quote, Delim, _State} ->
       % Interpolation mode - use streaming interpolation API
-      case toxic_interpolation:extract_stream_event(Line, Column, Scope, true, unicode:characters_to_list(Driver#toxic_driver.source), Quote) of
+      case toxic_interpolation:extract_stream_event(Line, Column, Scope, true, String, Quote) of
         {fragment, Meta, Binary, Rest, NewLine, NewColumn, NewScope} ->
           % Emit string fragment
           Token = {string_fragment, Meta, Binary},
@@ -2702,14 +2661,16 @@ scan_token_from_charlist(String, #toxic_driver{line = Line, column = Column, sco
           },
           {ok, Token, UpdatedDriver};
           
-        {done, Meta, _Terminator, Rest, NewLine, NewColumn, NewScope} ->
+        {done, _Meta, _Terminator, Rest, NewLine, NewColumn, NewScope} ->
           % String/heredoc/sigil complete
           EndTokenType = case Kind of
             string -> bin_string_end;
+            charlist -> list_string_end;
             heredoc -> bin_heredoc_end;
             sigil -> sigil_end
           end,
-          Token = {EndTokenType, Meta, [Quote]},
+          EndMeta = make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope),
+          Token = {EndTokenType, EndMeta, [Quote]},
           UpdatedDriver = Driver#toxic_driver{
             source = unicode:characters_to_binary(Rest),
             line = NewLine,
@@ -2930,6 +2891,8 @@ scan_token_from_charlist(Charlist, Line, Column, Scope, _Tokens) ->
       {ok, Token, Rest, NewLine, NewColumn, NewScope};
     {eof, NewLine, NewColumn, NewScope} ->
       {eof, NewLine, NewColumn, NewScope};
+    {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, Tokens0} ->
+      {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, Tokens0};
     {error, Reason, Rest, NewLine, NewColumn, NewScope} ->
       {error, Reason, Rest, NewLine, NewColumn, NewScope};
     Other ->
@@ -2943,7 +2906,7 @@ scan_single_token(#toxic_driver{source = Source, line = Line, column = Column, s
     {eof, Driver#toxic_driver{eof = true}};
   true ->
     Charlist = binary_to_list(Source),
-    case scan_token_from_charlist(Charlist, Line, Column, Scope, []) of
+    case scan_token_from_charlist(Charlist, Driver) of
       {ok, Token, Rest, NewLine, NewColumn, NewScope} ->
         UpdatedDriver = Driver#toxic_driver{
           source = unicode:characters_to_binary(Rest),
@@ -2954,6 +2917,17 @@ scan_single_token(#toxic_driver{source = Source, line = Line, column = Column, s
           eof = (Rest =:= [])
         },
         {ok, Token, UpdatedDriver};
+      {switch_to_interp, StartTok, Rest, NewLine, NewColumn, NewScope, Kind, Quote, _Tokens0} ->
+        UpdatedDriver = Driver#toxic_driver{
+          source = unicode:characters_to_binary(Rest),
+          offset = 0,
+          line = NewLine,
+          column = NewColumn,
+          scope = NewScope,
+          mode = {interp, Kind, Quote, Quote, normal},
+          eof = (Rest =:= [])
+        },
+        {ok, StartTok, UpdatedDriver};
       {eof, NewLine, NewColumn, NewScope} ->
         UpdatedDriver = Driver#toxic_driver{
           source = <<>>,

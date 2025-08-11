@@ -48,7 +48,7 @@ extract_stream_next([Last | Rest], Buffer, Line, Column, Scope, _Interpol, Last)
     _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column, Scope}
   end;
 
-extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, Last) ->
+extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, _Last) ->
   % Found interpolation start - emit fragment if any, then begin_interpolation
   case Buffer of
     [] -> {begin_interpolation, make_meta_pos(Line, Column), string, Rest, Line, Column + 2, Scope};
