@@ -39,7 +39,7 @@ defmodule ToxicTest do
       {:ok, token, new_stream} ->
         collect_all_tokens(new_stream, [token | acc])
       {:eof, final_stream} ->
-        {Enum.reverse(acc), final_stream}
+        {acc, final_stream}
     end
   end
 
