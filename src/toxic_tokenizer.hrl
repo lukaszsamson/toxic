@@ -1,6 +1,21 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% SPDX-FileCopyrightText: 2021 The Elixir Team
 
+%% Driver state record for streaming tokenizer
+%% Maintains single-token scanning state with position tracking
+-record(toxic_driver, {
+  source,           % binary() - input source
+  offset = 0,       % integer() - byte offset into source
+  line = 1,         % pos_integer() - current line (exclusive end)  
+  column = 1,       % pos_integer() - current column (exclusive end)
+  scope,            % #toxic_tokenizer{} - tokenizer configuration and state
+  mode = normal,    % normal | {interp, Kind, Quote, Delim, Acc} - parsing mode stack
+  error_mode = tolerant, % strict | tolerant - error handling mode
+  error_sync = [semicolon, newline, closer], % sync points for error recovery
+  lookahead_cache = [], % small buffer for multi-char ops and rewrites
+  eof = false       % boolean() - end of file reached
+}).
+
 %% Numbers
 -define(is_hex(S), (?is_digit(S) orelse (S >= $A andalso S =< $F) orelse (S >= $a andalso S =< $f))).
 -define(is_bin(S), (S >= $0 andalso S =< $1)).

@@ -26,11 +26,8 @@ defmodule Toxic.TokenStream do
   @type t :: %__MODULE__{
           buffer: :queue.queue(token),
           push: [token],
-          state: term(),
+          driver: term(),
           opts: options,
-          source: source(),
-          line: pos_integer(),
-          column: pos_integer(),
           eof: boolean(),
           error: term() | nil
         }
@@ -42,11 +39,8 @@ defmodule Toxic.TokenStream do
 
   defstruct buffer: :queue.new(),
             push: [],
-            state: nil,
+            driver: nil,
             opts: [],
-            source: "",
-            line: 1,
-            column: 1,
             eof: false,
             error: nil
 
@@ -72,11 +66,12 @@ defmodule Toxic.TokenStream do
   @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
     opts = Keyword.merge(@default_opts, opts)
+    
+    # Initialize driver using the new API
+    {:ok, driver} = :toxic_tokenizer.init_driver(normalize_source_for_driver(source), line, column, driver_opts(opts))
 
     %__MODULE__{
-      source: normalize_source(source),
-      line: line,
-      column: column,
+      driver: driver,
       opts: opts
     }
   end
@@ -87,7 +82,16 @@ defmodule Toxic.TokenStream do
   Returns `{:ok, token, stream}` or `{:eof, stream}`.
   """
   @spec next(t()) :: {:ok, token(), t()} | {:eof, t()}
-  def next(%__MODULE__{eof: true} = stream), do: {:eof, stream}
+  def next(%__MODULE__{eof: true, push: [], buffer: buffer} = stream) do
+    case :queue.is_empty(buffer) do
+      true -> {:eof, stream}
+      false -> do_next(stream)  # Still have tokens in buffer
+    end
+  end
+  def next(%__MODULE__{eof: true, push: [_|_]} = stream) do
+    # EOF but still have pushed tokens
+    do_next(stream)
+  end
   def next(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
     if Keyword.get(opts, :error_mode, :tolerant) == :strict do
       {:eof, stream}
@@ -229,7 +233,7 @@ defmodule Toxic.TokenStream do
     ref = make_ref()
     # Store current state in process dictionary for simplicity
     # In production, might want a different approach
-    Process.put({__MODULE__, :checkpoint, ref}, {stream.push, stream.buffer, stream.line, stream.column})
+    Process.put({__MODULE__, :checkpoint, ref}, {stream.push, stream.buffer, stream.driver})
     {ref, stream}
   end
 
@@ -240,11 +244,11 @@ defmodule Toxic.TokenStream do
   @spec rewind_to(t(), reference(), boolean()) :: t()
   def rewind_to(%__MODULE__{} = stream, ref, delete_checkpoint? \\ true) do
     case Process.get({__MODULE__, :checkpoint, ref}) do
-      {push, buffer, line, column} ->
+      {push, buffer, driver} ->
         if delete_checkpoint? do
           Process.delete({__MODULE__, :checkpoint, ref})
         end
-        %{stream | push: push, buffer: buffer, line: line, column: column}
+        %{stream | push: push, buffer: buffer, driver: driver}
 
       nil ->
         raise ArgumentError, "Invalid checkpoint reference"
@@ -255,7 +259,10 @@ defmodule Toxic.TokenStream do
   Get the current absolute position (start of next token).
   """
   @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
-  def position(%__MODULE__{line: line, column: column} = stream) do
+  def position(%__MODULE__{driver: driver} = stream) do
+    # Extract position from driver record (Erlang record access)
+    line = :erlang.element(4, driver)    # line is 4th field in record
+    column = :erlang.element(5, driver)  # column is 5th field in record
     {{line, column}, stream}
   end
 
@@ -297,15 +304,16 @@ defmodule Toxic.TokenStream do
     # 2. Re-lexing the new content
     # 3. Splicing the results
     # For now, create a new stream with the new content
-    new(new_content, stream.line, stream.column, stream.opts)
+    {{line, column}, _} = position(stream)
+    new(new_content, line, column, stream.opts)
   end
 
   @doc """
   Get the current terminator stack.
   """
   @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
-  def current_terminators(%__MODULE__{state: state} = stream) do
-    terminators = if state, do: state[:terminators] || [], else: []
+  def current_terminators(%__MODULE__{driver: driver} = stream) do
+    terminators = :toxic_tokenizer.current_terminators(driver)
     {terminators, stream}
   end
 
@@ -313,48 +321,81 @@ defmodule Toxic.TokenStream do
   Peek at a potentially missing terminator.
   """
   @spec peek_missing_terminator(t()) :: {atom() | nil, t()}
-  def peek_missing_terminator(%__MODULE__{} = stream) do
-    {terminators, stream} = current_terminators(stream)
-
-    # TODO: this looks invalid
-    closer = case terminators do
-      [{:paren, _, _} | _] -> :")"
-      [{:bracket, _, _} | _] -> :"]"
-      [{:curly, _, _} | _] -> :"}"
-      _ -> nil
-    end
-
+  def peek_missing_terminator(%__MODULE__{driver: driver} = stream) do
+    closer = :toxic_tokenizer.peek_missing_terminator(driver)
     {closer, stream}
   end
 
   # Private functions
 
-  defp normalize_source(source) when is_binary(source), do: source
-  defp normalize_source(source) when is_list(source), do: IO.iodata_to_binary(source)
-  defp normalize_source(source) when is_function(source, 2), do: source
+  defp normalize_source_for_driver(source) when is_binary(source), do: String.to_charlist(source)
+  defp normalize_source_for_driver(source) when is_list(source) do
+    source |> IO.iodata_to_binary() |> String.to_charlist()
+  end
+  defp normalize_source_for_driver(source) when is_function(source, 2) do
+    # For function sources, convert to charlist on each call
+    fn line, column ->
+      case source.(line, column) do
+        {:more, binary} -> {:more, String.to_charlist(binary)}
+        :eof -> :eof
+      end
+    end
+  end
+
+  defp driver_opts(opts) do
+    [
+      unescape: Keyword.get(opts, :unescape, true),
+      error_mode: Keyword.get(opts, :error_mode, :tolerant),
+      error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
+    ]
+  end
+
+  defp fetch_tokens_from_driver(driver, max_batch, opts) do
+    fetch_tokens_from_driver(driver, max_batch, [], 0, opts)
+  end
+
+  defp fetch_tokens_from_driver(driver, max_batch, acc, count, _opts) when count >= max_batch do
+    {Enum.reverse(acc), driver, false}
+  end
+
+  defp fetch_tokens_from_driver(driver, max_batch, acc, count, opts) do
+    case :toxic_tokenizer.next(driver) do
+      {:ok, token, new_driver} ->
+        processed_token = process_token(token, %__MODULE__{opts: opts})
+        if processed_token == nil do
+          # Skip nil tokens (e.g., filtered EOL) and continue
+          fetch_tokens_from_driver(new_driver, max_batch, acc, count, opts)
+        else
+          fetch_tokens_from_driver(new_driver, max_batch, [processed_token | acc], count + 1, opts)
+        end
+      
+      {:eof, new_driver} ->
+        {Enum.reverse(acc), new_driver, true}
+      
+      {:error_token, meta, reason, new_driver} ->
+        error_token = {:error_token, meta, reason}
+        fetch_tokens_from_driver(new_driver, max_batch, [error_token | acc], count + 1, opts)
+    end
+  end
 
   defp refill_buffer(%__MODULE__{eof: true} = stream), do: stream
-  defp refill_buffer(%__MODULE__{source: source, line: line, column: column, opts: opts} = stream) when source != "" do
+  defp refill_buffer(%__MODULE__{driver: driver, opts: opts} = stream) do
     max_batch = Keyword.get(opts, :max_batch, 256)
+    
+    {tokens, new_driver, eof} = fetch_tokens_from_driver(driver, max_batch, opts)
 
-    {tokens, new_line, new_column, remaining, eof} = fetch_tokens(source, line, column, max_batch, opts)
-
-    # TODO: check if putting tokens list would work better :queue.in(tokens, buf)
     new_buffer = Enum.reduce(tokens, stream.buffer, fn token, buf ->
       :queue.in(token, buf)
     end)
 
+    # Only set EOF if driver is at EOF AND we got no new tokens
+    stream_eof = eof and tokens == []
+    
     %{stream |
       buffer: new_buffer,
-      line: new_line,
-      column: new_column,
-      source: remaining,
-      eof: eof
+      driver: new_driver,
+      eof: stream_eof
     }
-  end
-
-  defp refill_buffer(%__MODULE__{source: ""} = stream) do
-    %{stream | eof: true}
   end
 
   defp maybe_refill_buffer(%__MODULE__{buffer: buffer, opts: opts} = stream) do
@@ -377,47 +418,6 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  defp fetch_tokens(source, line, column, _max_batch, opts) when is_binary(source) do
-    # TODO: why convert to binary jut to convert to charlist again
-    charlist = String.to_charlist(source)
-
-    # Call the Erlang tokenizer with required options
-    tokenizer_opts = [
-      produce_ranges: true,
-      linearize: true,
-      unescape: Keyword.get(opts, :unescape, true)
-    ]
-
-    case :toxic_tokenizer.tokenize_with_ranges(charlist, line, column, tokenizer_opts) do
-      {:ok, new_line, new_column, _warnings, tokens, remaining} ->
-        # Tokens are returned in reverse order, convert to forward order
-        tokens_forward = Enum.reverse(tokens)
-
-        eof = remaining == []
-        {tokens_forward, new_line, new_column, List.to_string(remaining), eof}
-
-      {:error, _meta, reason, _rest, _tokens} ->
-        # TODO: return tokens
-        # TODO: real implementation
-        # Handle error based on error_mode
-        if Keyword.get(opts, :error_mode, :tolerant) == :tolerant do
-          error_token = {:error_token, {{line, column}, {line, column + 1}, nil}, reason}
-          {[error_token], line, column + 1, "", false}
-        else
-          {[], line, column, "", true}
-        end
-    end
-  end
-
-  defp fetch_tokens(source, line, column, max_batch, opts) when is_function(source, 2) do
-    case source.(line, column) do
-      {:more, binary} ->
-        # TODO: this will not work correctly if source returns binary splitting token in half or with unbalanced terminators
-        fetch_tokens(binary, line, column, max_batch, opts)
-      :eof ->
-        {[], line, column, source, true}
-    end
-  end
 
   defp process_token(token, %__MODULE__{opts: opts}) do
     token = if Keyword.get(opts, :eol_mode, :embed) == :embed do

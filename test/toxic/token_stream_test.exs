@@ -5,12 +5,15 @@ defmodule Toxic.TokenStreamTest do
   describe "new/4" do
     test "creates a stream from a binary source" do
       stream = TokenStream.new("1 + 2")
-      assert %TokenStream{source: "1 + 2", line: 1, column: 1} = stream
+      assert %TokenStream{driver: driver} = stream
+      assert driver != nil
     end
 
     test "creates a stream with custom starting position" do
       stream = TokenStream.new("foo", 5, 10)
-      assert %TokenStream{line: 5, column: 10} = stream
+      {{line, column}, _} = TokenStream.position(stream)
+      assert line == 5
+      assert column == 10
     end
 
     test "accepts options" do

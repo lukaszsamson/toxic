@@ -7,6 +7,8 @@
 -include("toxic_tokenizer.hrl").
 -export([tokenize/1, tokenize/3, tokenize/4, invalid_do_error/1, terminator/1]).
 -export([tokenize_with_ranges/4, ranges_to_legacy/1, collapse_linear_ranges/1]).
+%% Driver API exports
+-export([init_driver/4, next/1, current_terminators/1, peek_missing_terminator/1, scan/5]).
 
 -define(at_op(T),
   T =:= $@).
@@ -2406,3 +2408,229 @@ prune_tokens([_ | Tokens], Opener) ->
   prune_tokens(Tokens, Opener);
 prune_tokens([], _Opener) ->
   [].
+
+%% =============================================================================
+%% Driver API - Streaming tokenizer implementation
+%% =============================================================================
+
+%% @doc Initialize a new tokenizer driver
+%% Forces produce_ranges=true and linearize=true for streaming compatibility
+%% @spec init_driver(String, Line, Column, Opts) -> {ok, Driver}
+init_driver(String, Line, Column, Opts) when is_list(String) ->
+  init_driver(list_to_binary(String), Line, Column, Opts);
+init_driver(String, Line, Column, Opts) when is_binary(String) ->
+  % Force required options for streaming
+  RequiredOpts = [
+    {produce_ranges, true},
+    {linearize, true}
+  ],
+  % Merge with user opts, required opts take precedence
+  MergedOpts = merge_opts(Opts, RequiredOpts),
+  
+  % Extract driver-specific options
+  ErrorMode = proplists:get_value(error_mode, MergedOpts, tolerant),
+  ErrorSync = proplists:get_value(error_sync, MergedOpts, [semicolon, newline, closer]),
+  
+  % Create tokenizer scope with all options
+  Scope = build_scope(MergedOpts),
+  
+  % Initialize driver record
+  Driver = #toxic_driver{
+    source = String,
+    offset = 0,
+    line = Line,
+    column = Column,
+    scope = Scope,
+    mode = normal,
+    error_mode = ErrorMode,
+    error_sync = ErrorSync,
+    lookahead_cache = [],
+    eof = (String =:= <<>>)
+  },
+  {ok, Driver};
+init_driver(FunctionSource, Line, Column, Opts) when is_function(FunctionSource) ->
+  % For function sources, start with empty binary and use function on demand
+  % Force required options for streaming
+  RequiredOpts = [
+    {produce_ranges, true},
+    {linearize, true}
+  ],
+  % Merge with user opts, required opts take precedence
+  MergedOpts = merge_opts(Opts, RequiredOpts),
+  
+  % Extract driver-specific options
+  ErrorMode = proplists:get_value(error_mode, MergedOpts, tolerant),
+  ErrorSync = proplists:get_value(error_sync, MergedOpts, [semicolon, newline, closer]),
+  
+  % Create tokenizer scope with all options
+  Scope = build_scope(MergedOpts),
+  
+  % Initialize driver record with function source
+  Driver = #toxic_driver{
+    source = FunctionSource,
+    offset = 0,
+    line = Line,
+    column = Column,
+    scope = Scope,
+    mode = normal,
+    error_mode = ErrorMode,
+    error_sync = ErrorSync,
+    lookahead_cache = [],
+    eof = false
+  },
+  {ok, Driver}.
+
+%% @doc Pull the next token from the driver
+%% @spec next(Driver) -> {ok, Token, Driver1} | {eof, Driver1} | {error_token, Meta, Reason, Driver1}
+next(#toxic_driver{eof = true} = Driver) ->
+  {eof, Driver};
+next(#toxic_driver{source = <<>>} = Driver) ->
+  {eof, Driver#toxic_driver{eof = true}};
+next(#toxic_driver{} = Driver) ->
+  % Single token scanning logic will be implemented in Phase 2
+  % For now, fall back to batch tokenization for compatibility
+  fallback_next_token(Driver).
+
+%% @doc Get current terminator stack from driver
+%% @spec current_terminators(Driver) -> [{Start, Meta, Indent}]
+current_terminators(#toxic_driver{scope = Scope}) ->
+  % Extract terminators from scope
+  case Scope of
+    #toxic_tokenizer{terminators = Terminators} -> 
+      Terminators;
+    _ -> 
+      []
+  end.
+
+%% @doc Peek at potentially missing terminator
+%% @spec peek_missing_terminator(Driver) -> End | nil
+peek_missing_terminator(#toxic_driver{scope = Scope}) ->
+  case current_terminators(#toxic_driver{scope = Scope}) of
+    [] -> 
+      nil;
+    [{Opener, _Meta, _Indent} | _] -> 
+      terminator(Opener)
+  end.
+
+%% @doc Callback-style scanning (optional API)
+%% @spec scan(String, Line, Column, Opts, EmitFun) -> {ok, FinalState}
+scan(String, Line, Column, Opts, EmitFun) when is_function(EmitFun, 2) ->
+  {ok, Driver} = init_driver(String, Line, Column, Opts),
+  scan_loop(Driver, EmitFun).
+
+%% =============================================================================
+%% Driver helper functions
+%% =============================================================================
+
+%% Merge user options with required options, required take precedence
+merge_opts(UserOpts, RequiredOpts) ->
+  lists:ukeymerge(1, lists:ukeysort(1, RequiredOpts), lists:ukeysort(1, UserOpts)).
+
+%% Build tokenizer scope from options  
+build_scope(Opts) ->
+  % Create default scope and apply options
+  DefaultScope = #toxic_tokenizer{},
+  lists:foldl(fun apply_scope_option/2, DefaultScope, Opts).
+
+%% Apply individual option to scope
+apply_scope_option({produce_ranges, Value}, Scope) ->
+  Scope#toxic_tokenizer{produce_ranges = Value};
+apply_scope_option({linearize, Value}, Scope) ->
+  Scope#toxic_tokenizer{linearize = Value};
+apply_scope_option({unescape, Value}, Scope) ->
+  Scope#toxic_tokenizer{unescape = Value};
+apply_scope_option({cursor_completion, Value}, Scope) ->
+  Scope#toxic_tokenizer{cursor_completion = Value};
+apply_scope_option({existing_atoms_only, Value}, Scope) ->
+  Scope#toxic_tokenizer{existing_atoms_only = Value};
+apply_scope_option({preserve_comments, Value}, Scope) ->
+  Scope#toxic_tokenizer{preserve_comments = Value};
+apply_scope_option({ascii_identifiers_only, Value}, Scope) ->
+  Scope#toxic_tokenizer{ascii_identifiers_only = Value};
+apply_scope_option(_Other, Scope) ->
+  % Ignore unknown options
+  Scope.
+
+%% Callback scanning loop
+scan_loop(Driver, EmitFun) ->
+  case next(Driver) of
+    {ok, Token, Driver1} ->
+      case EmitFun(Token, Driver1) of
+        continue -> scan_loop(Driver1, EmitFun);
+        halt -> {ok, Driver1}
+      end;
+    {eof, Driver1} ->
+      {ok, Driver1};
+    {error_token, Meta, Reason, Driver1} ->
+      case EmitFun({error_token, Meta, Reason}, Driver1) of
+        continue -> scan_loop(Driver1, EmitFun);
+        halt -> {ok, Driver1}
+      end
+  end.
+
+%% Fallback to batch tokenization for compatibility during Phase 1
+%% This will be replaced with proper single-token scanning in Phase 2
+fallback_next_token(#toxic_driver{source = Source, line = Line, column = Column, 
+                                 scope = Scope, offset = Offset} = Driver) ->
+  % Extract remaining source from offset
+  Remaining = binary:part(Source, Offset, byte_size(Source) - Offset),
+  
+  if Remaining =:= <<>> ->
+    {eof, Driver#toxic_driver{eof = true}};
+  true ->
+    % Convert to charlist for existing tokenizer
+    Charlist = binary_to_list(Remaining),
+    
+    % Use existing tokenizer with forced options
+    ScopeOpts = [
+      {produce_ranges, true},
+      {linearize, true},
+      {unescape, Scope#toxic_tokenizer.unescape}
+    ],
+    
+    case tokenize_with_ranges(Charlist, Line, Column, ScopeOpts) of
+      {ok, NewLine, NewColumn, _Warnings, [], _Remaining} ->
+        % No tokens produced, EOF
+        {eof, Driver#toxic_driver{eof = true}};
+      
+      {ok, NewLine, NewColumn, _Warnings, [FirstToken | _], _Remaining2} ->
+        % Extract position info from first token to calculate consumed bytes
+        {_Type, {{_StartLine, _StartCol}, {EndLine, EndCol}, _Extra}, _Value} = FirstToken,
+        
+        % Calculate consumed bytes based on end position of first token
+        % This is an approximation - in a proper implementation we'd track byte positions
+        ConsumedChars = case EndLine of
+          Line -> EndCol - Column;
+          _ -> 
+            % Multi-line token - approximate
+            (EndLine - Line) * 50 + EndCol  % Rough approximation
+        end,
+        
+        NewOffset = min(Offset + ConsumedChars, byte_size(Source)),
+        IsEOF = (NewOffset >= byte_size(Source)),
+        
+        UpdatedDriver = Driver#toxic_driver{
+          offset = NewOffset,
+          line = EndLine, 
+          column = EndCol,
+          eof = IsEOF
+        },
+        {ok, FirstToken, UpdatedDriver};
+        
+      {error, Meta, Reason, _Rest, _Tokens} ->
+        % Handle error according to error mode
+        case Driver#toxic_driver.error_mode of
+          tolerant ->
+            % Advance by one byte and return error token
+            ErrorToken = {error_token, Meta, Reason},
+            UpdatedDriver = Driver#toxic_driver{
+              offset = min(Offset + 1, byte_size(Source)),
+              column = Column + 1
+            },
+            {error_token, Meta, Reason, UpdatedDriver};
+          strict ->
+            % Return EOF on error in strict mode
+            {eof, Driver#toxic_driver{eof = true}}
+        end
+    end
+  end.
