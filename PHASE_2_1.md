@@ -4,7 +4,7 @@ Goal: Refactor the recursive, list-producing tokenizer into a driver-compatible,
 
 This plan lists all code areas to update with concrete instructions for a coder model.
 
-## A. Introduce scan_token/1 and driver loop entry points
+## A. Introduce scan_token/1 and driver loop entry points (REUSE tokenize/5 DISPATCH)
 
 - Add a new internal function:
   - `scan_token(Driver) -> {ok, Token, Driver1} | {eof, Driver1} | {error_token, Meta, Reason, Driver1}`
@@ -13,9 +13,19 @@ This plan lists all code areas to update with concrete instructions for a coder 
   - `next(Driver)` just calls `scan_token/1` and handles strict/tolerant mode decisions for errors.
   - Keep existing list-based `tokenize/4` by repeatedly calling `next/1` until EOF and collecting tokens (compat path).
 
-## B. Replace recursion in tokenize/5 family
+IMPORTANT: Do NOT create a brand-new character-dispatching tokenizer. We must reuse the existing `tokenize/5` pattern-matching clauses as the dispatcher. The change is mechanical:
 
-All clauses of `tokenize(String, Line, Column, Scope, Tokens)` and helper functions that call it recursively must be reworked to operate on driver state and return a single token.
+- Each `tokenize(Input, Line, Column, Scope, Tokens)` clause should be transformed to:
+  1) Inspect the input head as it already does today.
+  2) Build exactly one token (or decide EOF/error).
+  3) Update the Driver (advance input, update line/column, update `Scope#toxic_tokenizer` inside the Driver).
+  4) Return that single token with the updated Driver.
+
+In other words: keep the clause structure and recognition logic; remove only the tail calls like `tokenize(Rest, ...)` that build lists. Replace them with Driver updates and a single-token return. This preserves all battle-tested dispatch logic and avoids re-implementing the lexer from scratch.
+
+## B. Replace recursion in tokenize/5 family (PRESERVE EXISTING CLAUSES)
+
+All clauses of `tokenize(String, Line, Column, Scope, Tokens)` and helper functions that call it recursively must be reworked to operate on driver state and return a single token. Do not introduce a second dispatcher. Instead, refactor each existing clause to stop recursing and instead yield exactly one token and an updated Driver.
 
 Key areas to transform:
 
