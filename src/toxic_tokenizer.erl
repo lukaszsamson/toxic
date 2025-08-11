@@ -590,7 +590,7 @@ tokenize_single("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
     {[$/ | _] = Remaining, Extra} ->
       Token = {identifier, make_meta_len(Line, Column, 4, nil, Scope), '..//'},
-      tokenize_single(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
+      yield(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
     {_, _} ->
       unexpected_token(String, Line, Column, Scope, Tokens)
   end;
@@ -824,7 +824,7 @@ tokenize_single([$: | String] = Original, Line, Column, Scope, Tokens) ->
     empty when Scope#toxic_tokenizer.cursor_completion == false ->
       unexpected_token(Original, Line, Column, Scope, Tokens);
     empty ->
-      tokenize_single([], Line, Column, Scope, Tokens);
+      yield([], Line, Column, Scope, Tokens);
     {unexpected_token, Length} ->
       unexpected_token(lists:nthtail(Length - 1, String), Line, Column + Length - 1, Scope, Tokens);
     {error, Reason} ->
@@ -843,7 +843,7 @@ tokenize_single([H | T], Line, Column, Scope, Tokens) when ?is_digit(H) ->
       if
         Number == 0, (I =:= $x) orelse (I =:= $o) orelse (I =:= $b), Rest == [],
         Scope#toxic_tokenizer.cursor_completion /= false ->
-          tokenize_single([], Line, Column, Scope, Tokens);
+          yield([], Line, Column, Scope, Tokens);
 
         true ->
           Msg =
@@ -915,7 +915,7 @@ tokenize_single([$%, ${ | T], Line, Column, Scope, Tokens) ->
   handle_terminator(T, Line, Column + 2, Scope, Token, [{'%{}', make_meta_len(Line, Column, 2, nil, Scope)} | Tokens]);
 
 tokenize_single([$% | T], Line, Column, Scope, Tokens) ->
-  tokenize_single(T, Line, Column + 1, Scope, [{'%', make_meta_len(Line, Column, 1, nil, Scope)} | Tokens]);
+  yield(T, Line, Column + 1, Scope, [{'%', make_meta_len(Line, Column, 1, nil, Scope)} | Tokens]);
 
 tokenize_single([$. | T], Line, Column, Scope, Tokens) ->
   tokenize_dot(T, Line, Column + 1, make_meta_len(Line, Column, 1, nil, Scope), Scope, Tokens);
@@ -1360,8 +1360,8 @@ handle_call_identifier(Rest, Line, Column, DotInfo, Length, UnencodedOp, Scope, 
 % ## Ambiguous unary/binary operators tokens
 % Keywords are not ambiguous operators
 handle_space_sensitive_tokens([Sign, $:, Space | _] = String, Line, Column, Scope, Tokens) when ?dual_op(Sign), ?is_space(Space) ->
-  % TODO: should we recurse here or yield?
-  tokenize_single(String, Line, Column, Scope, Tokens);
+  % Yield directly as this is a single-token case
+  yield(String, Line, Column, Scope, Tokens);
 
 % But everything else, except other operators, are
 handle_space_sensitive_tokens([Sign, NotMarker | T], Line, Column, Scope, [{identifier, _, _} = H | Tokens]) when
@@ -1374,11 +1374,11 @@ handle_space_sensitive_tokens([Sign, NotMarker | T], Line, Column, Scope, [{iden
 handle_space_sensitive_tokens([], Line, Column,
                               #toxic_tokenizer{cursor_completion=Cursor} = Scope,
                               [{identifier, Info, Identifier} | Tokens]) when Cursor /= false ->
-  tokenize_single([$(], Line, Column+1, Scope, [{paren_identifier, Info, Identifier} | Tokens]);
+  yield([$(], Line, Column+1, Scope, [{paren_identifier, Info, Identifier} | Tokens]);
 
 handle_space_sensitive_tokens(String, Line, Column, Scope, Tokens) ->
-  % TODO: should we recurse here or yield?
-  tokenize_single(String, Line, Column, Scope, Tokens).
+  % Yield directly - handled case by case above
+  yield(String, Line, Column, Scope, Tokens).
 
 %% Helpers
 
@@ -2206,8 +2206,8 @@ tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Toke
 
 % Incomplete sigil.
 tokenize_sigil_contents([], _SigilName, Line, Column, Scope, Tokens) ->
-  % TODO: should we recurse here or yield? No tokens to yield, but we need to update the driver
-  tokenize_single([], Line, Column, Scope, Tokens).
+  % Yield directly - incomplete sigil case
+  yield([], Line, Column, Scope, Tokens).
 
 add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope, Tokens, Indentation, Delimiter) ->
   TokenColumn = Column - 1 - length(SigilName),
@@ -2221,7 +2221,7 @@ add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope,
       {Final, Modifiers} = collect_modifiers(Rest, []),
       NewColumnWithModifiers = NewColumn + length(Modifiers),
       Token = {sigil, make_meta(Line, TokenColumn, NewLine, NewColumnWithModifiers, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
-      tokenize_single(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
+      yield(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
 
     {error, Reason} ->
       error(Reason, Rest, Scope, Tokens)

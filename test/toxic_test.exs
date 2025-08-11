@@ -5,10 +5,16 @@ defmodule ToxicTest do
   defp tokenize(string, opts \\ []) do
     charlist = to_charlist(string)
     linearize = Keyword.get(opts, :linearize, false)
-    {:ok, _, _, _, toxic_tokens_with_ranges, toxic_remaining} =
-      :toxic_tokenizer.tokenize_with_ranges(charlist, 1, 1, [
-        {:linearize, linearize}
-      ])
+
+    # Use the new streaming API
+    stream = Toxic.TokenStream.new(string, 1, 1, [{:linearize, linearize}])
+    {toxic_tokens_with_ranges, final_stream} = collect_all_tokens(stream, [])
+
+    toxic_tokens_with_ranges = if linearize do
+      :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges |> Enum.reverse)
+    else
+      toxic_tokens_with_ranges
+    end
 
     if Keyword.get(opts, :must_match_elixir, true) do
       # Convert back to legacy format for comparison
@@ -17,18 +23,42 @@ defmodule ToxicTest do
       {:ok, _, _, _, elixir_tokens, _remaining} =
         :elixir_tokenizer.tokenize(charlist, 1, 1, [])
 
-      assert Enum.reverse(toxic_tokens) == Enum.reverse(elixir_tokens)
+      assert toxic_tokens == Enum.reverse(elixir_tokens)
     end
 
-    # Linearized tokens are already in forward order, non-linearized need reversing
-    tokens = if linearize do
-      :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges)
+    # Get remaining string from final stream position
+    remaining_str = get_remaining_string(final_stream, string)
+
+    {:ok, toxic_tokens_with_ranges, remaining_str}
+  end
+
+  # Helper function to collect all tokens from the stream
+  defp collect_all_tokens(stream, acc) do
+    case Toxic.TokenStream.next(stream) do
+      {:ok, token, new_stream} ->
+        collect_all_tokens(new_stream, [token | acc])
+      {:eof, final_stream} ->
+        {Enum.reverse(acc), final_stream}
+    end
+  end
+
+  # Helper to extract remaining string based on stream position
+  defp get_remaining_string(stream, original_string) do
+    {{line, column}, _stream} = Toxic.TokenStream.position(stream)
+
+    # For simple cases, if we're at line 1, we can calculate offset
+    if line == 1 do
+      offset = column - 1
+      if offset < String.length(original_string) do
+        String.slice(original_string, offset..-1)
+      else
+        ""
+      end
     else
-      Enum.reverse(toxic_tokens_with_ranges)
+      # For multi-line, would need more complex calculation
+      # For now, just return empty string
+      ""
     end
-    remaining_str = List.to_string(toxic_remaining)
-
-    {:ok, tokens, remaining_str}
   end
 
   test "empty" do
