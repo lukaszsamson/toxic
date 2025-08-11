@@ -26,16 +26,19 @@ defmodule Toxic.Driver do
       {:token, token, rest, line, column, scope} ->
         {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
 
-      {:switch_to_interp, token = {kind, _, delim}, rest, line, column, scope} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, kind, delim} | modes]}}
+      {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
       {:eof, line, column, scope} ->
         {:eof, %{state | line: line, column: column, scope: scope}}
     end
   end
-  def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | _]} = state) do
+  def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
     case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, interpolation, string, delim) do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
-        {:ok, {:binary_part, meta, binary_part}, rest, %{state | line: line, column: column, scope: scope}}
+        {:ok, {:string_fragment, meta, binary_part}, rest, %{state | line: line, column: column, scope: scope}}
+      {:done, _meta, _binary_part, rest, line, column, scope} ->
+        end_meta = {line, {line, column - 1}, nil}
+        {:ok, {:bin_string_end, end_meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
     end
   end
 end

@@ -28,22 +28,27 @@ extract(String, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
 %%   {error, Meta, Reason} - parse error
 
 extract_stream_event(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_integer(Column) ->
-  extract_stream_next(String, [], Line, Column, Scope, Interpol, Last).
+  extract_stream_next(String, [], Line, Column, Line, Column, Scope, Interpol, Last).
 
 %% Stream processing - accumulate buffer until we hit a significant event
-extract_stream_next([], _Buffer, Line, Column, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) ->
+extract_stream_next([], _Buffer, Line, Column, _StartLine, _StartColumn, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) ->
   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
 
-extract_stream_next([], Buffer, Line, Column, Scope, _Interpol, _Last) ->
+extract_stream_next([], Buffer, Line, Column, StartLine, StartColumn, Scope, _Interpol, _Last) ->
   % EOF reached - emit final fragment if any, then done
   case Buffer of
     [] -> {done, make_meta_pos(Line, Column), [], [], Line, Column, Scope};
-    _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
+    _  -> {fragment, make_meta_range(StartLine, StartColumn, Line, Column), list_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
   end;
 
-extract_stream_next([Last | Rest], Buffer, Line, Column, Scope, _Interpol, Last) ->
+extract_stream_next([Last | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, _Interpol, Last) ->
   % Found terminator - emit fragment if any, then done
-  {fragment, make_meta_pos(Line, Column + 1), list_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column + 1, Scope};
+  {done, make_meta_pos(Line, Column), [], Rest, Line, Column + 1, Scope};
+
+extract_stream_next([Last | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, _Interpol, Last) ->
+  % Found terminator - emit final fragment, then done
+  FragmentMeta = make_meta_range(StartLine, StartColumn, Line, Column),
+  {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column + 1, Scope};
 
 % extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, _Last) ->
 %   % Found interpolation start - emit fragment if any, then begin_interpolation
@@ -72,13 +77,21 @@ extract_stream_next([Last | Rest], Buffer, Line, Column, Scope, _Interpol, Last)
 %   % Handle escaped interpolation start
 %   extract_stream_next(Rest, [${, $#, $\\ | Buffer], Line, Column + 3, Scope, true, Last);
 
-extract_stream_next([Char | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
+extract_stream_next([Char | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, Interpol, Last) ->
+  % Starting buffer - track start position
+  extract_stream_next(Rest, [Char], Line, Column + 1, Line, Column, Scope, Interpol, Last);
+
+extract_stream_next([Char | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, Interpol, Last) ->
   % Regular character - add to buffer and continue
-  extract_stream_next(Rest, [Char | Buffer], Line, Column + 1, Scope, Interpol, Last).
+  extract_stream_next(Rest, [Char | Buffer], Line, Column + 1, StartLine, StartColumn, Scope, Interpol, Last).
 
 %% Helper to create simple positional metadata
 make_meta_pos(Line, Column) ->
   {Line, Column, nil}.
+
+%% Helper to create range metadata
+make_meta_range(StartLine, StartColumn, EndLine, EndColumn) ->
+  {{StartLine, StartColumn}, {EndLine, EndColumn}, nil}.
 
 %% Terminators
 

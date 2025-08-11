@@ -364,7 +364,7 @@ defmodule Toxic.TokenStream do
 
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
 
-    case Toxic.Driver.next(source_string, driver) |> dbg do
+    case Toxic.Driver.next(source_string, driver) do
       {:ok, token, source_string, driver} ->
         processed_token = process_token(token, %__MODULE__{opts: opts})
         if processed_token == nil do
