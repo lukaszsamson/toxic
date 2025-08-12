@@ -72,22 +72,13 @@ extract_stream_next([$\\, $\r, $\n | Rest], Buffer, Line, _Column, StartLine, St
 extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
   extract_stream_next(Rest, [$\n | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
 
+extract_stream_next([$\\, Last | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, Interpol, Last) ->
+  % Handle escaped terminator
+  extract_stream_next(Rest, [Last, $\\ | Buffer], Line, Column + 2, StartLine, StartColumn, Scope, Interpol, Last);
 
-% extract_stream_next([$\\, $\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
-%   % Handle escaped newlines
-%   extract_stream_next(Rest, [$\n, $\\ | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
-
-% extract_stream_next([$\\, $\r, $\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
-%   % Handle escaped CRLF
-%   extract_stream_next(Rest, [$\n, $\r, $\\ | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
-
-% extract_stream_next([$\\, Last | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
-%   % Handle escaped terminator
-%   extract_stream_next(Rest, [Last, $\\ | Buffer], Line, Column + 2, Scope, Interpol, Last);
-
-% extract_stream_next([$\\, $#, ${ | Rest], Buffer, Line, Column, Scope, true, Last) ->
-%   % Handle escaped interpolation start
-%   extract_stream_next(Rest, [${, $#, $\\ | Buffer], Line, Column + 3, Scope, true, Last);
+extract_stream_next([$\\, $#, ${ | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, true, Last) ->
+  % Handle escaped interpolation start
+  extract_stream_next(Rest, [${, $#, $\\ | Buffer], Line, Column + 3, StartLine, StartColumn, Scope, true, Last);
 
 extract_stream_next([Char | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, Interpol, Last) ->
   % Starting buffer - track start position

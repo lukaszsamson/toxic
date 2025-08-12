@@ -1306,8 +1306,8 @@ handle_space_sensitive_tokens([], Line, Column,
   yield([$(], Line, Column+1, Scope, [{paren_identifier, Info, Identifier} | Tokens]);
 
 handle_space_sensitive_tokens(String, Line, Column, Scope, Tokens) ->
-  % Yield directly - handled case by case above
-  yield(String, Line, Column, Scope, Tokens).
+  % Continue tokenizing after handling whitespace
+  tokenize_single(String, Line, Column, Scope, Tokens).
 
 %% Helpers
 
