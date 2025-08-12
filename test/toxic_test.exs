@@ -118,6 +118,8 @@ defmodule ToxicTest do
 
     test "hex followed by other characters" do
       assert tokenize("0x123;") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
+      assert tokenize("0x123 ;") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
+      assert tokenize("0x123  ;") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 8}, {1, 9}, 0}}], ""}
     end
   end
 
@@ -787,6 +789,7 @@ defmodule ToxicTest do
       assert tokenize("\"foo\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]}], ""}
       assert tokenize("\"\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["\nbar"]}], ""}
       assert tokenize("\"foo\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["foo\n"]}], ""}
+      assert tokenize("\"\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["\n"]}], ""}
     end
 
     test "with CRLF newlines" do
@@ -818,6 +821,7 @@ defmodule ToxicTest do
 
     test "tokens after bin strings same line" do
       assert tokenize("\"foo\" 0x123") == {:ok, [{:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]}, {:int, {{1, 7}, {1, 12}, 291}, ~c"0x123"}], ""}
+      assert tokenize("\"foo\" \t 0x123") == {:ok, [{:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]}, {:int, {{1, 9}, {1, 14}, 291}, ~c"0x123"}], ""}
     end
 
     test "tokens after bin strings next line" do
@@ -863,6 +867,35 @@ defmodule ToxicTest do
 
     test "with interpolation in the middle" do
       assert tokenize("\"foo \#{0x123} baz\"") == {:ok, [{:bin_string, {{1, 1}, {1, 19}, nil}, ["foo ", {{1, 6, nil}, {1, 13, nil}, [{:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}]}, " baz"]}], ""}
+      assert tokenize("\"\#{0x123}\"") == {
+        :ok,
+        [
+          {
+            :bin_string,
+            {{1, 1}, {1, 11}, nil},
+            [
+              {{1, 2, nil}, {1, 9, nil}, [{:int, {{1, 4}, {1, 9}, 291}, ~c"0x123"}]}
+            ]
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with only interpolation" do
+      assert tokenize("\"\#{0x123}\"") == {
+        :ok,
+        [
+          {
+            :bin_string,
+            {{1, 1}, {1, 11}, nil},
+            [
+              {{1, 2, nil}, {1, 9, nil}, [{:int, {{1, 4}, {1, 9}, 291}, ~c"0x123"}]}
+            ]
+          }
+        ],
+        ""
+      }
     end
 
     test "with interpolation in the beginning" do
@@ -910,6 +943,48 @@ defmodule ToxicTest do
               "a ",
               {{1, 4, nil}, {1, 11, nil}, [{:int, {{1, 6}, {1, 11}, 291}, ~c"0x123"}]},
               {{1, 12, nil}, {1, 19, nil}, [{:int, {{1, 14}, {1, 19}, 292}, ~c"0x124"}]},
+              " baz"
+            ]
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with empty interpolation" do
+      assert tokenize("\"foo \#{} baz\"") == {
+        :ok,
+        [
+          {
+            :bin_string,
+            {{1, 1}, {1, 14}, nil},
+            [
+              "foo ",
+              {
+                {1, 6, nil},
+                {1, 8, nil},
+                []
+              },
+              " baz"
+            ]
+          }
+        ],
+        ""
+      }
+
+      assert tokenize("\"foo \#{ } baz\"") == {
+        :ok,
+        [
+          {
+            :bin_string,
+            {{1, 1}, {1, 15}, nil},
+            [
+              "foo ",
+              {
+                {1, 6, nil},
+                {1, 9, nil},
+                []
+              },
               " baz"
             ]
           }

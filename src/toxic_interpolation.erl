@@ -48,18 +48,18 @@ extract_stream_next([Last | Rest], [], Line, Column, _StartLine, _StartColumn, S
   {done, make_meta_pos(Line, Column), [], Rest, Line, Column + 1, Scope};
 
 extract_stream_next([Last | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, _Interpol, Last) ->
-  % Found terminator - emit final fragment, then done
-  FragmentMeta = make_meta_range(StartLine, StartColumn, Line, Column),
-  {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column + 1, Scope};
+  % Found terminator - emit final fragment, then done  
+  FragmentMeta = make_meta_range(StartLine, StartColumn, Line, Column - 1),
+  {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column, Scope};
 
 % Interpolation
 
-% extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, _Last) ->
-%   % Found interpolation start - emit fragment if any, then begin_interpolation
-%   case Buffer of
-%     [] -> {begin_interpolation, make_meta_pos(Line, Column), string, Rest, Line, Column + 2, Scope};
-%     _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [$#, ${ | Rest], Line, Column, Scope}
-%   end;
+extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, true, _Last) ->
+  % Found interpolation start - emit fragment if any, then begin_interpolation
+  case Buffer of
+    [] -> {begin_interpolation, make_meta_pos(Line, Column), string, Rest, Line, Column + 2, Scope};
+    _  -> {fragment, make_meta_range(StartLine, StartColumn, Line, Column), list_to_binary(lists:reverse(Buffer)), [$#, ${ | Rest], Line, Column, Scope}
+  end;
 
 % Newlines
 
