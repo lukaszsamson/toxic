@@ -27,6 +27,11 @@ defmodule Toxic.Driver do
 
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
         {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
+        
+      {:error, {[line: _, column: error_column], _, _}, [?} | _] = string, _tokens, _warnings} when length(modes) > 1 ->
+        # Handle empty interpolation case - treat closing } as end_interpolation
+        {:ok, {:end_interpolation, {state.line, error_column, nil}, :string}, tl(string), %{state | modes: tl(modes), column: error_column + 1}}
+        
       {:eof, line, column, scope} ->
         {:eof, %{state | line: line, column: column, scope: scope}}
     end
