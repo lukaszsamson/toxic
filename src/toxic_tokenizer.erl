@@ -333,11 +333,19 @@ linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, 
   end;
 linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Tok = {bin_heredoc, CM, Indent, lists:reverse(PartsRev)},
+  Parts = case lists:reverse(PartsRev) of
+    [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
+    RevParts -> RevParts
+  end,
+  Tok = {bin_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
 linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Tok = {list_heredoc, CM, Indent, lists:reverse(PartsRev)},
+  Parts = case lists:reverse(PartsRev) of
+    [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
+    RevParts -> RevParts
+  end,
+  Tok = {list_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
 linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, _Delim1} | T], Out, [{kw_identifier_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
@@ -1063,7 +1071,24 @@ handle_char(_)  -> false.
 
 %% Handlers
 
+handle_heredocs(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
+  % Linearized streaming mode for heredocs
+  % First check if the heredoc header is valid (only whitespace + newline after opening)
+  case extract_heredoc_header(T) of
+    {ok, Headerless} ->
+      {StartType, Kind} = case H of
+        $' -> {list_heredoc_start, list_heredoc};
+        $" -> {bin_heredoc_start, bin_heredoc}
+      end,
+      StartTok = {StartType, make_meta(Line, Column, Line, Column + 3, nil, Scope), [H, H, H]},
+      % For streaming mode, don't prepend newline - handle it in interpolation extraction
+      {switch_to_interp, StartTok, Headerless, Line + 1, 1, Scope, Kind, [H, H, H], []};
+    error ->
+      Message = "heredoc allows only whitespace characters followed by a new line after opening ",
+      error({?LOC(Line, Column + 3), io_lib:format(Message, []), [H, H, H]}, [H, H, H] ++ T, Scope, _Tokens)
+  end;
 handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
+  % Non-linearized mode - keep old implementation for compatibility
   case extract_heredoc_with_interpolation(Line, Column, Scope, true, T, H) of
     {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
         StartTok = case H of

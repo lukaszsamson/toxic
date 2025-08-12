@@ -43,9 +43,18 @@ extract_stream_next([], Buffer, Line, Column, StartLine, StartColumn, Scope, _In
     _  -> {fragment, make_meta_range(StartLine, StartColumn, Line, Column), list_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
   end;
 
+extract_stream_next([H,H,H | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, _Interpol, [H,H,H]) ->
+  % Found heredoc terminator - done
+  {done, make_meta_pos(Line, Column), [], Rest, Line, Column + 3, Scope};
+
 extract_stream_next([Last | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, _Interpol, Last) ->
   % Found terminator - emit fragment if any, then done
   {done, make_meta_pos(Line, Column), [], Rest, Line, Column + 1, Scope};
+
+extract_stream_next([H,H,H | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, _Interpol, [H,H,H]) ->
+  % Found heredoc terminator - emit final fragment, then done  
+  FragmentMeta = make_meta_range(StartLine, StartColumn, Line, Column - 1),
+  {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse(Buffer)), [H,H,H | Rest], Line, Column, Scope};
 
 extract_stream_next([Last | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, _Interpol, Last) ->
   % Found terminator - emit final fragment, then done  
@@ -69,6 +78,23 @@ extract_stream_next([$\\, $\n | Rest], Buffer, Line, _Column, StartLine, StartCo
 extract_stream_next([$\\, $\r, $\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
   extract_stream_next(Rest, [$\n, $\r, $\\ | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
 
+extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, [H,H,H] = Last) ->
+  % Special handling for heredocs - check if we have the closing delimiter after newline
+  case strip_horizontal_space_stream(Rest, []) of
+    {[H,H,H|NewRest], Spaces} ->
+      % Found closing heredoc delimiter - emit final fragment if any, then done
+      case Buffer of
+        [] -> {done, make_meta_pos(Line + 1, length(Spaces) + 1), [], NewRest, Line + 1, length(Spaces) + 4, Scope};
+        _ ->
+          % Emit the last fragment including this newline
+          FragmentMeta = make_meta_range(StartLine, StartColumn, Line + 1, 0),
+          {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse([$\n | Buffer])), 
+           lists:reverse(Spaces) ++ [H,H,H|NewRest], Line + 1, length(Spaces) + 1, Scope}
+      end;
+    {NewRest, Spaces} ->
+      % Not closing delimiter, continue processing with newline
+      extract_stream_next(NewRest, lists:reverse(Spaces) ++ [$\n | Buffer], Line + 1, length(Spaces) + 1, StartLine, StartColumn, Scope, Interpol, Last)
+  end;
 extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
   extract_stream_next(Rest, [$\n | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
 
@@ -208,6 +234,11 @@ strip_horizontal_space([H | T], Buffer, Counter) when H =:= $\s; H =:= $\t ->
   strip_horizontal_space(T, [H | Buffer], Counter + 1);
 strip_horizontal_space(T, Buffer, Counter) ->
   {T, Buffer, Counter}.
+
+strip_horizontal_space_stream([H | T], Acc) when H =:= $\s; H =:= $\t ->
+  strip_horizontal_space_stream(T, [H | Acc]);
+strip_horizontal_space_stream(T, Acc) ->
+  {T, Acc}.
 
 cursor_complete(Line, Column, Terminators) ->
   lists:mapfoldl(

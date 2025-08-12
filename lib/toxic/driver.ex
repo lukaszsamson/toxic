@@ -51,9 +51,22 @@ defmodule Toxic.Driver do
         end_meta = {line, {line, column}, nil}
         end_token_type = case kind do
           :charlist -> :list_string_end
+          :list_heredoc -> :list_heredoc_end
+          :bin_heredoc -> :bin_heredoc_end
           _ -> :bin_string_end
         end
-        {:ok, {end_token_type, end_meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        # For heredocs, we need to include the indent as the 4th element
+        case kind do
+          k when k in [:bin_heredoc, :list_heredoc] ->
+            # TODO: Calculate proper indent for heredocs
+            {:ok, {end_token_type, end_meta, delim, 0}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          _ ->
+            {:ok, {end_token_type, end_meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        end
+      
+      {:error, reason} ->
+        # Handle errors from interpolation extraction
+        {:error, reason, string, %{state | modes: modes_rest}}
     end
   end
 end

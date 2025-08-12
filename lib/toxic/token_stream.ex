@@ -380,6 +380,10 @@ defmodule Toxic.TokenStream do
       {:error_token, meta, reason, driver} ->
         error_token = {:error_token, meta, reason}
         fetch_tokens_from_driver(driver, source_string, max_batch, [error_token | acc], count + 1, opts)
+      
+      {:error, _reason, _string, driver} ->
+        # Error from driver - stop fetching tokens
+        {Enum.reverse(acc), [], driver, false}
     end
   end
 
