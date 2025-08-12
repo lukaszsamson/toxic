@@ -319,11 +319,18 @@ linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, Me
 linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
-    [] -> [""];  % Empty string should have empty string part, not empty list
+    [] -> [<<>>];  % Empty charlist should use empty binary like bin_string, not empty string
     RevParts -> RevParts
   end,
   Tok = {list_string, CM, Parts},
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      % Nested inside interpolation - add to interpolation frame
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      % Top-level - add to output
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Tok = {bin_heredoc, CM, Indent, lists:reverse(PartsRev)},

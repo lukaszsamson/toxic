@@ -49,7 +49,11 @@ defmodule Toxic.Driver do
 
       {:done, _meta, _binary_part, rest, line, column, scope} ->
         end_meta = {line, {line, column}, nil}
-        {:ok, {:bin_string_end, end_meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        end_token_type = case kind do
+          :charlist -> :list_string_end
+          _ -> :bin_string_end
+        end
+        {:ok, {end_token_type, end_meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
     end
   end
 end
