@@ -5,7 +5,7 @@
 -module(toxic_tokenizer).
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
--export([invalid_do_error/1, terminator/1]).
+-export([invalid_do_error/1, terminator/1, unescape_tokens/4]).
 -export([ranges_to_legacy/1, collapse_linear_ranges/1, tokenize/1, tokenize_single/5]).
 %% Driver API exports
 -export([current_terminators/1, peek_missing_terminator/1]).

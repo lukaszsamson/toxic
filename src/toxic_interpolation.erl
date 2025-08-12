@@ -30,6 +30,8 @@ extract(String, Buffer, Output, Line, Column, Scope, Interpol, Last) ->
 extract_stream_event(Line, Column, Scope, Interpol, String, Last) when is_integer(Line), is_integer(Column) ->
   extract_stream_next(String, [], Line, Column, Line, Column, Scope, Interpol, Last).
 
+% Terminators
+
 %% Stream processing - accumulate buffer until we hit a significant event
 extract_stream_next([], _Buffer, Line, Column, _StartLine, _StartColumn, #toxic_tokenizer{cursor_completion=false}, _Interpol, Last) ->
   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
@@ -50,6 +52,8 @@ extract_stream_next([Last | Rest], Buffer, Line, Column, StartLine, StartColumn,
   FragmentMeta = make_meta_range(StartLine, StartColumn, Line, Column),
   {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse(Buffer)), [Last | Rest], Line, Column + 1, Scope};
 
+% Interpolation
+
 % extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, Scope, true, _Last) ->
 %   % Found interpolation start - emit fragment if any, then begin_interpolation
 %   case Buffer of
@@ -57,9 +61,17 @@ extract_stream_next([Last | Rest], Buffer, Line, Column, StartLine, StartColumn,
 %     _  -> {fragment, make_meta_pos(Line, Column), list_to_binary(lists:reverse(Buffer)), [$#, ${ | Rest], Line, Column, Scope}
 %   end;
 
-% extract_stream_next([$\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
-%   % Handle newlines
-%   extract_stream_next(Rest, [$\n | Buffer], Line + 1, Scope#toxic_tokenizer.column, Scope, Interpol, Last);
+% Newlines
+
+extract_stream_next([$\\, $\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
+  extract_stream_next(Rest, [$\n, $\\ | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
+
+extract_stream_next([$\\, $\r, $\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
+  extract_stream_next(Rest, [$\n, $\r, $\\ | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
+
+extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn, Scope, Interpol, Last) ->
+  extract_stream_next(Rest, [$\n | Buffer], Line + 1, 1, StartLine, StartColumn, Scope, Interpol, Last);
+
 
 % extract_stream_next([$\\, $\n | Rest], Buffer, Line, Column, Scope, Interpol, Last) ->
 %   % Handle escaped newlines

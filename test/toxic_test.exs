@@ -785,10 +785,14 @@ defmodule ToxicTest do
 
     test "with LF newlines" do
       assert tokenize("\"foo\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]}], ""}
+      assert tokenize("\"\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["\nbar"]}], ""}
+      assert tokenize("\"foo\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["foo\n"]}], ""}
     end
 
     test "with CRLF newlines" do
       assert tokenize("\"foo\r\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\r\nbar"]}], ""}
+      assert tokenize("\"\r\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["\r\nbar"]}], ""}
+      assert tokenize("\"foo\r\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["foo\r\n"]}], ""}
     end
 
     test "with escaped LF newlines" do
