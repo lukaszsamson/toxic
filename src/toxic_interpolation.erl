@@ -130,7 +130,9 @@ extract_stream_next(String, [], Line, Column, _StartLine, _StartColumn, Scope, _
     {[H,H,H|NewRest], Spaces} ->
       % Found heredoc terminator with indentation
       Indent = length(Spaces),
-      StartCol = Column + Indent,
+      % If we are already positioned after indentation (e.g., after emitting a fragment and newline),
+      % Column will be Indent+1. Otherwise, at start of line Column==1 and we must account for Indent.
+      StartCol = case Column of 1 -> Column + Indent; _ -> Column end,
       {done, make_meta_range(Line, StartCol, Line, StartCol + 3), [], Indent, NewRest, Line, StartCol + 3, Scope};
     _ ->
       % Not a heredoc terminator, process first character
