@@ -1069,6 +1069,10 @@ defmodule ToxicTest do
                {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\n"]}], ""}
     end
 
+    test "empty with indentation" do
+      assert tokenize("\"\"\"\n  \"\"\"") == {:ok, [{:bin_heredoc, {{1, 1}, {2, 6}, nil}, 2, [""]}], ""}
+    end
+
     test "simple with indentation" do
       assert tokenize("\"\"\"\n  foo\n  \"\"\"") ==
                {:ok, [{:bin_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\n"]}], ""}
@@ -1229,6 +1233,25 @@ defmodule ToxicTest do
       }
     end
 
+    test "with interpolation at the end of the line CR LF" do
+      assert tokenize("\"\"\"\nfoo \#{0x123}\r\n\"\"\"") == {
+        :ok,
+        [
+          {
+            :bin_heredoc,
+            {{1, 1}, {3, 4}, nil},
+            0,
+            [
+              "foo ",
+              {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
+              "\r\n"
+            ]
+          }
+        ],
+        ""
+      }
+    end
+
     test "with interpolation at the end of the line with newline escaped" do
       assert tokenize("\"\"\"\nfoo \#{0x123}\\\n\"\"\"") == {
         :ok,
@@ -1241,6 +1264,25 @@ defmodule ToxicTest do
               "foo ",
               {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
               ""
+            ]
+          }
+        ],
+        ""
+      }
+    end
+
+    test "with interpolation at the end of the line indent" do
+      assert tokenize("\"\"\"\nfoo \#{0x123}\n  \"\"\"") == {
+        :ok,
+        [
+          {
+            :bin_heredoc,
+            {{1, 1}, {3, 6}, nil},
+            2,
+            [
+              "foo ",
+              {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
+              "\n"
             ]
           }
         ],

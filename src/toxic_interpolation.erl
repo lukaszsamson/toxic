@@ -95,15 +95,11 @@ extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn,
   case strip_horizontal_space_stream(Rest, []) of
     {[H,H,H|NewRest], Spaces} ->
       Indent = length(Spaces),
-      % Found closing heredoc delimiter - emit final fragment if any, then done
-      case Buffer of
-        [] -> {done, make_meta_range(Line + 1, Indent + 1, Line + 1, Indent + 4), [], Indent, NewRest, Line + 1, Indent + 4, Scope};
-        _ ->
-          % Emit the last fragment including this newline
-          FragmentMeta = make_meta_range(StartLine, StartColumn, Line + 1, 1),
-          {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse([$\n | Buffer])), 
-           lists:reverse(Spaces) ++ [H,H,H|NewRest], Line + 1, Indent + 1, Scope}
-      end;
+      % Found closing heredoc delimiter - always emit a final fragment for the newline,
+      % even when there is no buffered content, so the last part can be "\n" or "\r\n".
+      FragmentMeta = make_meta_range(StartLine, StartColumn, Line + 1, 1),
+      {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse([$\n | Buffer])), 
+       lists:reverse(Spaces) ++ [H,H,H|NewRest], Line + 1, Indent + 1, Scope};
     {NewRest, Spaces} ->
       % Not closing delimiter, continue processing with newline
       extract_stream_next(NewRest, lists:reverse(Spaces) ++ [$\n | Buffer], Line + 1, length(Spaces) + 1, StartLine, StartColumn, Scope, Interpol, Last)
