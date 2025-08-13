@@ -146,12 +146,7 @@ tokenize_single(String, Line, Opts) ->
 
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
-  Collapsed =
-    case contains_linear_markers(TokensWithRanges) of
-      true -> linear_to_legacy(TokensWithRanges);
-      false -> TokensWithRanges
-    end,
-  [ranges_token_to_legacy(Token) || Token <- Collapsed].
+  [ranges_token_to_legacy(Token) || Token <- TokensWithRanges].
 
 %% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
 %% Build meta depending on whether ranges are enabled
