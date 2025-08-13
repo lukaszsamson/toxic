@@ -335,7 +335,9 @@ linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_h
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
-    RevParts -> RevParts
+    RevParts -> 
+      StrippedParts = strip_heredoc_indentation(RevParts, Indent),
+      add_missing_empty_fragments(StrippedParts, Indent)
   end,
   Tok = {bin_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -343,7 +345,9 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
-    RevParts -> RevParts
+    RevParts -> 
+      StrippedParts = strip_heredoc_indentation(RevParts, Indent),
+      add_missing_empty_fragments(StrippedParts)
   end,
   Tok = {list_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -2287,6 +2291,119 @@ maybe_warn_for_ambiguous_bang_before_equals(_Kind, _Atom, _Rest, _Line, _Column,
 
 prepend_warning(Line, Column, Msg, #toxic_tokenizer{warnings=Warnings} = Scope) ->
   Scope#toxic_tokenizer{warnings = [{{Line, Column}, Msg} | Warnings]}.
+
+%% Heredoc indentation stripping helpers
+
+strip_heredoc_indentation(Parts, Indent) ->
+  Fun = fun(Part) -> strip_heredoc_part_indent(Part, Indent) end,
+  lists:map(Fun, Parts).
+
+strip_heredoc_part_indent(Part, Indent) when is_binary(Part) ->
+  % First trim indentation from the beginning of the content
+  CharList = binary_to_list(Part),
+  {TrimmedStart, _} = trim_space_heredoc(CharList, Indent),
+  strip_heredoc_part_indent(TrimmedStart, [], Indent);
+strip_heredoc_part_indent(Part, _Indent) ->
+  Part.
+
+strip_heredoc_part_indent([$\n | Rest], Acc, Indent) ->
+  {Trimmed, _ShouldWarn} = trim_space_heredoc(Rest, Indent),
+  strip_heredoc_part_indent(Trimmed, [$\n | Acc], Indent);
+strip_heredoc_part_indent([Head | Rest], Acc, Indent) ->
+  strip_heredoc_part_indent(Rest, [Head | Acc], Indent);
+strip_heredoc_part_indent([], Acc, _Indent) ->
+  list_to_binary(lists:reverse(Acc)).
+
+trim_space_heredoc(Rest, 0) -> {Rest, false};
+trim_space_heredoc([$\r, $\n | _] = Rest, _) -> {Rest, false};
+trim_space_heredoc([$\n | _] = Rest, _) -> {Rest, false};
+trim_space_heredoc([H | T], Spaces) when ?is_horizontal_space(H) -> trim_space_heredoc(T, Spaces - 1);
+trim_space_heredoc([], _Spaces) -> {[], false};
+trim_space_heredoc(Rest, _Spaces) -> {Rest, true}.
+
+%% Add missing empty fragments for heredocs where interpolation starts at column 1
+add_missing_empty_fragments(Parts) ->
+  case Parts of
+    [{{_, Column, _}, _, _} | _] when Column == 1 ->
+      % First part is an interpolation at column 1 - add empty string before it
+      [<<>> | Parts];
+    _ ->
+      % First part is not an interpolation at column 1 or Parts is empty
+      fix_missing_spaces_in_parts(Parts)
+  end.
+
+%% Add missing empty fragments for heredocs where interpolation starts at column 1 
+%% with indentation-aware space restoration
+add_missing_empty_fragments(Parts, Indent) ->
+  case Parts of
+    [{{_, Column, _}, _, _} | _] when Column == 1 ->
+      % First part is an interpolation at column 1 - add empty string before it
+      if 
+        Indent > 0 ->
+          % Apply targeted space restoration only when there's actual indentation
+          [<<>> | fix_missing_spaces_in_parts(Parts, Indent)];
+        true ->
+          % No indentation stripping, no need for space restoration
+          [<<>> | Parts]
+      end;
+    _ ->
+      % First part is not an interpolation at column 1 or Parts is empty
+      if 
+        Indent > 0 ->
+          % Apply targeted space restoration only when there's actual indentation
+          fix_missing_spaces_in_parts(Parts, Indent);
+        true ->
+          % No indentation stripping, no need for space restoration
+          Parts
+      end
+  end.
+
+%% Fix missing spaces in final fragments due to indentation stripping
+%% Only apply fixes when there is actual indentation (indent > 0)
+fix_missing_spaces_in_parts(Parts) ->
+  Parts.
+
+%% Fix missing spaces with indentation context
+fix_missing_spaces_in_parts(Parts, Indent) when Indent > 0 ->
+  % Only apply space restoration when there's actual indentation stripping
+  fix_indentation_over_stripping(Parts);
+fix_missing_spaces_in_parts(Parts, _Indent) ->
+  % No indentation stripping, return parts as-is
+  Parts.
+
+%% Fix cases where indentation stripping removed content spaces
+fix_indentation_over_stripping(Parts) ->
+  fix_indentation_over_stripping(Parts, []).
+
+fix_indentation_over_stripping([], Acc) ->
+  lists:reverse(Acc);
+fix_indentation_over_stripping([Part | Rest], Acc) when is_binary(Part) ->
+  % For binary parts, check if this fragment follows an interpolation on the same line
+  FixedPart = case should_restore_leading_space(Part, Acc) of
+    true -> restore_leading_space(Part);
+    false -> Part
+  end,
+  fix_indentation_over_stripping(Rest, [FixedPart | Acc]);
+fix_indentation_over_stripping([Part | Rest], Acc) ->
+  % For interpolation parts, keep as-is
+  fix_indentation_over_stripping(Rest, [Part | Acc]).
+
+%% Check if a binary part should have its leading space restored
+should_restore_leading_space(Part, Acc) ->
+  % If the part doesn't start with newline and follows an interpolation,
+  % it likely had its content space incorrectly stripped as indentation
+  case {binary:at(Part, 0), Acc} of
+    {Char, [{{_, Column, _}, _, _} | _]} when Column > 1 andalso Char =/= $\n ->
+      % Previous part was an interpolation not at column 1, and this part doesn't start with newline
+      % This means this part continues from the middle of a line, so leading spaces are content
+      true;
+    _ ->
+      false
+  end.
+
+%% Restore one leading space to a binary part
+restore_leading_space(Part) ->
+  <<" ", Part/binary>>.
 
 track_ascii(true, Scope) -> Scope;
 track_ascii(false, Scope) -> Scope#toxic_tokenizer{ascii_identifiers_only=false}.

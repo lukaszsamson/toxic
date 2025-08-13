@@ -783,6 +783,7 @@ defmodule ToxicTest do
 
     test "unicode bin strings" do
       assert tokenize("\"ą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]}], ""}
+      assert tokenize("\"ąą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 5}, nil}, ["ąą"]}], ""}
     end
 
     test "with LF newlines" do

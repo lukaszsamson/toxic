@@ -391,7 +391,7 @@ defmodule Toxic.TokenStream do
   defp refill_buffer(%__MODULE__{opts: opts} = stream) do
     max_batch = Keyword.get(opts, :max_batch, 256)
 
-    {tokens, source, new_driver, eof} = fetch_tokens_from_driver(stream, max_batch, opts) |> dbg
+    {tokens, source, new_driver, eof} = fetch_tokens_from_driver(stream, max_batch, opts)
 
     new_buffer = Enum.reduce(tokens, stream.buffer, fn token, buf ->
       :queue.in(token, buf)
