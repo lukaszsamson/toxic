@@ -100,7 +100,7 @@ extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn,
         [] -> {done, make_meta_range(Line + 1, Indent + 1, Line + 1, Indent + 4), [], Indent, NewRest, Line + 1, Indent + 4, Scope};
         _ ->
           % Emit the last fragment including this newline
-          FragmentMeta = make_meta_range(StartLine, StartColumn, Line + 1, 0),
+          FragmentMeta = make_meta_range(StartLine, StartColumn, Line + 1, 1),
           {fragment, FragmentMeta, toxic_utils:characters_to_binary(lists:reverse([$\n | Buffer])), 
            lists:reverse(Spaces) ++ [H,H,H|NewRest], Line + 1, Indent + 1, Scope}
       end;
@@ -130,7 +130,8 @@ extract_stream_next(String, [], Line, Column, _StartLine, _StartColumn, Scope, _
     {[H,H,H|NewRest], Spaces} ->
       % Found heredoc terminator with indentation
       Indent = length(Spaces),
-      {done, make_meta_range(Line, Column, Line, Column + 3), [], Indent, NewRest, Line, Column + 3, Scope};
+      StartCol = Column + Indent,
+      {done, make_meta_range(Line, StartCol, Line, StartCol + 3), [], Indent, NewRest, Line, StartCol + 3, Scope};
     _ ->
       % Not a heredoc terminator, process first character
       extract_stream_next(tl(String), [hd(String)], Line, Column + 1, Line, Column, Scope, true, Last)
