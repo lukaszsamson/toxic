@@ -37,8 +37,7 @@ defmodule Toxic.Driver do
     end
   end
   def next(string, %__MODULE__{modes: [{:interp, kind, _interpolation, delim} | modes_rest]} = state) do
-    IO.puts("Calling extract_stream_event with: #{inspect({state.line, state.column, state.scope, true, string, delim})}")
-    case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, true, string, delim) |> IO.inspect(label: "stream_event") do
+    case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, true, string, delim) do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
         case :toxic_tokenizer.unescape_tokens([binary_part], line, column, scope) do
           {:ok, [unescaped]} ->

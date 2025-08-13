@@ -271,7 +271,10 @@ linear_to_legacy([{begin_interpolation, StartMeta, _Kind} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{interpol, StartMeta, []} | Stack]);
 linear_to_legacy([{end_interpolation, EndMeta, _Kind} | T], Out, [{interpol, StartMeta, InnerRev} | StackRest]) ->
   InnerCollapsed = linear_to_legacy(lists:reverse(InnerRev)),
-  Part = {StartMeta, EndMeta, InnerCollapsed},
+  % Convert range metadata to simple positional metadata for legacy format
+  SimpleStartMeta = legacy_meta(StartMeta),
+  SimpleEndMeta = legacy_meta(EndMeta),
+  Part = {SimpleStartMeta, SimpleEndMeta, InnerCollapsed},
   case StackRest of
     [{K, Meta, Delim, Parts} | Stack] ->
       linear_to_legacy(T, Out, [{K, Meta, Delim, [Part | Parts]} | Stack]);
