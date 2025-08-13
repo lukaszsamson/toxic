@@ -11,8 +11,9 @@ defmodule Toxic.Driver do
   Record.defrecord(:scope, :toxic_tokenizer, Record.extract(:toxic_tokenizer, from: "src/toxic.hrl"))
 
   def new() do
+    tokenizer = :toxic_config.identifier_tokenizer()
     %__MODULE__{
-      scope: scope()
+      scope: scope(identifier_tokenizer: tokenizer)
     }
   end
   def next([?} | rest], %__MODULE__{modes: [:normal | modes_rest]} = state) do
@@ -57,6 +58,8 @@ defmodule Toxic.Driver do
       {:done, meta, _binary_part, rest, line, column, scope} ->
         end_token_type = case kind do
           :charlist -> :list_string_end
+          :atom_safe -> :atom_safe_end
+          :atom_unsafe -> :atom_unsafe_end
           _ -> :bin_string_end
         end
         {:ok, {end_token_type, meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}

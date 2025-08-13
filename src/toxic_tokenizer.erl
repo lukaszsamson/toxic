@@ -353,13 +353,29 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, _Delim1} | T], Out, [{kw_i
   CM = combine_range_meta(MetaStart, MetaEnd),
   Tok = {kw_identifier_unsafe, CM, lists:reverse(PartsRev)},
   linear_to_legacy(T, [Tok | Out], Stack);
-linear_to_legacy([{atom_unsafe_end, MetaEnd, _Delim1} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
-  CM = combine_range_meta(MetaStart, MetaEnd),
-  Tok = {atom_unsafe, CM, lists:reverse(PartsRev)},
+linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
+    _ -> {atom_unsafe, CM, Parts}
+  end,
   linear_to_legacy(T, [Tok | Out], Stack);
-linear_to_legacy([{atom_safe_end, MetaEnd, _Delim1} | T], Out, [{atom_safe, MetaStart, _Delim2, PartsRev} | Stack]) ->
-  CM = combine_range_meta(MetaStart, MetaEnd),
-  Tok = {atom_safe, CM, lists:reverse(PartsRev)},
+linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
+    _ -> {atom_safe, CM, Parts}
+  end,
   linear_to_legacy(T, [Tok | Out], Stack);
 
 %% Close quoted identifier and emit inner token directly
@@ -766,62 +782,17 @@ tokenize_single([T | Rest], Line, Column, Scope, Tokens) when ?pipe_op(T) ->
 
 % Non-operator Atoms
 
-tokenize_single([$:, H | T] = Original, Line, Column, BaseScope, Tokens) when ?is_quote(H) ->
+tokenize_single([$:, H | T], Line, Column, BaseScope, _Tokens) when ?is_quote(H) ->
+  % Streaming mode for quoted atoms (mirrors strings)
   Scope = case H == $' of
-    true ->
-      prepend_warning(Line, Column, "single quotes around atoms are deprecated. Use double quotes instead", BaseScope);
-
-    false ->
-      BaseScope
+    true -> prepend_warning(Line, Column, "single quotes around atoms are deprecated. Use double quotes instead", BaseScope);
+    false -> BaseScope
   end,
-
-  % TODO: yield(begin_atom) instead of calling extract
-  % TODO: push interpolation mode onto the stack
-  % TODO: push opening terminator onto the stack
-
-  case toxic_interpolation:extract(Line, Column + 2, Scope, true, T, H) of
-    {NewLine, NewColumn, Parts, Rest, InterScope} ->
-      NewScope = case is_unnecessary_quote(Parts, InterScope) of
-        true ->
-          WarnMsg = io_lib:format(
-            "found quoted atom \"~ts\" but the quotes are not required. "
-            "Atoms made exclusively of ASCII letters, numbers, underscores, "
-            "beginning with a letter or underscore, and optionally ending with ! or ? "
-            "do not require quotes",
-            [hd(Parts)]
-          ),
-          prepend_warning(Line, Column, WarnMsg, InterScope);
-
-        false ->
-          InterScope
-      end,
-
-      case unescape_tokens(Parts, Line, Column, NewScope) of
-        {ok, [Part]} when is_binary(Part) ->
-          case unsafe_to_atom(Part, Line, Column, Scope) of
-            {ok, Atom} ->
-              Token = {atom_quoted, make_meta(Line, Column, NewLine, NewColumn, H, NewScope), Atom},
-              yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-            {error, Reason} ->
-              error(Reason, Rest, NewScope, Tokens)
-          end;
-        {ok, Unescaped} ->
-          StartType = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_start; false -> atom_unsafe_start end,
-          EndType   = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe_end;   false -> atom_unsafe_end   end,
-          StartTok = {StartType, make_meta(Line, Column, Line, Column + 1, nil, NewScope), H},
-          Seq = linearize_parts(Unescaped, NewScope, atom),
-          EndTok = {EndType, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-          Emitted = [StartTok] ++ Seq ++ [EndTok],
-          NewTokens2 = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          yield(Rest, NewLine, NewColumn, NewScope, NewTokens2);
-        {error, Reason} ->
-          error(Reason, Rest, NewScope, Tokens)
-      end;
-
-    {error, Reason} ->
-      Message = " (for atom starting at line ~B)",
-      interpolation_error(Reason, Original, Scope, Tokens, Message, [Line], Line, Column + 1, [H], [H])
-  end;
+  Kind = case Scope#toxic_tokenizer.existing_atoms_only of true -> atom_safe; false -> atom_unsafe end,
+  StartType = case Kind of atom_safe -> atom_safe_start; atom_unsafe -> atom_unsafe_start end,
+  % Span ":" and the opening quote
+  StartTok = {StartType, make_meta(Line, Column, Line, Column + 2, nil, Scope), H},
+  {switch_to_interp, StartTok, T, Line, Column + 2, Scope, Kind, H, []};
 
 tokenize_single([$: | String] = Original, Line, Column, Scope, Tokens) ->
   case tokenize_identifier(String, Line, Column, Scope, false) of
