@@ -66,12 +66,22 @@ defmodule Toxic.Driver do
     {:ok, pending_token, string, new_state}
   end
 
-  def next(string, %__MODULE__{modes: [{:interp, kind, _interpolation, delim} | modes_rest]} = state) do
-    case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, true, string, delim) do
+  def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
+    allow_interpol = case {kind, interpolation} do
+      {:sigil, {:sigil_info, _sigil_atom, allow?, _delim}} -> allow?
+      _ -> true
+    end
+    case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, allow_interpol, string, delim) do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
-        case :toxic_tokenizer.unescape_tokens([binary_part], line, column, scope) do
-          {:ok, [unescaped]} ->
-            {:ok, {:string_fragment, meta, unescaped}, rest, %{state | line: line, column: column, scope: scope}}
+        case kind do
+          :sigil ->
+            part = unescape_sigil_fragment(binary_part, interpolation)
+            {:ok, {:string_fragment, meta, part}, rest, %{state | line: line, column: column, scope: scope}}
+          _ ->
+            case :toxic_tokenizer.unescape_tokens([binary_part], line, column, scope) do
+              {:ok, [unescaped]} ->
+                {:ok, {:string_fragment, meta, unescaped}, rest, %{state | line: line, column: column, scope: scope}}
+            end
         end
 
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
@@ -94,6 +104,31 @@ defmodule Toxic.Driver do
         end
         end_token = {end_token_type, meta, delim}
         {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+
+      # Sigil heredoc completion (with indentation)
+      {:done, meta, _binary_part, indent, rest, line, column, scope} when kind == :sigil ->
+        {sigil_atom, start_delim} = sigil_from_interp(interpolation)
+        end_token = {:sigil_end, meta, sigil_atom, start_delim, indent}
+        case collect_sigil_modifiers(rest, line, column) do
+          {:none} ->
+            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:mods, mods_token, rest_after, new_column} ->
+            # Emit end token first, queue modifiers for next call
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:sigil_mods_pending, mods_token, new_column - column} | modes_rest]}
+            {:ok, end_token, rest, new_state}
+        end
+
+      # Sigil completion (no indentation)
+      {:done, meta, _binary_part, rest, line, column, scope} when kind == :sigil ->
+        {sigil_atom, start_delim} = sigil_from_interp(interpolation)
+        end_token = {:sigil_end, meta, sigil_atom, start_delim, nil}
+        case collect_sigil_modifiers(rest, line, column) do
+          {:none} ->
+            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:mods, mods_token, rest_after, new_column} ->
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:sigil_mods_pending, mods_token, new_column - column} | modes_rest]}
+            {:ok, end_token, rest, new_state}
+        end
 
       {:done, meta, _binary_part, rest, line, column, scope} ->
         case rest do
@@ -122,6 +157,13 @@ defmodule Toxic.Driver do
     end
   end
 
+  def next(string, %__MODULE__{modes: [{:sigil_mods_pending, pending_token, len} | modes_rest]} = state) do
+    # Emit the pending sigil_modifiers token and consume its characters from input
+    new_state = %{state | modes: modes_rest, column: state.column + len}
+    {_consumed, rest} = Enum.split(string, len)
+    {:ok, pending_token, rest, new_state}
+  end
+
   # Helper function to create proper identifier token with multiline support
   defp check_call_identifier_multiline(line, column, end_line, end_column, info, atom, rest, _scope) do
     case rest do
@@ -133,4 +175,32 @@ defmodule Toxic.Driver do
         {:identifier, {{line, column}, {end_line, end_column}, info}, atom}
     end
   end
+
+  defp sigil_from_interp({:sigil_info, sigil_atom, _interpol?, start_delim}), do: {sigil_atom, start_delim}
+  defp sigil_from_interp(_), do: {:sigil, nil}
+
+  defp unescape_sigil_fragment(binary_part, {:sigil_info, _sigil_atom, _allow?, start_delim}) when is_binary(start_delim) and byte_size(start_delim) == 1 do
+    open = :binary.first(start_delim)
+    close = case open do
+      ?( -> ?) ; ?[ -> ?] ; ?{ -> ?} ; ?< -> ?> ; other -> other
+    end
+    :binary.replace(binary_part, <<?\\, close>>, <<close>>, [:global])
+  end
+  defp unescape_sigil_fragment(binary_part, _), do: binary_part
+
+  defp collect_sigil_modifiers(rest, line, column) do
+    {mods, rest_after} = do_take_mods(rest, [])
+    case mods do
+      [] -> {:none}
+      _ ->
+        len = length(mods)
+        meta = {{line, column}, {line, column + len}, nil}
+        {:mods, {:sigil_modifiers, meta, List.to_charlist(mods)}, rest_after, column + len}
+    end
+  end
+
+  defp do_take_mods([h | t], acc) when h in ?a..?z or h in ?A..?Z or h in ?0..?9 do
+    do_take_mods(t, [h | acc])
+  end
+  defp do_take_mods(rest, acc), do: {Enum.reverse(acc), rest}
 end

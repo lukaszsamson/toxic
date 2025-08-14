@@ -281,8 +281,14 @@ linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim,
   linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts]} | Stack]);
 linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim, Parts, Extra} | Stack]) when K =:= bin_heredoc; K =:= list_heredoc ->
   linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts], Extra} | Stack]);
-linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{sigil, Meta, SigilAtom, Delim, Parts, Mods, pending_end} | Stack]) ->
-  linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Bin | Parts], Mods, pending_end} | Stack]);
+linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, Mods, pending_end} | Stack]) when is_binary(Bin) ->
+  case PartsRev of
+    [PrevBin | Rest] when is_binary(PrevBin) ->
+      Merged = <<PrevBin/binary, Bin/binary>>,
+      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Merged | Rest], Mods, pending_end} | Stack]);
+    _ ->
+      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Bin | PartsRev], Mods, pending_end} | Stack])
+  end;
 
 linear_to_legacy([{begin_interpolation, StartMeta, _Kind} | T], Out, Stack) ->
   %% Push interpolation frame; collect inner tokens
@@ -309,16 +315,21 @@ linear_to_legacy([Tok | T], Out, [{interpol, StartMeta, Inner} | Stack]) ->
 
 %% Sigil end and optional modifiers
 linear_to_legacy([{sigil_end, EndMeta, SigilAtom, Delim, Indent} | Rest], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, _Mods, pending_end} | Stack]) ->
+  RevParts0 = lists:reverse(PartsRev),
+  RevParts = case RevParts0 of [] -> [<<>>]; Other -> Other end,
+  Parts1 = case Indent of
+    I when is_integer(I) -> strip_heredoc_indentation(RevParts, I);
+    _ -> RevParts
+  end,
   case Rest of
-    [{sigil_modifiers, _M, Modifiers} | T] ->
-      Parts = lists:reverse(PartsRev),
-      CM = combine_range_meta(Meta, EndMeta),
-      Tok = {sigil, CM, SigilAtom, Parts, Modifiers, Indent, Delim},
+    [{sigil_modifiers, M, Modifiers} | T] ->
+      CM0 = combine_range_meta(Meta, EndMeta),
+      CM = combine_range_meta(CM0, M),
+      Tok = {sigil, CM, SigilAtom, Parts1, Modifiers, Indent, Delim},
       linear_to_legacy(T, [Tok | Out], Stack);
     _ ->
-      Parts = lists:reverse(PartsRev),
       CM = combine_range_meta(Meta, EndMeta),
-      Tok = {sigil, CM, SigilAtom, Parts, [], Indent, Delim},
+      Tok = {sigil, CM, SigilAtom, Parts1, [], Indent, Delim},
       linear_to_legacy(Rest, [Tok | Out], Stack)
   end;
 
@@ -2405,41 +2416,29 @@ sigil_name_error() ->
 
 tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Column, Scope, Tokens)
     when ?is_quote(H) ->
-  case extract_heredoc_with_interpolation(Line, Column, Scope, ?is_downcase(S), T, H) of
-    {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-      StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>},
-      Seq = linearize_parts(Parts, NewScope, sigil),
-      EndTok = {sigil_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H,H,H>>, NewColumn - 4},
-      Emitted = [StartTok] ++ Seq ++ [EndTok],
-      NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-      yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-
-    {error, Reason} ->
-      error(Reason, [$~] ++ SigilName ++ Original, Scope, Tokens)
+  % Streaming mode for sigil heredocs
+  case extract_heredoc_header(T) of
+    {ok, Headerless} ->
+      SigilAtom = list_to_atom("sigil_" ++ SigilName),
+      StartCol = Column - length(SigilName) - 1,
+      StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column, nil, Scope), SigilAtom, <<H,H,H>>},
+      % Switch to interpolation streaming; pass closing delimiter [H,H,H]
+      % Store sigil info in interpolation payload: {sigil_info, SigilAtom, Interpol?, StartDelim}
+      Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H,H,H>>},
+      {switch_to_interp, StartTok, Headerless, Line + 1, 1, Scope, sigil, [H, H, H], Interp};
+    {error, Message} ->
+      error({make_meta_len(Line, Column - 1 - length(SigilName), 1, nil, Scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens)
   end;
 
 tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, Scope, Tokens)
     when ?is_sigil(H) ->
-  % TODO: yield(begin_sigil) instead of calling extract
-  % TODO: push interpolation mode onto the stack
-  % TODO: push opening terminator onto the stack
-
-  case toxic_interpolation:extract(Line, Column + 1, Scope, ?is_downcase(S), T, sigil_terminator(H)) of
-    {NewLine, NewColumn, Parts, Rest, NewScope} ->
-      StartTok = {sigil_start, make_meta(Line, Column - 1, Line, Column + 1, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>},
-      Seq = linearize_parts(tokens_to_binary(Parts), NewScope, sigil),
-      EndTok = {sigil_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), list_to_atom("sigil_" ++ SigilName), <<H>>, nil},
-      {Final, Modifiers} = collect_modifiers(Rest, []),
-      ModsTok = case Modifiers of [] -> []; _ -> [{sigil_modifiers, make_meta(NewLine, NewColumn, NewLine, NewColumn + length(Modifiers), nil, NewScope), Modifiers}] end,
-      Emitted = [StartTok] ++ Seq ++ [EndTok | ModsTok],
-      NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-      yield(Final, NewLine, NewColumn + length(Modifiers), NewScope, NewTokens);
-
-    {error, Reason} ->
-      Sigil = [$~, S, H],
-      Message = " (for sigil ~ts starting at line ~B)",
-      interpolation_error(Reason, [$~] ++ SigilName ++ Original, Scope, Tokens, Message, [Sigil, Line], Line, Column, [H], [sigil_terminator(H)])
-  end;
+  % Streaming mode for regular sigils
+  SigilAtom = list_to_atom("sigil_" ++ SigilName),
+  StartCol = Column - length(SigilName) - 1,
+  StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column, nil, Scope), SigilAtom, <<H>>},
+  Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H>>},
+  % Switch to interpolation with closing terminator derived from opening
+  {switch_to_interp, StartTok, T, Line, Column + 1, Scope, sigil, sigil_terminator(H), Interp};
 
 tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Tokens) ->
   MessageString =

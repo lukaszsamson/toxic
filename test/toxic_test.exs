@@ -2269,13 +2269,13 @@ defmodule ToxicTest do
     end
 
     test "with modifier" do
-      assert tokenize("~x/asd/foo") == {:ok, [
+      assert tokenize("~x/asd/fO0") == {:ok, [
         {
           :sigil,
           {{1, 1}, {1, 11}, nil},
           :sigil_x,
           ["asd"],
-          ~c"foo",
+          ~c"fO0",
           nil,
           "/"
         }
