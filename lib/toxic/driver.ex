@@ -24,12 +24,35 @@ defmodule Toxic.Driver do
   def next([?} | rest], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     {:ok, {:end_interpolation, {{state.line, state.column}, {state.line, state.column + 1}, nil}, :string}, rest, %{state | modes: modes_rest, column: state.column + 1}}
   end
+  # Support emitting closers at BOL after an EOL token with count>0
+  def next([], %__MODULE__{modes: [:normal | _]} = state) do
+    {:eof, state}
+  end
+  def next(string, %__MODULE__{modes: [{:carry_tokens, carry} | modes_rest]} = state) when is_list(string) do
+    # Pass along carried previous tokens (e.g., EOL) so tokenizer can attach EOL to next token and optionally drop it
+    case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, carry) do
+      {:token, token, rest, line, column, scope} ->
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+      {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes_rest]}}
+      {:eof, line, column, scope} ->
+        {:eof, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+      {:error, reason, rest, _tokens, _warnings} ->
+        {:error, reason, rest, %{state | modes: modes_rest}}
+    end
+  end
+
   def next(string, %__MODULE__{modes: [:normal | _] = modes} = state) when is_list(string) do
     # TODO: eliminate tokens
     tokens = []
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+        # If token is EOL, carry it to the next tokenizer call so subsequent token can embed/drop it
+        new_state = case token do
+          {:eol, _meta} -> %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token]} | modes]}
+          _ -> %{state | line: line, column: column, scope: scope}
+        end
+        {:ok, token, rest, new_state}
 
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
         # Check if there are stored tokens to emit first (for quoted identifiers and call identifiers)
