@@ -84,10 +84,9 @@ defmodule Toxic.Driver do
       {:done, meta, _binary_part, rest, line, column, scope} ->
         case rest do
           [?:, ws | tail] when is_space(ws) ->
-            adj_meta = case meta do
-              {{sl, sc}, {el, ec}, extra} -> {{sl, sc}, {el, ec + 1}, extra}
-              other -> other
-            end
+            {{sl, sc}, {el, ec}, extra} = meta
+            adj_meta = {{sl, sc}, {el, ec + 1}, extra}
+
             end_token_type = case scope do
               scope(existing_atoms_only: true) -> :kw_identifier_safe_end
               _ -> :kw_identifier_unsafe_end
