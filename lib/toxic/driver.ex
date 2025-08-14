@@ -86,8 +86,13 @@ defmodule Toxic.Driver do
 
 
       {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
-        # Handle quoted identifier completion - emit end token, let linear_to_legacy handle conversion
-        end_token = {:quoted_identifier_end, meta, delim}
+        # Handle quoted identifier completion - look ahead to determine correct end token type
+        end_token_type = case rest do
+          [?( | _] -> :quoted_paren_identifier_end;
+          [?[ | _] -> :quoted_bracket_identifier_end;
+          _ -> :quoted_identifier_end
+        end
+        end_token = {end_token_type, meta, delim}
         {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
 
       {:done, meta, _binary_part, rest, line, column, scope} ->

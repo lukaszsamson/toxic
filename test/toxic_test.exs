@@ -2031,7 +2031,7 @@ defmodule ToxicTest do
       assert tokenize(".\"foo\"()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:paren_identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"(", {{1, 7}, {1, 8}, nil}},
       {:")", {{1, 8}, {1, 9}, nil}}], ""}
-      assert tokenize(".\"foo\"()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      assert tokenize(".\"foo\" ()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"(", {{1, 8}, {1, 9}, nil}},
       {:")", {{1, 9}, {1, 10}, nil}}], ""}
     end
@@ -2040,7 +2040,7 @@ defmodule ToxicTest do
       assert tokenize(".\"foo\"[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:bracket_identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"[", {{1, 7}, {1, 8}, nil}},
       {:"]", {{1, 8}, {1, 9}, nil}}], ""}
-      assert tokenize(".\"foo\"[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      assert tokenize(".\"foo\" []") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"[", {{1, 8}, {1, 9}, nil}},
       {:"]", {{1, 9}, {1, 10}, nil}}], ""}
     end
