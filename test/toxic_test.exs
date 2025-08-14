@@ -2282,6 +2282,32 @@ defmodule ToxicTest do
       ], ""}
     end
 
+    test "heredoc with modifier" do
+      assert tokenize("~x\"\"\"\nasd\n\"\"\"fO0") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {3, 7}, nil},
+          :sigil_x,
+          ["asd\n"],
+          ~c"fO0",
+          0,
+          "\"\"\""
+        }
+      ], ""}
+
+      assert tokenize("~x'''\nasd\n'''fO0") == {:ok, [
+        {
+          :sigil,
+          {{1, 1}, {3, 7}, nil},
+          :sigil_x,
+          ["asd\n"],
+          ~c"fO0",
+          0,
+          "'''"
+        }
+      ], ""}
+    end
+
     test "capital letters" do
       assert tokenize("~FOO1/asd/") == {:ok, [
         {

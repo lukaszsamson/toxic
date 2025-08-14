@@ -2421,7 +2421,7 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
     {ok, Headerless} ->
       SigilAtom = list_to_atom("sigil_" ++ SigilName),
       StartCol = Column - length(SigilName) - 1,
-      StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column, nil, Scope), SigilAtom, <<H,H,H>>},
+      StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column + 3, nil, Scope), SigilAtom, <<H,H,H>>},
       % Switch to interpolation streaming; pass closing delimiter [H,H,H]
       % Store sigil info in interpolation payload: {sigil_info, SigilAtom, Interpol?, StartDelim}
       Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H,H,H>>},
@@ -2435,7 +2435,7 @@ tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, S
   % Streaming mode for regular sigils
   SigilAtom = list_to_atom("sigil_" ++ SigilName),
   StartCol = Column - length(SigilName) - 1,
-  StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column, nil, Scope), SigilAtom, <<H>>},
+  StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column + 1, nil, Scope), SigilAtom, <<H>>},
   Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H>>},
   % Switch to interpolation with closing terminator derived from opening
   {switch_to_interp, StartTok, T, Line, Column + 1, Scope, sigil, sigil_terminator(H), Interp};
