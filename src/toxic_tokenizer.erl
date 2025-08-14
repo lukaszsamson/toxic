@@ -146,7 +146,22 @@ tokenize_single(String, Line, Opts) ->
 
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
-  [ranges_token_to_legacy(Token) || Token <- TokensWithRanges].
+  ranges_to_legacy_after_collapse(TokensWithRanges, false, []).
+
+ranges_to_legacy_after_collapse([], _PrevWasEol, Acc) -> lists:reverse(Acc);
+ranges_to_legacy_after_collapse([{eol, _} = Tok | T], _PrevWasEol, Acc) ->
+  ranges_to_legacy_after_collapse(T, true, [ranges_token_to_legacy(Tok) | Acc]);
+ranges_to_legacy_after_collapse([Tok | T], PrevWasEol, Acc) ->
+  Conv = ranges_token_to_legacy(Tok),
+  Adj = case {PrevWasEol, Conv} of
+    {true, {Type, {Line, _Col, Extra}}} -> {Type, {Line, 1, Extra}};
+    {true, {Type, {Line, _Col, Extra}, V}} -> {Type, {Line, 1, Extra}, V};
+    {true, {Type, {Line, _Col, Extra}, A, B}} -> {Type, {Line, 1, Extra}, A, B};
+    {true, {Type, {Line, _Col, Extra}, A, B, C}} -> {Type, {Line, 1, Extra}, A, B, C};
+    {true, {Type, {Line, _Col, Extra}, A, B, C, D}} -> {Type, {Line, 1, Extra}, A, B, C, D};
+    _ -> Conv
+  end,
+  ranges_to_legacy_after_collapse(T, false, [Adj | Acc]).
 
 %% Internal helpers to construct ranges for tokens emitted by legacy tokenizer
 %% Build meta depending on whether ranges are enabled
@@ -213,6 +228,8 @@ is_linear_type(sigil_end) -> true;
 is_linear_type(sigil_modifiers) -> true;
 is_linear_type(kw_identifier_unsafe_start) -> true;
 is_linear_type(kw_identifier_unsafe_end) -> true;
+is_linear_type(kw_identifier_safe_start) -> true;
+is_linear_type(kw_identifier_safe_end) -> true;
 is_linear_type(quoted_identifier_start) -> true;
 is_linear_type(quoted_identifier_end) -> true;
 is_linear_type(atom_unsafe_start) -> true;
@@ -349,9 +366,104 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
   end,
   Tok = {list_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
-linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, _Delim1} | T], Out, [{kw_identifier_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
-  CM = combine_range_meta(MetaStart, MetaEnd),
-  Tok = {kw_identifier_unsafe, CM, lists:reverse(PartsRev)},
+%% Keep EOL tokens in collapsed ranges
+
+%% Also accept string container frames when quoted kw_identifier was tokenized as string
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_unsafe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_safe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_safe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_unsafe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_safe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_unsafe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_safe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_safe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_unsafe, CM, Parts}
+  end,
+  linear_to_legacy(T, [Tok | Out], Stack);
+linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  CM0 = combine_range_meta(MetaStart, MetaEnd),
+  CM = case CM0 of
+    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
+    _ -> CM0
+  end,
+  Tok = case Parts of
+    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    _ -> {kw_identifier_safe, CM, Parts}
+  end,
   linear_to_legacy(T, [Tok | Out], Stack);
 linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
