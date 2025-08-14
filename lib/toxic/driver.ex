@@ -32,11 +32,15 @@ defmodule Toxic.Driver do
         {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
 
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-        # Check if there are stored tokens to emit first (for quoted identifiers)
+        # Check if there are stored tokens to emit first (for quoted identifiers and call identifiers)
         case interpolation do
           [stored_token | _remaining_tokens] when interp_kind == :quoted_identifier ->
             # Emit stored token first, then switch to interp mode with start token pending
             new_state = %{state | line: line, column: column, scope: scope, modes: [{:interp_with_pending, interp_kind, token, delim} | modes]}
+            {:ok, stored_token, rest, new_state}
+          [stored_token | _remaining_tokens] when interp_kind == :call_identifier ->
+            # Emit stored token (dot) first, then emit identifier token directly (no interp mode needed)
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:call_identifier_pending, token} | modes]}
             {:ok, stored_token, rest, new_state}
           _ ->
             # Normal case - no stored tokens, emit start token immediately
@@ -54,6 +58,11 @@ defmodule Toxic.Driver do
   def next(string, %__MODULE__{modes: [{:interp_with_pending, kind, pending_token, delim} | modes_rest]} = state) do
     # Emit the pending start token and switch to normal interp mode
     new_state = %{state | modes: [{:interp, kind, [], delim} | modes_rest]}
+    {:ok, pending_token, string, new_state}
+  end
+  def next(string, %__MODULE__{modes: [{:call_identifier_pending, pending_token} | modes_rest]} = state) do
+    # Emit the pending identifier token and return to normal mode
+    new_state = %{state | modes: modes_rest}
     {:ok, pending_token, string, new_state}
   end
 

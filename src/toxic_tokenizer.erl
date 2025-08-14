@@ -1446,7 +1446,9 @@ handle_dot([$. | Rest], Line, Column, DotInfo, Scope, Tokens) ->
 handle_call_identifier(Rest, Line, Column, DotInfo, Length, UnencodedOp, Scope, Tokens) ->
   Token = check_call_identifier(Line, Column, UnencodedOp, list_to_atom(UnencodedOp), Length, Rest, Scope),
   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-  yield(Rest, Line, Column + Length, Scope, [Token | TokensSoFar]).
+  % TODO: use other command, switch_to_interp is not the best name for this
+  % Use switch_to_interp to emit both tokens sequentially: dot first, then identifier
+  {switch_to_interp, Token, Rest, Line, Column + Length, Scope, call_identifier, dot, TokensSoFar}.
 
 % ## Ambiguous unary/binary operators tokens
 % Keywords are not ambiguous operators
