@@ -20,6 +20,7 @@ defmodule Toxic.Driver do
       scope: scope(identifier_tokenizer: tokenizer)
     }
   end
+
   def next([?} | rest], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     {:ok, {:end_interpolation, {{state.line, state.column}, {state.line, state.column + 1}, nil}, :string}, rest, %{state | modes: modes_rest, column: state.column + 1}}
   end
@@ -31,7 +32,16 @@ defmodule Toxic.Driver do
         {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
 
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
+        # Check if there are stored tokens to emit first (for quoted identifiers)
+        case interpolation do
+          [stored_token | _remaining_tokens] when interp_kind == :quoted_identifier ->
+            # Emit stored token first, then switch to interp mode with start token pending
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:interp_with_pending, interp_kind, token, delim} | modes]}
+            {:ok, stored_token, rest, new_state}
+          _ ->
+            # Normal case - no stored tokens, emit start token immediately
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
+        end
 
       {:error, {[line: _, column: error_column], _, _}, [?} | _] = string, _tokens, _warnings} when length(modes) > 1 ->
         # Handle empty interpolation case - treat closing } as end_interpolation
@@ -41,6 +51,12 @@ defmodule Toxic.Driver do
         {:eof, %{state | line: line, column: column, scope: scope}}
     end
   end
+  def next(string, %__MODULE__{modes: [{:interp_with_pending, kind, pending_token, delim} | modes_rest]} = state) do
+    # Emit the pending start token and switch to normal interp mode
+    new_state = %{state | modes: [{:interp, kind, [], delim} | modes_rest]}
+    {:ok, pending_token, string, new_state}
+  end
+
   def next(string, %__MODULE__{modes: [{:interp, kind, _interpolation, delim} | modes_rest]} = state) do
     case :toxic_interpolation.extract_stream_event(state.line, state.column, state.scope, true, string, delim) do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
@@ -58,6 +74,12 @@ defmodule Toxic.Driver do
           :bin_heredoc -> :bin_heredoc_end
         end
         {:ok, {end_token_type, meta, delim, indent}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+
+
+      {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
+        # Handle quoted identifier completion - emit end token, let linear_to_legacy handle conversion
+        end_token = {:quoted_identifier_end, meta, delim}
+        {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
 
       {:done, meta, _binary_part, rest, line, column, scope} ->
         case rest do
@@ -84,6 +106,18 @@ defmodule Toxic.Driver do
       {:error, reason} ->
         # Handle errors from interpolation extraction
         {:error, reason, string, %{state | modes: modes_rest}}
+    end
+  end
+
+  # Helper function to create proper identifier token with multiline support
+  defp check_call_identifier_multiline(line, column, end_line, end_column, info, atom, rest, _scope) do
+    case rest do
+      [?( | _] ->
+        {:paren_identifier, {{line, column}, {end_line, end_column}, info}, atom}
+      [?[ | _] ->
+        {:bracket_identifier, {{line, column}, {end_line, end_column}, info}, atom}
+      _ ->
+        {:identifier, {{line, column}, {end_line, end_column}, info}, atom}
     end
   end
 end

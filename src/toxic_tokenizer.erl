@@ -262,8 +262,8 @@ linear_to_legacy([{kw_identifier_unsafe_start, Meta, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{kw_identifier_unsafe, Meta, Delim, []} | Stack]);
 
 %% Quoted identifier (from handle_dot) wraps a single identifier token
-linear_to_legacy([{quoted_identifier_start, _Meta, _Delim} | T], Out, Stack) ->
-  linear_to_legacy(T, Out, [{quoted_identifier, []} | Stack]);
+linear_to_legacy([{quoted_identifier_start, StartMeta, Delim} | T], Out, Stack) ->
+  linear_to_legacy(T, Out, [{quoted_identifier, StartMeta, Delim, []} | Stack]);
 
 %% Quoted atoms (linearized)
 linear_to_legacy([{atom_unsafe_start, Meta, Delim} | T], Out, Stack) ->
@@ -490,19 +490,49 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
 
-%% Close quoted identifier and emit inner token directly
-linear_to_legacy([{quoted_identifier_end, _Meta, _Delim} | T], Out, [{quoted_identifier, [IdentTok]} | Stack]) ->
+%% Close quoted identifier and emit identifier token
+linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  % Convert parts to identifier atom and extract content end position
+  {Atom, ContentEndPos} = case Parts of
+    [{string_fragment, FragMeta, Content}] ->
+      % Convert string content to atom and extract content end position
+      AtomVal = case is_binary(Content) of
+        true -> binary_to_atom(Content, utf8);
+        false -> list_to_atom(Content)
+      end,
+      % Extract end position from string fragment (end of content, not quote)
+      ContentEnd = case FragMeta of
+        {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
+        _ -> {1, 7}  % Fallback 
+      end,
+      {AtomVal, ContentEnd};
+    [Content] when is_binary(Content) ->
+      {binary_to_atom(Content, utf8), {1, 7}};
+    [Content] when is_list(Content) ->
+      {list_to_atom(Content), {1, 7}};
+    _ ->
+      % Fallback for unexpected content structure
+      {'UNKNOWN', {1, 7}}
+  end,
+  % Create identifier metadata spanning from quote to end of content
+  IdentifierMeta = case StartMeta of
+    {{SL, SC}, _SEnd, _SX} ->
+      % Start position should include the opening quote (SC - 1), end at content end
+      {{SL, SC - 1}, ContentEndPos, Delim};
+    _ ->
+      % Fallback 
+      {{1, 2}, ContentEndPos, Delim}
+  end,
+  IdentTok = {identifier, IdentifierMeta, Atom},
   linear_to_legacy(T, [IdentTok | Out], Stack);
-linear_to_legacy([{quoted_identifier_end, _Meta, _Delim} | T], Out, [{quoted_identifier, Inner} | Stack]) ->
-  %% Fallback: if structure unexpected, drop wrapper and push inner as-is
-  linear_to_legacy(T, lists:reverse(Inner, Out), Stack);
 
 %% Pass-through for non-linear tokens
 linear_to_legacy([Tok | T], Out, Stack) ->
   case Stack of
-    [{quoted_identifier, Inner} | Rest] ->
-      %% Accumulate exactly one identifier-ish token inside
-      linear_to_legacy(T, Out, [{quoted_identifier, [Tok | Inner]} | Rest]);
+    [{quoted_identifier, StartMeta, Delim, PartsRev} | Rest] ->
+      %% Accumulate tokens inside quoted identifier
+      linear_to_legacy(T, Out, [{quoted_identifier, StartMeta, Delim, [Tok | PartsRev]} | Rest]);
     [{interpol, StartMeta, Inner} | Rest] ->
       linear_to_legacy(T, Out, [{interpol, StartMeta, [Tok | Inner]} | Rest]);
     _ -> linear_to_legacy(T, [Tok | Out], Stack)
@@ -1355,59 +1385,18 @@ handle_dot([$., $( | Rest], Line, Column, DotInfo, Scope, Tokens) ->
   TokensSoFar = add_token_with_eol({dot_call_op, DotInfo, '.'}, Tokens),
   yield([$( | Rest], Line, Column, Scope, TokensSoFar);
 
-handle_dot([$., H | T] = Original, Line, Column, DotInfo, BaseScope, Tokens) when ?is_quote(H) ->
+handle_dot([$., H | T] = _Original, Line, Column, DotInfo, BaseScope, Tokens) when ?is_quote(H) ->
   Scope = case H == $' of
     true ->
       prepend_warning(Line, Column, "single quotes around calls are deprecated. Use double quotes instead", BaseScope);
-
     false ->
       BaseScope
   end,
-  % TODO: yield(begin_identifier) instead of calling extract
-  % TODO: push interpolation mode onto the stack
-  % TODO: push opening terminator onto the stack
-
-  case toxic_interpolation:extract(Line, Column + 1, Scope, true, T, H) of
-    {NewLine, NewColumn, [Part], Rest, InterScope} when is_list(Part) ->
-      NewScope = case is_unnecessary_quote([Part], InterScope) of
-        true ->
-          WarnMsg = io_lib:format(
-            "found quoted call \"~ts\" but the quotes are not required. "
-            "Calls made exclusively of Unicode letters, numbers, and underscores "
-            "and not beginning with a number do not require quotes",
-            [Part]
-          ),
-          prepend_warning(Line, Column, WarnMsg, InterScope);
-
-        false ->
-          InterScope
-      end,
-
-      %% Linearized flow: consistent begin/end markers around quoted identifier
-      case unescape_tokens([Part], Line, Column, NewScope) of
-        {ok, [UnescapedPart]} ->
-          case unsafe_to_atom(UnescapedPart, Line, Column, NewScope) of
-            {ok, Atom} ->
-          StartTok = {quoted_identifier_start, make_meta(Line, Column + 1, Line, Column + 2, nil, NewScope), H},
-              IdentTok = check_call_identifier_multiline(Line, Column, NewLine, NewColumn, H, Atom, Rest, NewScope),
-              EndTok = {quoted_identifier_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-              TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
-              Emitted = [StartTok, IdentTok, EndTok],
-              NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, TokensSoFar, lists:reverse(Emitted)),
-              yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-            {error, Reason} ->
-              error(Reason, Original, NewScope, Tokens)
-          end;
-        {error, Reason} ->
-          error(Reason, Original, NewScope, Tokens)
-      end;
-
-    {_NewLine, _NewColumn, _Parts, Rest, NewScope} ->
-      Message = "interpolation is not allowed when calling function/macro. Found interpolation in a call starting with: ",
-      error({?LOC(Line, Column), Message, [H]}, Rest, NewScope, Tokens);
-    {error, Reason} ->
-      interpolation_error(Reason, Original, Scope, Tokens, " (for function name starting at line ~B)", [Line], Line, Column, [H], [H])
-  end;
+  % Use streaming mode: store dot token and emit quoted identifier via switch_to_interp
+  TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
+  StartTok = {quoted_identifier_start, make_meta(Line, Column + 1, Line, Column + 2, nil, Scope), H},
+  % Pass TokensSoFar as the interpolation parameter so the driver can emit stored tokens first
+  {switch_to_interp, StartTok, T, Line, Column + 2, Scope, quoted_identifier, H, TokensSoFar};
 
 handle_dot([$. | Rest], Line, Column, DotInfo, Scope, Tokens) ->
   TokensSoFar = add_token_with_eol({'.', DotInfo}, Tokens),
