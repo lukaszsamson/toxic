@@ -1811,6 +1811,9 @@ defmodule ToxicTest do
 
     test "double quoted kw_identifier" do
       assert tokenize("\"foo\": 1") == {:ok, [{:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo}, {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}], ""}
+      assert tokenize("\"foo\":\t1") == {:ok, [{:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo}, {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}], ""}
+      assert tokenize("\"foo\":\n1") == {:ok, [{:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo}, {:eol, {{1, 7}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
+      assert tokenize("\"foo\":\r\n1") == {:ok, [{:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo}, {:eol, {{1, 7}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
     end
 
     test "single quoted kw_identifier" do
