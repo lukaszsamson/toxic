@@ -1204,6 +1204,12 @@ tokenize_dot(T, Line, Column, DotInfo, Scope, Tokens) ->
           preserve_comments(Line, Column, Tokens, Comment, Rest, Scope),
           tokenize_dot(Rest, Line, Scope#toxic_tokenizer.column, DotInfo, Scope, Tokens)
       end;
+    {"\\\r\n" ++ Rest, _} ->
+      % Escaped carriage return + newline - continue on next line
+      tokenize_dot(Rest, Line + 1, Scope#toxic_tokenizer.column, DotInfo, Scope, Tokens);
+    {"\\\n" ++ Rest, _} ->
+      % Escaped newline - continue on next line
+      tokenize_dot(Rest, Line + 1, Scope#toxic_tokenizer.column, DotInfo, Scope, Tokens);
     {"\r\n" ++ Rest, _} ->
       tokenize_dot(Rest, Line + 1, Scope#toxic_tokenizer.column, DotInfo, Scope, Tokens);
     {"\n" ++ Rest, _} ->

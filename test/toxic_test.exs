@@ -1893,12 +1893,19 @@ defmodule ToxicTest do
       assert tokenize(".id()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:paren_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
       {:"(", {{1, 4}, {1, 5}, nil}},
       {:")", {{1, 5}, {1, 6}, nil}}], ""}
+      assert tokenize(".id ()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
+      {:"(", {{1, 5}, {1, 6}, nil}},
+      {:")", {{1, 6}, {1, 7}, nil}}], ""}
     end
 
     test "dot followed by bracket identifier" do
       assert tokenize(".id[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:bracket_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
       {:"[", {{1, 4}, {1, 5}, nil}},
       {:"]", {{1, 5}, {1, 6}, nil}}], ""}
+
+      assert tokenize(".id []") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
+      {:"[", {{1, 5}, {1, 6}, nil}},
+      {:"]", {{1, 6}, {1, 7}, nil}}], ""}
     end
 
     test "dot followed by horizontal space" do
@@ -2024,12 +2031,18 @@ defmodule ToxicTest do
       assert tokenize(".\"foo\"()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:paren_identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"(", {{1, 7}, {1, 8}, nil}},
       {:")", {{1, 8}, {1, 9}, nil}}], ""}
+      assert tokenize(".\"foo\"()") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      {:"(", {{1, 8}, {1, 9}, nil}},
+      {:")", {{1, 9}, {1, 10}, nil}}], ""}
     end
 
     test "dot quote bracket" do
       assert tokenize(".\"foo\"[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:bracket_identifier, {{1, 2}, {1, 7}, 34}, :foo},
       {:"[", {{1, 7}, {1, 8}, nil}},
       {:"]", {{1, 8}, {1, 9}, nil}}], ""}
+      assert tokenize(".\"foo\"[]") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
+      {:"[", {{1, 8}, {1, 9}, nil}},
+      {:"]", {{1, 9}, {1, 10}, nil}}], ""}
     end
   end
 
