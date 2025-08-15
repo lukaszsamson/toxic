@@ -21,6 +21,38 @@ defmodule Toxic.Driver do
     }
   end
 
+  # Handle escaped newline at beginning: skip EOL emission and advance line/column
+  def next([?\\, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    stripped = trim_leading_spaces(tail)
+    new_col = 1 + (length(tail) - length(stripped))
+    next(stripped, %{state | line: state.line + 1, column: new_col})
+  end
+  def next([?\\, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    stripped = trim_leading_spaces(tail)
+    new_col = 1 + (length(tail) - length(stripped))
+    next(stripped, %{state | line: state.line + 1, column: new_col})
+  end
+
+  # Fold ",\n" into a single comma token with extra=1 (no EOL token)
+  def next([?,, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+    {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+  end
+  def next([?,, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+    {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+  end
+
+  # Fold ";\n" into a single semicolon token with extra=1 (no EOL token)
+  def next([?;, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+    {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+  end
+  def next([?;, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+    {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+  end
+
   
   # Emit pending token or coalesced EOL on EOF before falling back to generic eof
   def next([], %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) do
@@ -109,6 +141,33 @@ defmodule Toxic.Driver do
 
   def next(string, %__MODULE__{modes: [:normal | _] = modes} = state) when is_list(string) do
     # TODO: eliminate tokens
+    # Handle escaped newlines at the driver level to avoid emitting EOL tokens
+    case string do
+      [?\\, ?\n | tail] ->
+        # Move to next line, strip horizontal spaces, do not emit EOL
+        stripped = trim_leading_spaces(tail)
+        new_col = 1 + (length(tail) - length(stripped))
+        next(stripped, %{state | line: state.line + 1, column: new_col, scope: state.scope})
+      [?\\, ?\r, ?\n | tail] ->
+        stripped = trim_leading_spaces(tail)
+        new_col = 1 + (length(tail) - length(stripped))
+        next(stripped, %{state | line: state.line + 1, column: new_col, scope: state.scope})
+      # Fold immediate newline after comma/semicolon into their count
+      [?,, ?\n | tail] ->
+        meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+        {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+      [?,, ?\r, ?\n | tail] ->
+        meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+        {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+      [?;, ?\n | tail] ->
+        meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+        {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+      [?;, ?\r, ?\n | tail] ->
+        meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
+        {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+      _ -> :ok
+    end
+
     tokens = []
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
@@ -134,7 +193,7 @@ defmodule Toxic.Driver do
             end
           {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
             # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
-            case string do
+            case rest do
               [?\n | tail] ->
                 new_token = {Kind, {{sl, sc}, {el, ec}, (extra || 0) + 1}}
                 new_state = %{state | line: line + 1, column: 1, scope: scope}
