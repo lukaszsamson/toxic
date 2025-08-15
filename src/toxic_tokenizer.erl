@@ -154,11 +154,13 @@ ranges_to_legacy_after_collapse([{eol, _} = Tok | T], _PrevWasEol, Acc) ->
 ranges_to_legacy_after_collapse([Tok | T], PrevWasEol, Acc) ->
   Conv = ranges_token_to_legacy(Tok),
   Adj = case {PrevWasEol, Conv} of
-    {true, {Type, {Line, _Col, Extra}}} -> {Type, {Line, 1, Extra}};
-    {true, {Type, {Line, _Col, Extra}, V}} -> {Type, {Line, 1, Extra}, V};
-    {true, {Type, {Line, _Col, Extra}, A, B}} -> {Type, {Line, 1, Extra}, A, B};
-    {true, {Type, {Line, _Col, Extra}, A, B, C}} -> {Type, {Line, 1, Extra}, A, B, C};
-    {true, {Type, {Line, _Col, Extra}, A, B, C, D}} -> {Type, {Line, 1, Extra}, A, B, C, D};
+    %% Preserve actual starting column when it is greater than 1.
+    {true, {Type, {Line, Col, Extra}}} when is_integer(Col), Col > 1 -> {Type, {Line, Col, Extra}};
+    {true, {Type, {Line, Col, Extra}, V}} when is_integer(Col), Col > 1 -> {Type, {Line, Col, Extra}, V};
+    {true, {Type, {Line, Col, Extra}, A, B}} when is_integer(Col), Col > 1 -> {Type, {Line, Col, Extra}, A, B};
+    {true, {Type, {Line, Col, Extra}, A, B, C}} when is_integer(Col), Col > 1 -> {Type, {Line, Col, Extra}, A, B, C};
+    {true, {Type, {Line, Col, Extra}, A, B, C, D}} when is_integer(Col), Col > 1 -> {Type, {Line, Col, Extra}, A, B, C, D};
+    %% Default behaviour
     _ -> Conv
   end,
   ranges_to_legacy_after_collapse(T, false, [Adj | Acc]).
