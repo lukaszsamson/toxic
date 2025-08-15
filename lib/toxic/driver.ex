@@ -34,27 +34,48 @@ defmodule Toxic.Driver do
   end
 
   # Fold ",\n" into a single comma token with extra=1 (no EOL token)
-  def next([?,, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?,, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
-    {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+    token = {:',', meta}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    {:ok, token, tail, new_state}
   end
-  def next([?,, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?,, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
-    {:ok, {:',', meta}, tail, %{state | line: state.line + 1, column: 1}}
+    token = {:',', meta}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    {:ok, token, tail, new_state}
   end
 
   # Fold ";\n" into a single semicolon token with extra=1 (no EOL token)
-  def next([?;, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?;, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
-    {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+    token = {:';', meta}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    {:ok, token, tail, new_state}
   end
-  def next([?;, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?;, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
-    {:ok, {:';', meta}, tail, %{state | line: state.line + 1, column: 1}}
+    token = {:';', meta}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    {:ok, token, tail, new_state}
+  end
+
+  # Handle "\n=>" and "\r\n=>" by emitting only assoc_op with EOL count and no EOL token
+  def next([?\n, ?=, ?> | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line + 1, 1}, {state.line + 1, 3}, 1}
+    {:ok, {:assoc_op, meta, :"=>"}, tail, %{state | line: state.line + 1, column: 3}}
+  end
+  def next([?\r, ?\n, ?=, ?> | tail], %__MODULE__{modes: [:normal | _]} = state) do
+    meta = {{state.line + 1, 1}, {state.line + 1, 3}, 1}
+    {:ok, {:assoc_op, meta, :"=>"}, tail, %{state | line: state.line + 1, column: 3}}
   end
 
   
   # Emit pending token or coalesced EOL on EOF before falling back to generic eof
+  def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
+    {:ok, pending, [], %{state | modes: modes_rest}}
+  end
   def next([], %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
   end
@@ -186,10 +207,37 @@ defmodule Toxic.Driver do
                 new_modes = [{:bol_indent, indent_col} | modes]
                 new_state = %{state | line: line, column: column, scope: scope, modes: new_modes}
                 {:ok, eol_token, rest, new_state}
+              [93 | _] ->
+                # Closer: emit EOL separately and carry it into closer
+                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                {:ok, eol_token, rest, new_state}
+              [125 | _] ->
+                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                {:ok, eol_token, rest, new_state}
+              [41 | _] ->
+                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                {:ok, eol_token, rest, new_state}
+              [62, 62 | _] ->
+                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                {:ok, eol_token, rest, new_state}
               _ ->
-                # Default: coalesce EOLs and emit exactly one before the next token
-                new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
-                next(rest, new_state)
+                # If multiple EOLs immediately precede assoc_op (=>), fold all into assoc_op extra
+                {after_eols, extra_eols} = count_leading_eols(rest)
+                trimmed2 = trim_leading_spaces(after_eols)
+                case trimmed2 do
+                  [61, 62 | _] ->
+                    # total EOLs = current + extra_eols
+                    {:eol, {{sl, sc}, _endpos, _}} = eol_token
+                    total = 1 + extra_eols
+                    carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
+                    spaces = length(after_eols) - length(trimmed2)
+                    new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, modes: [{:carry_tokens, [carry]} | modes]}
+                    next(trimmed2, new_state)
+                  _ ->
+                    # Default: coalesce EOLs, emit one EOL before next token
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
+                end
             end
           {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
             # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
@@ -222,7 +270,7 @@ defmodule Toxic.Driver do
             new_state = %{state | line: line, column: column, scope: scope, modes: [{:interp_with_pending, interp_kind, token, delim} | modes]}
             {:ok, stored_token, rest, new_state}
           [stored_token | _remaining_tokens] when interp_kind == :call_identifier ->
-            # Emit stored token (dot) first, then emit identifier token directly (no interp mode needed)
+            # Emit stored token (dot) first, then queue identifier token; ensure we don't lose it at EOF
             new_state = %{state | line: line, column: column, scope: scope, modes: [{:call_identifier_pending, token} | modes]}
             {:ok, stored_token, rest, new_state}
           _ ->
@@ -392,6 +440,17 @@ defmodule Toxic.Driver do
 
   defp count_leading_spaces([c | rest]) when c in [?\t, ?\s], do: 1 + count_leading_spaces(rest)
   defp count_leading_spaces(_), do: 0
+
+  # Count leading EOL sequences (LF or CRLF)
+  defp count_leading_eols([?\r, ?\n | rest]) do
+    {after_rest, n} = count_leading_eols(rest)
+    {after_rest, n + 1}
+  end
+  defp count_leading_eols([?\n | rest]) do
+    {after_rest, n} = count_leading_eols(rest)
+    {after_rest, n + 1}
+  end
+  defp count_leading_eols(rest), do: {rest, 0}
 
   # Adjust operator column at beginning of line after EOL indentation
   defp adjust_bol_operator({kind, {{sl, sc}, {el, ec}, extra}, value} = tok, line, indent_col)

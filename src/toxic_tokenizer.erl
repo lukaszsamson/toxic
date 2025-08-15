@@ -973,8 +973,13 @@ tokenize_single([$:, T | Rest], Line, Column, Scope, Tokens) when
 
 tokenize_single("=>" ++ Rest, Line, Column, Scope, Tokens) ->
   EOL = previous_was_eol(Tokens),
-  Token = {assoc_op, make_meta_len(Line, Column, 2, EOL, Scope), '=>'},
-  yield(Rest, Line, Column + 2, Scope, add_token_with_eol(Token, Tokens));
+  Token0 = {assoc_op, make_meta_len(Line, Column, 2, EOL, Scope), '=>'},
+  % If previous was EOL, we should not keep the EOL token around; attach its count and drop it
+  Tokens1 = case Tokens of
+    [{eol, _} | Tail] -> Tail;
+    _ -> Tokens
+  end,
+  yield(Rest, Line, Column + 2, Scope, [Token0 | Tokens1]);
 
 tokenize_single("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
   case strip_horizontal_space(Rest, 0) of
