@@ -21,18 +21,21 @@ defmodule Toxic.Driver do
     }
   end
 
-  def next([?} | rest], %__MODULE__{modes: [:normal | modes_rest]} = state) do
-    {:ok, {:end_interpolation, {{state.line, state.column}, {state.line, state.column + 1}, nil}, :string}, rest, %{state | modes: modes_rest, column: state.column + 1}}
-  end
+  
   # Support emitting closers at BOL after an EOL token with count>0
   def next([], %__MODULE__{modes: [:normal | _]} = state) do
     {:eof, state}
+  end
+  def next([], %__MODULE__{} = state), do: {:eof, state}
+  # Unwrap bol_indent marker and continue normally
+  def next(string, %__MODULE__{modes: [{:bol_indent, _} | modes_rest]} = state) when is_list(string) do
+    next(string, %{state | modes: modes_rest})
   end
   def next(string, %__MODULE__{modes: [{:carry_tokens, carry} | modes_rest]} = state) when is_list(string) do
     # Pass along carried previous tokens (e.g., EOL) so tokenizer can attach EOL to next token and optionally drop it
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, carry) do
       {:token, token, rest, line, column, scope} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        {:ok, adjust_bol_operator(token, state.line, state.column), rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
         {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes_rest]}}
       {:eof, line, column, scope} ->
@@ -47,12 +50,37 @@ defmodule Toxic.Driver do
     tokens = []
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
-        # If token is EOL, carry it to the next tokenizer call so subsequent token can embed/drop it
-        new_state = case token do
-          {:eol, _meta} -> %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token]} | modes]}
-          _ -> %{state | line: line, column: column, scope: scope}
+        case token do
+          {:eol, _meta} ->
+            # Lookahead after EOL: if next non-space starts with '//', suppress EOL emission
+            trimmed = trim_leading_spaces(rest)
+            case trimmed do
+              [?/ , ?/ | _] ->
+                # Suppress EOL; carry it into next scan and immediately fetch next token
+                next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token]} | modes]}
+                next(trimmed, next_state)
+              _ ->
+                # Decide whether to embed EOL into next token meta or not
+                case trimmed do
+                  [head | _] when head in [?- , ?+ , ?@] ->
+                    # Unary or at_op at BOL: keep EOL separate; do not embed into operator meta
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:bol_indent, column} | modes]}
+                    {:ok, token, rest, new_state}
+                  _ ->
+                    # Default: embed EOL in next token; push carry first then bol indent
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token]} | [{:bol_indent, column} | modes]]}
+                    {:ok, token, rest, new_state}
+                end
+            end
+          _ ->
+            # If we are at BOL after EOL, adjust operator metas to indentation column
+            case modes do
+              [{:bol_indent, indent_col} | modes_rest] ->
+                {:ok, adjust_bol_operator(token, line, indent_col), rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+              _ ->
+                {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+            end
         end
-        {:ok, token, rest, new_state}
 
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
         # Check if there are stored tokens to emit first (for quoted identifiers and call identifiers)
@@ -226,4 +254,18 @@ defmodule Toxic.Driver do
     do_take_mods(t, [h | acc])
   end
   defp do_take_mods(rest, acc), do: {Enum.reverse(acc), rest}
+
+  defp trim_leading_spaces([c | rest]) when c in [?\t, ?\s], do: trim_leading_spaces(rest)
+  defp trim_leading_spaces(list), do: list
+
+  # Adjust operator column at beginning of line after EOL indentation
+  defp adjust_bol_operator({kind, {{sl, sc}, {el, ec}, extra}, value} = tok, line, column) when kind in [:dual_op, :unary_op, :at_op] do
+    if sl == line and sc < column do
+      len = ec - sc
+      {kind, {{line, column}, {line, column + len}, extra}, value}
+    else
+      tok
+    end
+  end
+  defp adjust_bol_operator(tok, _line, _column), do: tok
 end
