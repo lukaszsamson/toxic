@@ -83,6 +83,33 @@ defmodule Toxic.Driver do
     {:ok, eol_token, [], %{state | modes: modes_rest}}
   end
 
+  # Awaiting 'in' after an EOL following 'not'
+  def next(string, %__MODULE__{modes: [{:await_in_after_eol} | modes_rest]} = state) when is_list(string) do
+    case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, []) do
+      {:token, {:eol, _} = eol_token, rest, line, column, scope} ->
+        trimmed = trim_leading_spaces(rest)
+        if begins_with_in_keyword(trimmed) do
+          next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes_rest]}
+          next(trimmed, next_state)
+        else
+          # Fallback: coalesce and emit EOL before next token
+          next(rest, %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes_rest]})
+        end
+      other ->
+        # Delegate to general handler by stripping the await marker
+        case other do
+          {:token, token, rest, line, column, scope} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes_rest]}}
+          {:eof, line, column, scope} ->
+            {:eof, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:error, reason, rest, _tokens, _warnings} ->
+            {:error, reason, rest, %{state | modes: modes_rest}}
+        end
+    end
+  end
+
   # Support emitting closers at BOL after an EOL token with count>0
   def next([], %__MODULE__{modes: [:normal | _]} = state) do
     {:eof, state}
@@ -193,51 +220,75 @@ defmodule Toxic.Driver do
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
         case token do
-          {:eol, _meta} = eol_token ->
-            # Lookahead after EOL: if next non-space starts with '//', suppress EOL emission
+          {:unary_op, _meta, :not} ->
             trimmed = trim_leading_spaces(rest)
-            case trimmed do
-              [?/ , ?/ | _] ->
-                # Suppress EOL; carry it into next scan and immediately fetch next token
-                next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                next(trimmed, next_state)
-              [head | _] when head in [?- , ?+ , ?@] ->
-                # Record the indentation column for the next operator; do not carry EOL into operator
-                indent_col = column + count_leading_spaces(rest)
-                new_modes = [{:bol_indent, indent_col} | modes]
-                new_state = %{state | line: line, column: column, scope: scope, modes: new_modes}
-                {:ok, eol_token, rest, new_state}
-              [93 | _] ->
-                # Closer: emit EOL separately and carry it into closer
-                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                {:ok, eol_token, rest, new_state}
-              [125 | _] ->
-                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                {:ok, eol_token, rest, new_state}
-              [41 | _] ->
-                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                {:ok, eol_token, rest, new_state}
-              [62, 62 | _] ->
-                new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                {:ok, eol_token, rest, new_state}
-              _ ->
-                # If multiple EOLs immediately precede assoc_op (=>), fold all into assoc_op extra
-                {after_eols, extra_eols} = count_leading_eols(rest)
-                trimmed2 = trim_leading_spaces(after_eols)
-                case trimmed2 do
-                  [61, 62 | _] ->
-                    # total EOLs = current + extra_eols
-                    {:eol, {{sl, sc}, _endpos, _}} = eol_token
-                    total = 1 + extra_eols
-                    carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
-                    spaces = length(after_eols) - length(trimmed2)
-                    new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, modes: [{:carry_tokens, [carry]} | modes]}
-                    next(trimmed2, new_state)
-                  _ ->
-                    # Default: coalesce EOLs, emit one EOL before next token
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
-                    next(rest, new_state)
+            if begins_with_in_keyword(trimmed) do
+              # Suppress standalone 'not'; carry it so tokenizer can merge into 'not in'
+              spaces = length(rest) - length(trimmed)
+              next_state = %{state | line: line, column: column + spaces, scope: scope, modes: [{:carry_tokens, [token]} | modes]}
+              next(trimmed, next_state)
+            else
+              {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:await_in_after_eol} | modes]}}
+            end
+          {:eol, _meta} = eol_token ->
+            # Lookahead after EOL
+            trimmed = trim_leading_spaces(rest)
+            # Special case: previous was 'not' and next is keyword 'in' -> suppress EOL and carry it
+            case modes do
+              [{:await_in_after_eol} | modes_rest] ->
+                if begins_with_in_keyword(trimmed) do
+                  next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes_rest]}
+                  next(trimmed, next_state)
+                else
+                  :continue
                 end
+              _ -> :continue
+            end
+            |> case do
+              :continue ->
+                case trimmed do
+                  [?/ , ?/ | _] ->
+                    # Suppress EOL for comment start
+                    next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    next(trimmed, next_state)
+                  [head | _] when head in [?- , ?+ , ?@] ->
+                    # Record indentation column for next operator
+                    indent_col = column + count_leading_spaces(rest)
+                    new_modes = [{:bol_indent, indent_col} | modes]
+                    new_state = %{state | line: line, column: column, scope: scope, modes: new_modes}
+                    {:ok, eol_token, rest, new_state}
+                  [93 | _] ->
+                    # Closer: emit EOL separately and carry into closer
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [125 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [41 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [62, 62 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  _ ->
+                    # Assoc op '=>' after multiple EOLs
+                    {after_eols, extra_eols} = count_leading_eols(rest)
+                    trimmed2 = trim_leading_spaces(after_eols)
+                    case trimmed2 do
+                      [61, 62 | _] ->
+                        {:eol, {{sl, sc}, _endpos, _}} = eol_token
+                        total = 1 + extra_eols
+                        carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
+                        spaces = length(after_eols) - length(trimmed2)
+                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, modes: [{:carry_tokens, [carry]} | modes]}
+                        next(trimmed2, new_state)
+                      _ ->
+                        # Coalesce EOLs, emit one EOL before next token
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
+                    end
+                end
+              other -> other
             end
           {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
             # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
@@ -451,6 +502,19 @@ defmodule Toxic.Driver do
     {after_rest, n + 1}
   end
   defp count_leading_eols(rest), do: {rest, 0}
+
+  # Detect if the upcoming input starts with the standalone keyword "in"
+  defp begins_with_in_keyword([?i, ?n, next | _]) do
+    not is_identifier_char(next)
+  end
+  defp begins_with_in_keyword([?i, ?n]), do: true
+  defp begins_with_in_keyword(_), do: false
+
+  defp is_identifier_char(char) when char in ?a..?z, do: true
+  defp is_identifier_char(char) when char in ?A..?Z, do: true
+  defp is_identifier_char(char) when char in ?0..?9, do: true
+  defp is_identifier_char(?_), do: true
+  defp is_identifier_char(_), do: false
 
   # Adjust operator column at beginning of line after EOL indentation
   defp adjust_bol_operator({kind, {{sl, sc}, {el, ec}, extra}, value} = tok, line, indent_col)

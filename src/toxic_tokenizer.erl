@@ -2356,6 +2356,40 @@ tokenize_keyword(block, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   yield(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
+  % Special handling for "not" followed by escaped newline and then "in"
+  case {Atom, Rest} of
+    {'not', "\\\n" ++ RestAfterEscape} ->
+      % Look ahead to see if "in" follows the escaped newline
+      case strip_horizontal_space(RestAfterEscape, 0) of
+        {"in" ++ InRest, ExtraSpaces} ->
+          % Create a "not in" token spanning across the escaped newline
+          EndColumn = 2 + ExtraSpaces,  % "in" length + any spaces before it
+          Meta = make_meta(Line, Column, Line + 1, EndColumn + 1, nil, Scope),
+          NewTokens = add_token_with_eol({in_op, Meta, 'not in'}, Tokens),
+          yield(InRest, Line + 1, EndColumn + 1, Scope, NewTokens);
+        _ ->
+          % Not followed by "in", process normally
+          normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
+      end;
+    {'not', "\\\r\n" ++ RestAfterEscape} ->
+      % Handle Windows-style escaped newline
+      case strip_horizontal_space(RestAfterEscape, 0) of
+        {"in" ++ InRest, ExtraSpaces} ->
+          % Create a "not in" token spanning across the escaped newline
+          EndColumn = 2 + ExtraSpaces,  % "in" length + any spaces before it
+          Meta = make_meta(Line, Column, Line + 1, EndColumn + 1, nil, Scope),
+          NewTokens = add_token_with_eol({in_op, Meta, 'not in'}, Tokens),
+          yield(InRest, Line + 1, EndColumn + 1, Scope, NewTokens);
+        _ ->
+          % Not followed by "in", process normally
+          normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
+      end;
+    _ ->
+      % Normal keyword processing
+      normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
+  end.
+
+normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   NewTokens =
     case strip_horizontal_space(Rest, 0) of
       {[$/ | _], _} ->
@@ -2370,7 +2404,9 @@ tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
               {SL, SC, _} -> {SL, SC}
             end,
             EndLine = Line,
-            EndColumn = Column + Length,
+            %% Include any horizontal spaces between 'not' and 'in' in the range
+            {_, ExtraSpaces} = strip_horizontal_space(Rest, 0),
+            EndColumn = Column + Length + ExtraSpaces,
             Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, nil, Scope),
             add_token_with_eol({in_op, Meta, 'not in'}, T);
 
