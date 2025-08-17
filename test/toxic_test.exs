@@ -2591,6 +2591,109 @@ defmodule ToxicTest do
     end
   end
 
+  describe "op_identifier" do
+    test "simple" do
+      assert tokenize("foo +1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:int, {{1, 6}, {1, 7}, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "quoted" do
+      assert tokenize("K.'1foo' +1") == {:ok, [
+        {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+        {:., {{1, 2}, {1, 3}, nil}},
+        {:op_identifier, {{1, 3}, {1, 9}, ~c"1foo"}, :foo},
+        {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
+        {:int, {{1, 12}, {1, 13}, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "space" do
+      assert tokenize("foo  +1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+        {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo \t+1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+        {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo  + 1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+        {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo  +\t1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+        {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "newline" do
+      assert tokenize("foo\n+1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:eol, {{1, 4}, {2, 1}, 1}},
+        {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
+        {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo\r\n+1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:eol, {{1, 4}, {2, 1}, 1}},
+        {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
+        {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +\n1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:eol, {{1, 6}, {2, 1}, 1}},
+        {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +\r\n1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:eol, {{1, 6}, {2, 1}, 1}},
+        {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
+      ], ""}
+    end
+
+    test "escaped newline" do
+      # TODO: isn't that a bug in elixir tokenizer?
+      assert tokenize("foo\\\n+1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
+        {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo\\\r\n+1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
+        {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +\\\n1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +\\\r\n1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
+      ], ""}
+    end
+  end
+
   describe "integration" do
     test "module" do
       assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},

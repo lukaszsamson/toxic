@@ -822,7 +822,18 @@ tokenize_single([$# | String], Line, Column, Scope, Tokens) ->
       error_comment(Char, [$# | String], Line, Column, Scope, Tokens);
     {Rest, Comment} ->
       preserve_comments(Line, Column, Tokens, Comment, Rest, Scope),
-      yield(Rest, Line, Column, Scope, reset_eol(Tokens))
+      % Check if comment ends with newline and handle appropriately
+      case Rest of
+        "\n" ++ ActualRest ->
+          % Comment followed by newline - generate eol token
+          tokenize_eol(ActualRest, Line, Scope, eol(Line, Column, reset_eol(Tokens), Scope));
+        "\r\n" ++ ActualRest ->
+          % Comment followed by CRLF - generate eol token
+          tokenize_eol(ActualRest, Line, Scope, eol(Line, Column, reset_eol(Tokens), Scope));
+        _ ->
+          % Comment at EOF or followed by other content - no eol token
+          yield(Rest, Line, Column, Scope, reset_eol(Tokens))
+      end
   end;
 
 % Sigils
