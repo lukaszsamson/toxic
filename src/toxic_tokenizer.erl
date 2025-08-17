@@ -234,6 +234,7 @@ is_linear_type(kw_identifier_safe_start) -> true;
 is_linear_type(kw_identifier_safe_end) -> true;
 is_linear_type(quoted_identifier_start) -> true;
 is_linear_type(quoted_identifier_end) -> true;
+is_linear_type(quoted_op_identifier_end) -> true;
 is_linear_type(quoted_paren_identifier_end) -> true;
 is_linear_type(quoted_bracket_identifier_end) -> true;
 is_linear_type(atom_unsafe_start) -> true;
@@ -581,6 +582,33 @@ linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_id
       {{1, 2}, ClosingQuotePos, Delim}
   end,
   IdentTok = {identifier, IdentifierMeta, Atom},
+  linear_to_legacy(T, [IdentTok | Out], Stack);
+
+%% Close quoted identifier where next token is dual_op start -> op_identifier
+linear_to_legacy([{quoted_op_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  {Atom, ContentEnd} = case Parts of
+    [{string_fragment, FragMeta, Content}] ->
+      AtomVal = case is_binary(Content) of
+        true -> binary_to_atom(Content, utf8);
+        false -> list_to_atom(Content)
+      end,
+      ContentEndPos = case FragMeta of
+        {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
+        _ -> {1, 7}
+      end,
+      {AtomVal, ContentEndPos};
+    _ -> {'UNKNOWN', {1,7}}
+  end,
+  ClosingQuotePos = case ContentEnd of
+    {Line, Column} -> {Line, Column + 1};
+    Other -> Other
+  end,
+  IdentifierMeta = case StartMeta of
+    {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim};
+    _ -> {{1,2}, ClosingQuotePos, Delim}
+  end,
+  IdentTok = {op_identifier, IdentifierMeta, Atom},
   linear_to_legacy(T, [IdentTok | Out], Stack);
 
 %% Close quoted paren identifier and emit paren_identifier token
@@ -1638,8 +1666,8 @@ handle_call_identifier(Rest, Line, Column, DotInfo, Length, UnencodedOp, Scope, 
 % ## Ambiguous unary/binary operators tokens
 % Keywords are not ambiguous operators
 handle_space_sensitive_tokens([Sign, $:, Space | _] = String, Line, Column, Scope, Tokens) when ?dual_op(Sign), ?is_space(Space) ->
-  % Yield directly as this is a single-token case
-  yield(String, Line, Column, Scope, Tokens);
+  % Continue tokenizing normally so "+:" becomes kw_identifier via operator path
+  tokenize_single(String, Line, Column, Scope, Tokens);
 
 % But everything else, except other operators, are
 handle_space_sensitive_tokens([Sign, NotMarker | T], Line, Column, Scope, [{identifier, _, _} = H | Tokens]) when

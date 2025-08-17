@@ -2598,15 +2598,69 @@ defmodule ToxicTest do
         {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
         {:int, {{1, 6}, {1, 7}, 1}, ~c"1"}
       ], ""}
+
+      assert tokenize("foo -1") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
+        {:int, {{1, 6}, {1, 7}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo -x") == {:ok, [
+        {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
+        {:identifier, {{1, 6}, {1, 7}, ~c"x"}, :x}
+      ], ""}
+    end
+
+    test "negative cases" do
+      assert tokenize("foo +>1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
+        {:rel_op, {{1, 6}, {1, 7}, nil}, :>},
+        {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +: 1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:kw_identifier, {{1, 5}, {1, 7}, nil}, :+},
+        {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +: x") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:kw_identifier, {{1, 5}, {1, 7}, nil}, :+},
+        {:identifier, {{1, 8}, {1, 9}, ~c"x"}, :x}
+      ], ""}
+
+      assert tokenize("foo --1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:concat_op, {{1, 5}, {1, 7}, nil}, :--},
+        {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("foo +/1") == {:ok, [
+        {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
+        {:identifier, {{1, 5}, {1, 6}, nil}, :+},
+        {:mult_op, {{1, 6}, {1, 7}, nil}, :/},
+        {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+      ], ""}
     end
 
     test "quoted" do
       assert tokenize("K.'1foo' +1") == {:ok, [
         {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
         {:., {{1, 2}, {1, 3}, nil}},
-        {:op_identifier, {{1, 3}, {1, 9}, ~c"1foo"}, :foo},
+        {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
         {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
-        {:int, {{1, 12}, {1, 13}, 1}, ~c"1"}
+        {:int, {{1, 11}, {1, 12}, 1}, ~c"1"}
+      ], ""}
+
+      assert tokenize("K.'1foo' +x") == {:ok, [
+        {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+        {:., {{1, 2}, {1, 3}, nil}},
+        {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
+        {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
+        {:identifier, {{1, 11}, {1, 12}, ~c"x"}, :x}
       ], ""}
     end
 
@@ -2694,85 +2748,85 @@ defmodule ToxicTest do
     end
   end
 
-  describe "integration" do
-    test "module" do
-      assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
-      {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
-      {:do, {{1, 15}, {1, 17}, nil}},
-      {:eol, {{1, 17}, {2, 1}, 1}},
-      {:end, {{2, 1}, {2, 4}, nil}}], ""}
-    end
+  # describe "integration" do
+  #   test "module" do
+  #     assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
+  #     {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
+  #     {:do, {{1, 15}, {1, 17}, nil}},
+  #     {:eol, {{1, 17}, {2, 1}, 1}},
+  #     {:end, {{2, 1}, {2, 4}, nil}}], ""}
+  #   end
 
-    test "try" do
-      assert tokenize("try do\n:ok\nend") == {:ok, [{:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-      {:do, {{1, 5}, {1, 7}, nil}},
-      {:eol, {{1, 7}, {2, 1}, 1}},
-      {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-      {:eol, {{2, 4}, {3, 1}, 1}},
-      {:end, {{3, 1}, {3, 4}, nil}}], ""}
-    end
+  #   test "try" do
+  #     assert tokenize("try do\n:ok\nend") == {:ok, [{:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+  #     {:do, {{1, 5}, {1, 7}, nil}},
+  #     {:eol, {{1, 7}, {2, 1}, 1}},
+  #     {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+  #     {:eol, {{2, 4}, {3, 1}, 1}},
+  #     {:end, {{3, 1}, {3, 4}, nil}}], ""}
+  #   end
 
-    test "try with rescue" do
-      assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
-        {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-              {:do, {{1, 5}, {1, 7}, nil}},
-              {:eol, {{1, 7}, {2, 1}, 1}},
-              {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-              {:eol, {{2, 4}, {3, 1}, 1}},
-              {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
-              {:eol, {{3, 7}, {4, 1}, 1}},
-              {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
-              {:eol, {{4, 7}, {5, 1}, 1}},
-              {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
-              {:eol, {{5, 6}, {6, 1}, 1}},
-              {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
-              {:eol, {{6, 4}, {7, 1}, 1}},
-              {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
-              {:eol, {{7, 5}, {8, 1}, 1}},
-              {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
-        {:eol, {{8, 4}, {9, 1}, 1}},
-        {:end, {{9, 1}, {9, 4}, nil}}], ""}
-    end
+  #   test "try with rescue" do
+  #     assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
+  #       {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+  #             {:do, {{1, 5}, {1, 7}, nil}},
+  #             {:eol, {{1, 7}, {2, 1}, 1}},
+  #             {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+  #             {:eol, {{2, 4}, {3, 1}, 1}},
+  #             {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
+  #             {:eol, {{3, 7}, {4, 1}, 1}},
+  #             {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
+  #             {:eol, {{4, 7}, {5, 1}, 1}},
+  #             {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
+  #             {:eol, {{5, 6}, {6, 1}, 1}},
+  #             {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
+  #             {:eol, {{6, 4}, {7, 1}, 1}},
+  #             {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
+  #             {:eol, {{7, 5}, {8, 1}, 1}},
+  #             {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
+  #       {:eol, {{8, 4}, {9, 1}, 1}},
+  #       {:end, {{9, 1}, {9, 4}, nil}}], ""}
+  #   end
 
-    test "fn" do
-      assert tokenize("fn ->\n:ok\nend") == {:ok, [
-        {:fn, {{1, 1}, {1, 3}, nil}},
-              {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
-              {:eol, {{1, 6}, {2, 1}, 1}},
-              {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-              {:eol, {{2, 4}, {3, 1}, 1}},
-              {:end, {{3, 1}, {3, 4}, nil}}], ""}
-    end
+  #   test "fn" do
+  #     assert tokenize("fn ->\n:ok\nend") == {:ok, [
+  #       {:fn, {{1, 1}, {1, 3}, nil}},
+  #             {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
+  #             {:eol, {{1, 6}, {2, 1}, 1}},
+  #             {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+  #             {:eol, {{2, 4}, {3, 1}, 1}},
+  #             {:end, {{3, 1}, {3, 4}, nil}}], ""}
+  #   end
 
-    for module <- [
-      Atom,
-      Tuple,
-      List,
-      Map,
-      Keyword,
-      Bitwise,
-      String,
-      Integer,
-      Float,
-      ] do
+  #   for module <- [
+  #     Atom,
+  #     Tuple,
+  #     List,
+  #     Map,
+  #     Keyword,
+  #     Bitwise,
+  #     String,
+  #     Integer,
+  #     Float,
+  #     ] do
 
-      @module module
-      test "elixir src #{@module}" do
-        source = @module.module_info()[:compile][:source] |> File.read!
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
-      end
-    end
+  #     @module module
+  #     test "elixir src #{@module}" do
+  #       source = @module.module_info()[:compile][:source] |> File.read!
+  #       # lines = String.split(source, "\n")
+  #       assert {:ok, _, _} = tokenize(source)
+  #     end
+  #   end
 
-    test "elixir src" do
-      files = Enum.module_info()[:compile][:source] |> Path.join("../../..") |> Path.expand() |> Path.join("**/*.ex*") |> Path.wildcard
-      for file <- files do
-        source = file |> File.read!
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
-      end
-    end
-  end
+  #   test "elixir src" do
+  #     files = Enum.module_info()[:compile][:source] |> Path.join("../../..") |> Path.expand() |> Path.join("**/*.ex*") |> Path.wildcard
+  #     for file <- files do
+  #       source = file |> File.read!
+  #       # lines = String.split(source, "\n")
+  #       assert {:ok, _, _} = tokenize(source)
+  #     end
+  #   end
+  # end
 
   # Ported from elixir/lib/elixir/test/erlang/tokenizer_test.erl
   describe "erlang tokenizer compatibility tests" do

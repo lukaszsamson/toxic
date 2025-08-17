@@ -220,6 +220,12 @@ defmodule Toxic.Driver do
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
         case token do
+          {:., _} = dot_token ->
+            # Carry the dot so the next token sees previous_was_dot/1
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [dot_token]} | modes]}
+            {:ok, dot_token, rest, new_state}
+          _ ->
+            case token do
           {:unary_op, _meta, :not} ->
             trimmed = trim_leading_spaces(rest)
             if begins_with_in_keyword(trimmed) do
@@ -246,17 +252,32 @@ defmodule Toxic.Driver do
             end
             |> case do
               :continue ->
-                case trimmed do
+                 case trimmed do
                   [?/ , ?/ | _] ->
                     # Suppress EOL for comment start
                     next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
                     next(trimmed, next_state)
-                  [head | _] when head in [?- , ?+ , ?@] ->
-                    # Record indentation column for next operator
-                    indent_col = column + count_leading_spaces(rest)
-                    new_modes = [{:bol_indent, indent_col} | modes]
-                    new_state = %{state | line: line, column: column, scope: scope, modes: new_modes}
-                    {:ok, eol_token, rest, new_state}
+                  [head | rest_after_op] when head in [?- , ?+ , ?@] ->
+                    # Check if this is a standalone operator at beginning of line
+                    # If operator is followed by space/tab + non-operator, it's likely standalone
+                    case rest_after_op do
+                      [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      _ ->
+                        # Continuation operator: carry EOL into next operator so tokenizer can fold it
+                        next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                        next(trimmed, next_state)
+                    end
+                  [46 | _] ->
+                    # Suppress EOL before dot; do not emit EOL, continue scanning at dot
+                    next(rest, %{state | line: line, column: column, scope: scope})
                   [93 | _] ->
                     # Closer: emit EOL separately and carry into closer
                     new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
@@ -304,6 +325,165 @@ defmodule Toxic.Driver do
               _ ->
                 {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
             end
+          {:identifier, _, _} = id_token ->
+            # Check for spaces followed by dual_op for op_identifier conversion
+            trimmed = trim_leading_spaces(rest)
+            spaces = length(rest) - length(trimmed)
+            
+            if spaces > 0 do
+              # We have identifier + spaces, check if dual_op follows
+              case trimmed do
+                [sign | next_rest] when sign in [?+, ?-] ->
+                  # Check what follows the dual_op
+                  case next_rest do
+                    [char | _] when char != ?\s and char != ?\t and char != ?\n and char != ?\r and char != sign and char != ?/ and char != ?> and char != ?: ->
+                      # Convert to op_identifier and continue with remaining input
+                      op_id_token = put_elem(id_token, 0, :op_identifier)
+                      new_state = %{state | line: line, column: column + spaces, scope: scope}
+                      {:ok, op_id_token, trimmed, new_state}
+                    _ ->
+                      # Normal identifier - space + dual_op + space/same/special char
+                      {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                  end
+                _ ->
+                  # Not followed by dual_op, return identifier as-is
+                  {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+              end
+            else
+              # No spaces after identifier
+              {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+            end
+          _ ->
+            case state.modes do
+              [{:bol_indent, indent_col} | modes_rest2] ->
+                {:ok, adjust_bol_operator(token, line, indent_col), rest, %{state | line: line, column: column, scope: scope, modes: modes_rest2}}
+              _ ->
+                {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+            end
+          end
+          {:unary_op, _meta, :not} ->
+            trimmed = trim_leading_spaces(rest)
+            if begins_with_in_keyword(trimmed) do
+              # Suppress standalone 'not'; carry it so tokenizer can merge into 'not in'
+              spaces = length(rest) - length(trimmed)
+              next_state = %{state | line: line, column: column + spaces, scope: scope, modes: [{:carry_tokens, [token]} | modes]}
+              next(trimmed, next_state)
+            else
+              {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:await_in_after_eol} | modes]}}
+            end
+          {:eol, _meta} = eol_token ->
+            # Lookahead after EOL
+            trimmed = trim_leading_spaces(rest)
+            # Special case: previous was 'not' and next is keyword 'in' -> suppress EOL and carry it
+            case modes do
+              [{:await_in_after_eol} | modes_rest] ->
+                if begins_with_in_keyword(trimmed) do
+                  next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes_rest]}
+                  next(trimmed, next_state)
+                else
+                  :continue
+                end
+              _ -> :continue
+            end
+            |> case do
+              :continue ->
+                 case trimmed do
+                  [?/ , ?/ | _] ->
+                    # Suppress EOL for comment start
+                    next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    next(trimmed, next_state)
+                  [head | rest_after_op] when head in [?- , ?+ , ?@] ->
+                    # Check if this is a standalone operator at beginning of line
+                    # If operator is followed by space/tab + non-operator, it's likely standalone
+                    case rest_after_op do
+                      [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                        # Standalone operator: emit EOL normally
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      _ ->
+                        # Continuation operator: carry EOL into next operator so tokenizer can fold it
+                        next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                        next(trimmed, next_state)
+                    end
+                  [46 | _] ->
+                    # Suppress EOL before dot; do not emit EOL, continue scanning at dot
+                    next(rest, %{state | line: line, column: column, scope: scope})
+                  [93 | _] ->
+                    # Closer: emit EOL separately and carry into closer
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [125 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [41 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  [62, 62 | _] ->
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
+                    {:ok, eol_token, rest, new_state}
+                  _ ->
+                    # Assoc op '=>' after multiple EOLs
+                    {after_eols, extra_eols} = count_leading_eols(rest)
+                    trimmed2 = trim_leading_spaces(after_eols)
+                    case trimmed2 do
+                      [61, 62 | _] ->
+                        {:eol, {{sl, sc}, _endpos, _}} = eol_token
+                        total = 1 + extra_eols
+                        carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
+                        spaces = length(after_eols) - length(trimmed2)
+                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, modes: [{:carry_tokens, [carry]} | modes]}
+                        next(trimmed2, new_state)
+                      _ ->
+                        # Coalesce EOLs, emit one EOL before next token
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
+                    end
+                end
+              other -> other
+            end
+          {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
+            # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
+            case rest do
+              [?\n | tail] ->
+                new_token = {Kind, {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                new_state = %{state | line: line + 1, column: 1, scope: scope}
+                {:ok, new_token, tail, new_state}
+              [?\r, ?\n | tail] ->
+                new_token = {Kind, {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                new_state = %{state | line: line + 1, column: 1, scope: scope}
+                {:ok, new_token, tail, new_state}
+              _ ->
+                {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+            end
+          {:identifier, _, _} = id_token ->
+            # Space-sensitive op_identifier detection locally (exclude "+: <space>")
+            trimmed = trim_leading_spaces(rest)
+            spaces = length(rest) - length(trimmed)
+            if spaces > 0 do
+              case trimmed do
+                [sign | next_rest] when sign in [?+, ?-] ->
+                  case next_rest do
+                    # Do NOT convert to op_identifier for "+: <space>" (kw_identifier)
+                    [?:, ws | _] when ws in [?\s, ?\t] ->
+                      {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                    [char | _] when char not in [?\n, ?\r, ?\t, ?\s, sign, ?/, ?>, ?:] ->
+                      op_id_token = put_elem(id_token, 0, :op_identifier)
+                      new_state = %{state | line: line, column: column + spaces, scope: scope}
+                      {:ok, op_id_token, trimmed, new_state}
+                    _ ->
+                      {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                  end
+                _ ->
+                  {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+              end
+            else
+              {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+            end
           _ ->
             case state.modes do
               [{:bol_indent, indent_col} | modes_rest2] ->
@@ -320,6 +500,10 @@ defmodule Toxic.Driver do
             # Emit stored token first, then switch to interp mode with start token pending
             new_state = %{state | line: line, column: column, scope: scope, modes: [{:interp_with_pending, interp_kind, token, delim} | modes]}
             {:ok, stored_token, rest, new_state}
+          [stored_token | _] when interp_kind == :call_identifier and delim == :op_kw ->
+            # For "+: <space> <digit>", Elixir does not emit a separate dual_op before kw_identifier.
+            # So we should emit only kw_identifier and drop the carried dual_op token for parity.
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
           [stored_token | _remaining_tokens] when interp_kind == :call_identifier ->
             # Emit stored token (dot) first, then queue identifier token; ensure we don't lose it at EOF
             new_state = %{state | line: line, column: column, scope: scope, modes: [{:call_identifier_pending, token} | modes]}
@@ -379,11 +563,18 @@ defmodule Toxic.Driver do
 
       {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
         # Handle quoted identifier completion - look ahead to determine correct end token type
-        end_token_type = case rest do
-          [?( | _] -> :quoted_paren_identifier_end;
-          [?[ | _] -> :quoted_bracket_identifier_end;
-          _ -> :quoted_identifier_end
-        end
+        trimmed = trim_leading_spaces(rest)
+        end_token_type =
+          cond do
+            match?([?( | _], rest) -> :quoted_paren_identifier_end
+            match?([?[ | _], rest) -> :quoted_bracket_identifier_end
+            match?([sign | _] when sign in [?+, ?-], trimmed) ->
+              case trimmed do
+                [sign, next | _] when next not in [?\n, ?\r, ?\t, ?\s, ?/, ?>, ?:] and next != sign -> :quoted_op_identifier_end
+                _ -> :quoted_identifier_end
+              end
+            true -> :quoted_identifier_end
+          end
         end_token = {end_token_type, meta, delim}
         {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
 
