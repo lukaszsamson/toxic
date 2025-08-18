@@ -365,9 +365,8 @@ defmodule Toxic.Driver do
                         new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
                         next(rest, new_state)
                       [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Use eol_carry to let tokenizer decide
-                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
-                        next(rest, new_state)
+                        # This is a standalone unary operator like "\n-1" - emit separate EOL
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
                         next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
@@ -514,9 +513,8 @@ defmodule Toxic.Driver do
                         new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
                         next(rest, new_state)
                       [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Use eol_carry to let tokenizer decide
-                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
-                        next(rest, new_state)
+                        # This is a standalone unary operator like "\n-1" - emit separate EOL
+                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
                         next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
