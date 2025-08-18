@@ -326,32 +326,40 @@ defmodule Toxic.Driver do
                 {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
             end
           {:identifier, _, _} = id_token ->
-            # Check for spaces followed by dual_op for op_identifier conversion
+            # Check for spaces followed by keywords or operators for special conversions
             trimmed = trim_leading_spaces(rest)
             spaces = length(rest) - length(trimmed)
-            
-            if spaces > 0 do
-              # We have identifier + spaces, check if dual_op follows
-              case trimmed do
-                [sign | next_rest] when sign in [?+, ?-] ->
-                  # Check what follows the dual_op
-                  case next_rest do
-                    [char | _] when char != ?\s and char != ?\t and char != ?\n and char != ?\r and char != sign and char != ?/ and char != ?> and char != ?: ->
-                      # Convert to op_identifier and continue with remaining input
-                      op_id_token = put_elem(id_token, 0, :op_identifier)
-                      new_state = %{state | line: line, column: column + spaces, scope: scope}
-                      {:ok, op_id_token, trimmed, new_state}
-                    _ ->
-                      # Normal identifier - space + dual_op + space/same/special char
-                      {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
-                  end
-                _ ->
-                  # Not followed by dual_op, return identifier as-is
-                  {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
-              end
-            else
-              # No spaces after identifier
-              {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+
+            cond do
+              # Check if followed by "do" keyword - convert to do_identifier
+              begins_with_do_keyword(trimmed) ->
+                do_id_token = put_elem(id_token, 0, :do_identifier)
+                new_state = %{state | line: line, column: column + spaces, scope: scope}
+                {:ok, do_id_token, trimmed, new_state}
+
+              # Check for spaces followed by dual_op for op_identifier conversion
+              spaces > 0 ->
+                case trimmed do
+                  [sign | next_rest] when sign in [?+, ?-] ->
+                    # Check what follows the dual_op
+                    case next_rest do
+                      [char | _] when char != ?\s and char != ?\t and char != ?\n and char != ?\r and char != sign and char != ?/ and char != ?> and char != ?: ->
+                        # Convert to op_identifier and continue with remaining input
+                        op_id_token = put_elem(id_token, 0, :op_identifier)
+                        new_state = %{state | line: line, column: column + spaces, scope: scope}
+                        {:ok, op_id_token, trimmed, new_state}
+                      _ ->
+                        # Normal identifier - space + dual_op + space/same/special char
+                        {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                    end
+                  _ ->
+                    # Not followed by dual_op, return identifier as-is
+                    {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                end
+
+              true ->
+                # No spaces after identifier
+                {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
             end
           _ ->
             case state.modes do
@@ -471,6 +479,7 @@ defmodule Toxic.Driver do
                     # Do NOT convert to op_identifier for "+: <space>" (kw_identifier)
                     [?:, ws | _] when ws in [?\s, ?\t] ->
                       {:ok, id_token, rest, %{state | line: line, column: column, scope: scope}}
+                    # TODO: this may be invalid
                     [char | _] when char not in [?\n, ?\r, ?\t, ?\s, sign, ?/, ?>, ?:] ->
                       op_id_token = put_elem(id_token, 0, :op_identifier)
                       new_state = %{state | line: line, column: column + spaces, scope: scope}
@@ -564,19 +573,32 @@ defmodule Toxic.Driver do
       {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
         # Handle quoted identifier completion - look ahead to determine correct end token type
         trimmed = trim_leading_spaces(rest)
-        end_token_type =
+        {end_token_type, final_rest, final_column, custom_meta} =
           cond do
-            match?([?( | _], rest) -> :quoted_paren_identifier_end
-            match?([?[ | _], rest) -> :quoted_bracket_identifier_end
+            match?([?( | _], rest) ->
+              {:quoted_paren_identifier_end, rest, column, nil}
+            match?([?[ | _], rest) ->
+              {:quoted_bracket_identifier_end, rest, column, nil}
+            begins_with_do_keyword(trimmed) ->
+              # Don't consume the "do" keyword - let normal tokenizer handle it
+              # linear_to_legacy will only generate the do_identifier token
+              {:quoted_do_identifier_end, rest, column, nil}
             match?([sign | _] when sign in [?+, ?-], trimmed) ->
               case trimmed do
-                [sign, next | _] when next not in [?\n, ?\r, ?\t, ?\s, ?/, ?>, ?:] and next != sign -> :quoted_op_identifier_end
-                _ -> :quoted_identifier_end
+                # TODO: this may be invalid
+                [sign, next | _] when next not in [?\n, ?\r, ?\t, ?\s, ?/, ?>, ?:] and next != sign ->
+                  {:quoted_op_identifier_end, rest, column, nil}
+                _ ->
+                  {:quoted_identifier_end, rest, column, nil}
               end
-            true -> :quoted_identifier_end
+            true ->
+              {:quoted_identifier_end, rest, column, nil}
           end
-        end_token = {end_token_type, meta, delim}
-        {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        # Use custom metadata for special cases like quoted_do_identifier_end
+        token_meta = custom_meta || meta
+        end_token = {end_token_type, token_meta, delim}
+
+        {:ok, end_token, final_rest, %{state | line: line, column: final_column, scope: scope, modes: modes_rest}}
 
       # Sigil heredoc completion (with indentation)
       {:done, meta, _binary_part, indent, rest, line, column, scope} when kind == :sigil ->
@@ -700,6 +722,13 @@ defmodule Toxic.Driver do
   end
   defp begins_with_in_keyword([?i, ?n]), do: true
   defp begins_with_in_keyword(_), do: false
+
+  # Detect if the upcoming input starts with the standalone keyword "do"
+  defp begins_with_do_keyword([?d, ?o, next | _]) do
+    not is_identifier_char(next)
+  end
+  defp begins_with_do_keyword([?d, ?o]), do: true
+  defp begins_with_do_keyword(_), do: false
 
   defp is_identifier_char(char) when char in ?a..?z, do: true
   defp is_identifier_char(char) when char in ?A..?Z, do: true

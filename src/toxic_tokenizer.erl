@@ -584,6 +584,24 @@ linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_id
   IdentTok = {identifier, IdentifierMeta, Atom},
   linear_to_legacy(T, [IdentTok | Out], Stack);
 
+%% Close quoted identifier followed by do and emit do_identifier + do
+linear_to_legacy([{quoted_do_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  {Atom, ContentEnd} = case Parts of
+    [{string_fragment, FragMeta, Content}] ->
+      AtomVal = case is_binary(Content) of true -> binary_to_atom(Content, utf8); false -> list_to_atom(Content) end,
+      ContentEndPos = case FragMeta of {{_, _}, {FEL, FEC}, _} -> {FEL, FEC}; _ -> {1, 7} end,
+      {AtomVal, ContentEndPos};
+    [Content] when is_binary(Content) -> {binary_to_atom(Content, utf8), {1, 7}};
+    [Content] when is_list(Content) -> {list_to_atom(Content), {1, 7}};
+    _ -> {'UNKNOWN', {1, 7}}
+  end,
+  ClosingQuotePos = case ContentEnd of {Line, Column} -> {Line, Column + 1}; Other -> Other end,
+  IdentifierMeta = case StartMeta of {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim}; _ -> {{1, 2}, ClosingQuotePos, Delim} end,
+  DoIdTok = {do_identifier, IdentifierMeta, Atom},
+  %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
+  linear_to_legacy(T, [DoIdTok | Out], Stack);
+
 %% Close quoted identifier where next token is dual_op start -> op_identifier
 linear_to_legacy([{quoted_op_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),

@@ -2748,6 +2748,29 @@ defmodule ToxicTest do
     end
   end
 
+  describe "do_identifier" do
+    test "simple" do
+      assert tokenize("try do\n:ok\nend") == {:ok, [{:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+      {:do, {{1, 5}, {1, 7}, nil}},
+      {:eol, {{1, 7}, {2, 1}, 1}},
+      {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+      {:eol, {{2, 4}, {3, 1}, 1}},
+      {:end, {{3, 1}, {3, 4}, nil}}], ""}
+    end
+
+    test "quoted" do
+      assert tokenize("K.'1foo' do\n:ok\nend") == {:ok, [
+      {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+      {:., {{1, 2}, {1, 3}, nil}},
+      {:do_identifier, {{1, 3}, {1, 9}, 39}, :"1foo"},
+      {:do, {{1, 10}, {1, 12}, nil}},
+      {:eol, {{1, 12}, {2, 1}, 1}},
+      {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+      {:eol, {{2, 4}, {3, 1}, 1}},
+      {:end, {{3, 1}, {3, 4}, nil}}], ""}
+    end
+  end
+
   # describe "integration" do
   #   test "module" do
   #     assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},

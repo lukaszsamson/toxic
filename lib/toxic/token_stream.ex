@@ -365,13 +365,13 @@ defmodule Toxic.TokenStream do
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
 
     case Toxic.Driver.next(source_string, driver) do
-      {:ok, token, source_string, driver} ->
+      {:ok, token, new_source_string, new_driver} ->
         processed_token = process_token(token, %__MODULE__{opts: opts})
         if processed_token == nil do
-          # Skip nil tokens (e.g., filtered EOL) and continue
-          fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts)
+          # Skip nil tokens (e.g., filtered EOL) and continue with updated state
+          fetch_tokens_from_driver(new_driver, new_source_string, max_batch, acc, count, opts)
         else
-          fetch_tokens_from_driver(driver, source_string, max_batch, [processed_token | acc], count + 1, opts)
+          fetch_tokens_from_driver(new_driver, new_source_string, max_batch, [processed_token | acc], count + 1, opts)
         end
 
       {:eof, driver} ->
