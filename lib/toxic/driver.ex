@@ -90,7 +90,7 @@ defmodule Toxic.Driver do
     {:ok, {:assoc_op, meta, :"=>"}, tail, %{state | line: state.line + 1, column: 3}}
   end
 
-  
+
   # Emit pending token or coalesced EOL on EOF before falling back to generic eof
   def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
@@ -191,9 +191,77 @@ defmodule Toxic.Driver do
         # Keep coalescing EOLs
         next(rest, %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, new_eol} | modes_rest]})
       {:token, token, rest, line, column, scope} ->
-        # Emit the final EOL first, queue the non-EOL token for next call
-        new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
-        {:ok, eol_token, rest, new_state}
+        # Check if this is a token type that should fold EOLs
+        # Only keyword operators should fold EOLs, all other tokens should emit separate EOLs
+        case token do
+          {:unary_op, _, :not} ->
+            # Check if this 'not' will be merged with 'in' - if so, don't emit separate EOL
+            trimmed = trim_leading_spaces(rest)
+            if begins_with_in_keyword(trimmed) do
+              # Double carry: carry both 'not' and EOL so tokenizer can merge with 'in'
+              # 'not' must be first for tokenizer to find it, EOL second for previous_was_eol
+              carry_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token, eol_token]} | modes_rest]}
+              next(rest, carry_state)
+            else
+              # Standalone 'not', emit separate EOL
+              new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+              {:ok, eol_token, rest, new_state}
+            end
+          {:unary_op, _, _} ->
+            # Other unary_op always emits separate EOL, never folds it
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+            {:ok, eol_token, rest, new_state}
+          # Keyword operators that should fold EOLs
+          {:when_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:and_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:or_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:in_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          # All other binary/ternary operators that should fold EOLs
+          {:comp_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:arrow_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:match_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:in_match_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:type_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:dual_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:mult_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:power_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:concat_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:range_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:xor_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:pipe_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:stab_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:assoc_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:rel_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:ternary_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:capture_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          {:ellipsis_op, _, _} ->
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+          _ ->
+            # All other tokens (int, identifier, literals, etc.) should emit separate EOL
+            new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+            {:ok, eol_token, rest, new_state}
+        end
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
         # Emit EOL first, then handle interp start as a pending token
         new_modes = [{:pending_token, token}, {:interp, interp_kind, interpolation, delim} | modes_rest]
@@ -289,14 +357,17 @@ defmodule Toxic.Driver do
                     # If operator is followed by space/tab + non-operator, it's likely standalone
                     case rest_after_op do
                       [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
                         next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
@@ -306,18 +377,21 @@ defmodule Toxic.Driver do
                     # Suppress EOL before dot; do not emit EOL, continue scanning at dot
                     next(rest, %{state | line: line, column: column, scope: scope})
                   [93 | _] ->
-                    # Closer: emit EOL separately and carry into closer
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [125 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [41 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [62, 62 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   _ ->
                     # Assoc op '=>' after multiple EOLs
                     {after_eols, extra_eols} = count_leading_eols(rest)
@@ -432,14 +506,17 @@ defmodule Toxic.Driver do
                     # If operator is followed by space/tab + non-operator, it's likely standalone
                     case rest_after_op do
                       [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                        # Standalone operator: emit EOL normally
-                        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                        # Use eol_carry to let tokenizer decide
+                        new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                        next(rest, new_state)
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
                         next_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
@@ -449,18 +526,21 @@ defmodule Toxic.Driver do
                     # Suppress EOL before dot; do not emit EOL, continue scanning at dot
                     next(rest, %{state | line: line, column: column, scope: scope})
                   [93 | _] ->
-                    # Closer: emit EOL separately and carry into closer
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [125 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [41 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   [62, 62 | _] ->
-                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [eol_token]} | modes]}
-                    {:ok, eol_token, rest, new_state}
+                    # Use eol_carry to let tokenizer decide
+                    new_state = %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, eol_token} | modes]}
+                    next(rest, new_state)
                   _ ->
                     # Assoc op '=>' after multiple EOLs
                     {after_eols, extra_eols} = count_leading_eols(rest)
@@ -553,7 +633,7 @@ defmodule Toxic.Driver do
 
       {:eof, line, column, scope} ->
         {:eof, %{state | line: line, column: column, scope: scope}}
-        
+
       {:error, reason, rest, _warnings, _tokens} ->
         # Handle tokenizer errors - return error from driver
         {:error, reason, rest, state}
@@ -759,6 +839,7 @@ defmodule Toxic.Driver do
   defp begins_with_do_keyword([?d, ?o]), do: true
   defp begins_with_do_keyword(_), do: false
 
+  # TODO: GTFO whith this hack
   defp is_identifier_char(char) when char in ?a..?z, do: true
   defp is_identifier_char(char) when char in ?A..?Z, do: true
   defp is_identifier_char(char) when char in ?0..?9, do: true

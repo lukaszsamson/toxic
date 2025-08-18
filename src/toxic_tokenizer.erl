@@ -2464,7 +2464,7 @@ normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
             %% Include any horizontal spaces between 'not' and 'in' in the range
             {_, ExtraSpaces} = strip_horizontal_space(Rest, 0),
             EndColumn = Column + Length + ExtraSpaces,
-            Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, nil, Scope),
+            Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, previous_was_eol(T), Scope),
             add_token_with_eol({in_op, Meta, 'not in'}, T);
 
           {_, _} ->
