@@ -11,7 +11,7 @@ defmodule ToxicTest do
     {toxic_tokens_with_ranges, final_stream} = collect_all_tokens(stream, [])
 
     toxic_tokens_with_ranges = if not linearize do
-      dbg(toxic_tokens_with_ranges)
+      dbg(toxic_tokens_with_ranges, limit: :infinity)
       :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges |> Enum.reverse)
     else
       toxic_tokens_with_ranges
@@ -24,7 +24,13 @@ defmodule ToxicTest do
       {:ok, _, _, _, elixir_tokens, _remaining} =
         :elixir_tokenizer.tokenize(charlist, 1, 1, [])
 
-      assert toxic_tokens == Enum.reverse(elixir_tokens)
+      elixir_tokens_reversed = Enum.reverse(elixir_tokens)
+
+      if toxic_tokens != elixir_tokens_reversed do
+        dbg(toxic_tokens, limit: :infinity)
+        dbg(elixir_tokens_reversed, limit: :infinity)
+        flunk "toxic_tokens != elixir_tokens_reversed"
+      end
     end
 
     # Get remaining string from final stream position
@@ -2109,6 +2115,51 @@ defmodule ToxicTest do
     test "else" do
       assert tokenize("else") == {:ok, [{:block_identifier, {{1, 1}, {1, 5}, nil}, :else}], ""}
     end
+
+    test "after eol" do
+      assert tokenize("\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, 1}, :when}], ""}
+      assert tokenize("\r\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, 1}, :when}], ""}
+      assert tokenize("\n\nwhen") == {:ok, [{:when_op, {{3, 1}, {3, 5}, 2}, :when}], ""}
+      assert tokenize("\\\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, nil}, :when}], ""}
+      assert tokenize("\\\r\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, nil}, :when}], ""}
+
+      assert tokenize("\ntrue") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {true, {{2, 1}, {2, 5}, nil}}
+      ], ""}
+      assert tokenize("\nfalse") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {false, {{2, 1}, {2, 6}, nil}}
+      ], ""}
+      assert tokenize("\nnil") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {nil, {{2, 1}, {2, 4}, nil}}
+      ], ""}
+      assert tokenize("\nand") == {:ok, [{:and_op, {{2, 1}, {2, 4}, 1}, :and}], ""}
+      assert tokenize("\nor") == {:ok, [{:or_op, {{2, 1}, {2, 3}, 1}, :or}], ""}
+      assert tokenize("\nnot") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {:unary_op, {{2, 1}, {2, 4}, 1}, :not}
+      ], ""}
+      assert tokenize("\nin") == {:ok, [{:in_op, {{2, 1}, {2, 3}, 1}, :"in"}], ""}
+      assert tokenize("\nnot in") == {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, :"not in"}], ""}
+      assert tokenize("\ncatch") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {:block_identifier, {{2, 1}, {2, 6}, nil}, :catch}
+      ], ""}
+      assert tokenize("\nrescue") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {:block_identifier, {{2, 1}, {2, 7}, nil}, :rescue}
+      ], ""}
+      assert tokenize("\nafter") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {:block_identifier, {{2, 1}, {2, 6}, nil}, :after}
+      ], ""}
+      assert tokenize("\nelse") == {:ok, [
+        {:eol, {{1, 1}, {2, 1}, 1}},
+        {:block_identifier, {{2, 1}, {2, 5}, nil}, :else}
+      ], ""}
+    end
   end
 
   describe "sigil" do
@@ -2903,6 +2954,36 @@ defmodule ToxicTest do
         {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
         {:atom, {{1, 6}, {1, 10}, _}, :bar}
       ], tokens)
+    end
+
+    test "typespec when on next line folds EOL" do
+      code = """
+      @spec foo() :: true
+      when limit: :infinity
+      def foo(), do: true
+      """
+
+      {:ok, toks, ""} = tokenize(code)
+      legacy = :toxic_tokenizer.ranges_to_legacy(toks)
+      # Ensure there is no standalone EOL token before when_op
+      idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
+      prev = Enum.at(legacy, idx - 1)
+      refute match?({:eol, _}, prev)
+      assert match?({:when_op, {2, 1, 1}, :when}, Enum.at(legacy, idx))
+    end
+
+    test "typespec when with leading spaces folds EOL" do
+      code = """
+      @spec foo() :: true
+          when limit: :infinity
+      def foo(), do: true
+      """
+
+      {:ok, toks, ""} = tokenize(code)
+      legacy = :toxic_tokenizer.ranges_to_legacy(toks)
+      idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
+      prev = Enum.at(legacy, idx - 1)
+      refute match?({:eol, _}, prev)
     end
 
     test "scientific" do
