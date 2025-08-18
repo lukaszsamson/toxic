@@ -56,13 +56,13 @@ defmodule Toxic.Driver do
   def next([?,, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:',', meta}
-    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | [:normal | modes_rest]]}
     {:ok, token, tail, new_state}
   end
   def next([?,, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:',', meta}
-    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | [:normal | modes_rest]]}
     {:ok, token, tail, new_state}
   end
 
@@ -70,13 +70,13 @@ defmodule Toxic.Driver do
   def next([?;, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:';', meta}
-    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | [:normal | modes_rest]]}
     {:ok, token, tail, new_state}
   end
   def next([?;, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:';', meta}
-    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | modes_rest]}
+    new_state = %{state | line: state.line + 1, column: 1, modes: [{:carry_tokens, [token]} | [:normal | modes_rest]]}
     {:ok, token, tail, new_state}
   end
 
