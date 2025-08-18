@@ -187,6 +187,14 @@ defmodule Toxic.Driver do
     end
   end
 
+  # If we are inside an interpolation (i.e., :normal stacked over {:interp,...})
+  # and the next char is '}', emit end_interpolation and return to interp mode.
+  def next([?} | rest], %__MODULE__{modes: [:normal, {:interp, kind, interpolation, delim} | modes_rest]} = state) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
+    new_state = %{state | column: state.column + 1, modes: [{:interp, kind, interpolation, delim} | modes_rest]}
+    {:ok, {:end_interpolation, meta, kind}, rest, new_state}
+  end
+
   def next(string, %__MODULE__{modes: [:normal | _] = modes} = state) when is_list(string) do
     # TODO: eliminate tokens
     # Handle escaped newlines at the driver level to avoid emitting EOL tokens
@@ -522,12 +530,14 @@ defmodule Toxic.Driver do
             {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
         end
 
-      {:error, {[line: _, column: error_column], _, _}, [?} | _] = string, _tokens, _warnings} when length(modes) > 1 ->
-        # Handle empty interpolation case - treat closing } as end_interpolation
-        {:ok, {:end_interpolation, {state.line, error_column, nil}, :string}, tl(string), %{state | modes: tl(modes), column: error_column + 1}}
+      # Let the general clause handle '}' now that we added a fast path above
 
       {:eof, line, column, scope} ->
         {:eof, %{state | line: line, column: column, scope: scope}}
+        
+      {:error, reason, rest, _warnings, _tokens} ->
+        # Handle tokenizer errors - return error from driver
+        {:error, reason, rest, state}
     end
   end
   def next(string, %__MODULE__{modes: [{:interp_with_pending, kind, pending_token, delim} | modes_rest]} = state) do

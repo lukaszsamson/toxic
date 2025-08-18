@@ -2771,55 +2771,64 @@ defmodule ToxicTest do
     end
   end
 
-  # describe "integration" do
-  #   test "module" do
-  #     assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
-  #     {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
-  #     {:do, {{1, 15}, {1, 17}, nil}},
-  #     {:eol, {{1, 17}, {2, 1}, 1}},
-  #     {:end, {{2, 1}, {2, 4}, nil}}], ""}
-  #   end
+  describe "integration" do
+    test "module" do
+      assert tokenize("defmodule Foo do\nend") == {:ok, [{:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
+      {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
+      {:do, {{1, 15}, {1, 17}, nil}},
+      {:eol, {{1, 17}, {2, 1}, 1}},
+      {:end, {{2, 1}, {2, 4}, nil}}], ""}
+    end
 
-  #   test "try" do
-  #     assert tokenize("try do\n:ok\nend") == {:ok, [{:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-  #     {:do, {{1, 5}, {1, 7}, nil}},
-  #     {:eol, {{1, 7}, {2, 1}, 1}},
-  #     {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-  #     {:eol, {{2, 4}, {3, 1}, 1}},
-  #     {:end, {{3, 1}, {3, 4}, nil}}], ""}
-  #   end
+    test "try with rescue" do
+      assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
+        {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+              {:do, {{1, 5}, {1, 7}, nil}},
+              {:eol, {{1, 7}, {2, 1}, 1}},
+              {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+              {:eol, {{2, 4}, {3, 1}, 1}},
+              {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
+              {:eol, {{3, 7}, {4, 1}, 1}},
+              {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
+              {:eol, {{4, 7}, {5, 1}, 1}},
+              {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
+              {:eol, {{5, 6}, {6, 1}, 1}},
+              {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
+              {:eol, {{6, 4}, {7, 1}, 1}},
+              {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
+              {:eol, {{7, 5}, {8, 1}, 1}},
+              {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
+        {:eol, {{8, 4}, {9, 1}, 1}},
+        {:end, {{9, 1}, {9, 4}, nil}}], ""}
+    end
 
-  #   test "try with rescue" do
-  #     assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") == {:ok, [
-  #       {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-  #             {:do, {{1, 5}, {1, 7}, nil}},
-  #             {:eol, {{1, 7}, {2, 1}, 1}},
-  #             {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-  #             {:eol, {{2, 4}, {3, 1}, 1}},
-  #             {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
-  #             {:eol, {{3, 7}, {4, 1}, 1}},
-  #             {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
-  #             {:eol, {{4, 7}, {5, 1}, 1}},
-  #             {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
-  #             {:eol, {{5, 6}, {6, 1}, 1}},
-  #             {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
-  #             {:eol, {{6, 4}, {7, 1}, 1}},
-  #             {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
-  #             {:eol, {{7, 5}, {8, 1}, 1}},
-  #             {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
-  #       {:eol, {{8, 4}, {9, 1}, 1}},
-  #       {:end, {{9, 1}, {9, 4}, nil}}], ""}
-  #   end
+    test "fn" do
+      assert tokenize("fn ->\n:ok\nend") == {:ok, [
+        {:fn, {{1, 1}, {1, 3}, nil}},
+              {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
+              {:eol, {{1, 6}, {2, 1}, 1}},
+              {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+              {:eol, {{2, 4}, {3, 1}, 1}},
+              {:end, {{3, 1}, {3, 4}, nil}}], ""}
+    end
 
-  #   test "fn" do
-  #     assert tokenize("fn ->\n:ok\nend") == {:ok, [
-  #       {:fn, {{1, 1}, {1, 3}, nil}},
-  #             {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
-  #             {:eol, {{1, 6}, {2, 1}, 1}},
-  #             {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-  #             {:eol, {{2, 4}, {3, 1}, 1}},
-  #             {:end, {{3, 1}, {3, 4}, nil}}], ""}
-  #   end
+    test "string interpolation in function with do/end" do
+      # Minimal failing case that reproduces the tokenizer error
+      code = """
+      def keyfind!(list, key, position) when is_integer(position) do
+        :lists.keyfind(key, position + 1, list) ||
+          raise KeyError,
+            key: key,
+            term: list,
+            message:
+              "key \#{inspect(key)} at position \#{inspect(position)} not found in: \#{inspect(list)}"
+      end
+
+      @doc \"\"\"
+      Receives a list of tuples and returns `true` if there is
+      a tuple where the element at `position` in the tuple matches
+      \"\"\"
+      """
 
   #   for module <- [
   #     Atom,
