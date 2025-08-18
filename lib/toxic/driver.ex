@@ -21,6 +21,25 @@ defmodule Toxic.Driver do
     }
   end
 
+  def ensure_state_valid(%__MODULE__{modes: modes} = state) do
+    case modes do
+      [] -> raise ArgumentError, message: "modes is empty"
+      [mode] when mode != :normal -> raise ArgumentError, message: "modes contains invalid top mode #{inspect(mode)}"
+      list when is_list(list) ->
+        if List.last(list) != :normal do
+          raise ArgumentError, message: "modes contains invalid top mode #{inspect(modes)}"
+        end
+    end
+    state
+  end
+
+  def next_with_validation(string, state) do
+    result = next(string, state)
+    state = result |> Tuple.to_list() |> List.last()
+    ensure_state_valid(state)
+    result
+  end
+
   # Handle escaped newline at beginning: skip EOL emission and advance line/column
   def next([?\\, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
     stripped = trim_leading_spaces(tail)
