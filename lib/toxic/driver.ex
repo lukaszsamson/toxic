@@ -405,12 +405,6 @@ defmodule Toxic.Driver do
     end
   end
 
-  # Emit a previously scanned token without consuming input (migrated to deferrals)
-  def next(string, %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) when is_list(string) do
-    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending, 0, nil} | state.deferrals]}
-    next(string, new_state)
-  end
-
   # If we are inside an interpolation (i.e., :normal stacked over {:interp,...})
   # and the next char is '}', emit end_interpolation and return to interp mode.
   def next([?} | rest], %__MODULE__{modes: [:normal, {:interp, kind, interpolation, delim} | modes_rest]} = state) do
