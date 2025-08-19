@@ -606,13 +606,6 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next(string, %__MODULE__{modes: [{:interp_with_pending, kind, pending_token, delim} | modes_rest]} = state) do
-    # Migrate to deferrals: emit pending token, then push interp context
-    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, 0, {:push_interp, kind, [], delim}} | state.deferrals]}
-    # Immediately service deferral (no input consumption), to preserve behavior
-    next(string, new_state)
-  end
-
   def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
     allow_interpol = case {kind, interpolation} do
       {:sigil, {:sigil_info, _sigil_atom, allow?, _delim}} -> allow?
@@ -781,9 +774,6 @@ defmodule Toxic.Driver do
 
   defp trim_leading_spaces([c | rest]) when c in [?\t, ?\s], do: trim_leading_spaces(rest)
   defp trim_leading_spaces(list), do: list
-
-  defp count_leading_spaces([c | rest]) when c in [?\t, ?\s], do: 1 + count_leading_spaces(rest)
-  defp count_leading_spaces(_), do: 0
 
   # Count leading EOL sequences (LF or CRLF)
   defp count_leading_eols([?\r, ?\n | rest]) do
