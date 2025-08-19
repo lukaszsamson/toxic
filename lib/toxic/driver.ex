@@ -351,10 +351,6 @@ defmodule Toxic.Driver do
   def next([], %__MODULE__{deferrals: [{:transform_next, :identifier, id_token} | rest]} = state) do
     {:ok, id_token, [], %{state | deferrals: rest}}
   end
-  # Backward compatibility: if old modes are still present for EOF, handle them
-  def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
-    {:ok, pending, [], %{state | modes: modes_rest}}
-  end
 
   # Support emitting closers at BOL after an EOL token with count>0
 
@@ -631,12 +627,6 @@ defmodule Toxic.Driver do
     # Migrate to deferrals: emit pending token, then push interp context
     new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, 0, {:push_interp, kind, [], delim}} | state.deferrals]}
     # Immediately service deferral (no input consumption), to preserve behavior
-    next(string, new_state)
-  end
-
-  def next(string, %__MODULE__{modes: [{:call_identifier_pending, pending_token} | modes_rest]} = state) do
-    # Migrate to deferrals: emit pending identifier next without consuming input
-    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, 0, nil} | state.deferrals]}
     next(string, new_state)
   end
 
