@@ -359,8 +359,8 @@ defmodule Toxic.Driver do
 
   # Awaiting 'in' after an EOL following 'not' (legacy). Bridge to eol_strategy.
   def next(string, %__MODULE__{modes: [{:await_in_after_eol} | modes_rest]} = state) when is_list(string) do
-    # We don't know the exact last EOL token here; schedule strategy to await 'in'
-    new_state = %{state | modes: modes_rest, deferrals: [{:eol_strategy, %{eol: {:eol, {{state.line, state.column}, {state.line, state.column}, 0}}, await_in?: true}} | state.deferrals]}
+    # Arm strategy to suppress the immediate EOL and look for 'in'
+    new_state = %{state | modes: modes_rest, deferrals: [{:eol_strategy, %{await_in?: true}} | state.deferrals]}
     next(string, new_state)
   end
 
@@ -487,23 +487,15 @@ defmodule Toxic.Driver do
             next_state = %{state | line: line, column: column + spaces, scope: scope, modes: modes, deferrals: [{:pre_carry, [token]} | state.deferrals]}
               next(trimmed, next_state)
             else
-              {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:await_in_after_eol} | modes]}}
+              # Arm eol_strategy to await 'in' after the upcoming EOL
+              new_state = %{state | line: line, column: column, scope: scope, modes: modes, deferrals: [{:eol_strategy, %{await_in?: true}} | state.deferrals]}
+              {:ok, token, rest, new_state}
             end
           {:eol, _meta} = eol_token ->
             # Lookahead after EOL
             trimmed = trim_leading_spaces(rest)
             # Special case: previous was 'not' and next is keyword 'in' -> suppress EOL and carry it
-            case modes do
-              [{:await_in_after_eol} | modes_rest] ->
-                if begins_with_in_keyword(trimmed) do
-                     next_state = %{state | line: line, column: column, scope: scope, modes: modes_rest, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
-                  next(trimmed, next_state)
-                else
-                  :continue
-                end
-              _ -> :continue
-            end
-            |> case do
+            case :continue do
               :continue ->
                  case trimmed do
                   [?/ , ?/ | _] ->
