@@ -39,6 +39,16 @@ defmodule Toxic.Driver do
     state
   end
 
+  # Context helpers
+  defp push_context(%__MODULE__{contexts: contexts} = state, ctx) when is_list(contexts) do
+    %{state | contexts: [ctx | contexts]}
+  end
+
+  defp pop_context(%__MODULE__{contexts: [top | rest]} = state) do
+    {top, %{state | contexts: rest}}
+  end
+  defp pop_context(%__MODULE__{contexts: []}), do: raise(ArgumentError, "contexts is empty")
+
   def next_with_validation(string, state) do
     result = next(string, state)
     state = result |> Tuple.to_list() |> List.last()
@@ -60,7 +70,7 @@ defmodule Toxic.Driver do
     new_state =
       case next_action do
         {:push_interp, kind, interpolation, delim} ->
-          %{state | column: new_column, contexts: [{:interp, kind, interpolation, delim} | state.contexts], deferrals: rest}
+          %{push_context(state, {:interp, kind, interpolation, delim}) | column: new_column, deferrals: rest}
         nil ->
           %{state | column: new_column, deferrals: rest}
       end
@@ -151,8 +161,8 @@ defmodule Toxic.Driver do
                   {:token, token, rest_input, line, column, scope} ->
                     # Pass through token, keep strategy for later
                     {:ok, token, rest_input, %{state | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)]}}
-                  {:switch_to_interp, token, rest_input, line, column, scope, interp_kind, delim, interpolation} ->
-                    {:ok, token, rest_input, %{state | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)], contexts: [{:interp, interp_kind, interpolation, delim} | state.contexts]}}
+          {:switch_to_interp, token, rest_input, line, column, scope, interp_kind, delim, interpolation} ->
+            {:ok, token, rest_input, %{push_context(state, {:interp, interp_kind, interpolation, delim}) | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)]}}
                   {:eof, line, column, scope} ->
                     # Nothing to do; drop strategy at EOF
                     {:eof, %{state | line: line, column: column, scope: scope, deferrals: drop_eol_strategies(rest)}}
@@ -256,13 +266,6 @@ defmodule Toxic.Driver do
         end
       other -> other
     end
-  end
-
-  defp drop_eol_strategies(deferrals) do
-    Enum.reject(deferrals, fn
-      {:eol_strategy, _} -> true
-      _ -> false
-    end)
   end
 
   # Handle escaped newline at beginning: skip EOL emission and advance line/column
@@ -369,7 +372,9 @@ defmodule Toxic.Driver do
             adjusted = adjust_bol_operator(token, line, indent_col)
             {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, contexts: contexts_rest, deferrals: rest_deferrals}}
           {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: [{:interp, interp_kind, interpolation, delim} | contexts_rest]}}
+            # Drop bol_indent and push interp
+            updated = %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: contexts_rest}
+            {:ok, token, rest, push_context(updated, {:interp, interp_kind, interpolation, delim})}
           {:eof, line, column, scope} ->
             {:eof, %{state | line: line, column: column, scope: scope, contexts: contexts_rest, deferrals: rest_deferrals}}
           {:error, reason, rest, _tokens, _warnings} ->
@@ -380,7 +385,8 @@ defmodule Toxic.Driver do
           {:token, token, rest, line, column, scope} ->
             {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
           {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: [{:interp, interp_kind, interpolation, delim} | state.contexts]}}
+            updated = %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}
+            {:ok, token, rest, push_context(updated, {:interp, interp_kind, interpolation, delim})}
           {:eof, line, column, scope} ->
             {:eof, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
           {:error, reason, rest, _tokens, _warnings} ->
@@ -397,7 +403,8 @@ defmodule Toxic.Driver do
         adjusted = adjust_bol_operator(token, line, indent_col)
         {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, contexts: contexts_rest}}
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope, contexts: [{:interp, interp_kind, interpolation, delim} | contexts_rest]}}
+        updated = %{state | line: line, column: column, scope: scope}
+        {:ok, token, rest, push_context(updated, {:interp, interp_kind, interpolation, delim})}
       {:eof, line, column, scope} ->
         {:eof, %{state | line: line, column: column, scope: scope, contexts: contexts_rest}}
       {:error, reason, rest, _tokens, _warnings} ->
@@ -577,7 +584,7 @@ defmodule Toxic.Driver do
               deferrals: [{:emit_next, token, 0, {:push_interp, interp_kind, [], delim}} | state.deferrals]
             }
             {:ok, stored_token, rest, new_state}
-          [stored_token | _] when interp_kind == :call_identifier and delim == :op_kw ->
+          [_stored_token | _] when interp_kind == :call_identifier and delim == :op_kw ->
             # For "+: <space> <digit>", Elixir does not emit a separate dual_op before kw_identifier.
             # So we should emit only kw_identifier and drop the carried dual_op token for parity.
             {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
@@ -592,7 +599,8 @@ defmodule Toxic.Driver do
             {:ok, stored_token, rest, new_state}
           _ ->
             # Normal case - no stored tokens, emit start token immediately
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, contexts: [{:interp, interp_kind, interpolation, delim} | modes]}}
+            updated = %{state | line: line, column: column, scope: scope}
+            {:ok, token, rest, push_context(updated, {:interp, interp_kind, interpolation, delim})}
         end
 
       # Let the general clause handle '}' now that we added a fast path above
@@ -625,7 +633,8 @@ defmodule Toxic.Driver do
         end
 
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
-        {:ok, {:begin_interpolation, meta, kind}, rest, %{state | line: line, column: column, scope: scope, contexts: [:normal | state.contexts]}}
+        updated = %{state | line: line, column: column, scope: scope}
+        {:ok, {:begin_interpolation, meta, kind}, rest, push_context(updated, :normal)}
 
       {:done, meta, _binary_part, indent, rest, line, column, scope} when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type = case kind do
@@ -672,7 +681,7 @@ defmodule Toxic.Driver do
         case collect_sigil_modifiers(rest, line, column) do
           {:none} ->
             {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
-          {:mods, mods_token, rest_after, new_column} ->
+          {:mods, mods_token, _rest_after, new_column} ->
             # Emit end token first, schedule modifiers via deferral (consume characters)
             consume_len = new_column - column
             new_state = %{state |
@@ -692,7 +701,7 @@ defmodule Toxic.Driver do
         case collect_sigil_modifiers(rest, line, column) do
           {:none} ->
             {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
-          {:mods, mods_token, rest_after, new_column} ->
+          {:mods, mods_token, _rest_after, new_column} ->
             consume_len = new_column - column
             new_state = %{state |
               line: line,
@@ -816,7 +825,7 @@ defmodule Toxic.Driver do
   defp is_identifier_char(_), do: false
 
   # Adjust operator column at beginning of line after EOL indentation
-  defp adjust_bol_operator({kind, {{sl, sc}, {el, ec}, extra}, value} = tok, line, indent_col)
+  defp adjust_bol_operator({kind, {{sl, sc}, {_el, ec}, extra}, value} = tok, line, indent_col)
        when kind in [:dual_op, :unary_op, :at_op] do
     if sl == line and sc < indent_col do
       len = ec - sc
@@ -826,4 +835,11 @@ defmodule Toxic.Driver do
     end
   end
   defp adjust_bol_operator(tok, _line, _indent_col), do: tok
+
+  defp drop_eol_strategies(deferrals) do
+    Enum.reject(deferrals, fn
+      {:eol_strategy, _} -> true
+      _ -> false
+    end)
+  end
 end

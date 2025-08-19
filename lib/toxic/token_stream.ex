@@ -343,13 +343,13 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  defp driver_opts(opts) do
-    [
-      unescape: Keyword.get(opts, :unescape, true),
-      error_mode: Keyword.get(opts, :error_mode, :tolerant),
-      error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
-    ]
-  end
+  # defp driver_opts(opts) do
+  #   [
+  #     unescape: Keyword.get(opts, :unescape, true),
+  #     error_mode: Keyword.get(opts, :error_mode, :tolerant),
+  #     error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
+  #   ]
+  # end
 
   defp fetch_tokens_from_driver(stream, max_batch, opts) do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
@@ -365,7 +365,6 @@ defmodule Toxic.TokenStream do
   end
 
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
-
     case Toxic.Driver.next_with_validation(source_string, driver) do
       {:ok, token, new_source_string, new_driver} ->
         processed_token = process_token(token, %__MODULE__{opts: opts})
@@ -382,7 +381,7 @@ defmodule Toxic.TokenStream do
       {:error_token, meta, reason, driver} ->
         error_token = {:error_token, meta, reason}
         fetch_tokens_from_driver(driver, source_string, max_batch, [error_token | acc], count + 1, opts)
-      
+
       {:error, _reason, _string, driver} ->
         # Error from driver - stop fetching tokens
         {Enum.reverse(acc), [], driver, false}
