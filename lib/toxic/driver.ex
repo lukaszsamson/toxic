@@ -478,7 +478,7 @@ defmodule Toxic.Driver do
                  case trimmed do
                   [?/ , ?/ | _] ->
                      # Suppress EOL for comment start
-                      next_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
+                      next_state = %{state | line: line, column: column, scope: scope, contexts: contexts, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
                     next(trimmed, next_state)
           [head | rest_after_op] when head in [?- , ?+ , ?@] ->
                     # Check if this is a standalone operator at beginning of line
@@ -497,7 +497,7 @@ defmodule Toxic.Driver do
                         {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
-                        next_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
+                        next_state = %{state | line: line, column: column, scope: scope, contexts: contexts, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
                         next(trimmed, next_state)
                     end
                   [46 | _] ->
@@ -529,7 +529,7 @@ defmodule Toxic.Driver do
                         total = 1 + extra_eols
                         carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
                         spaces = length(after_eols) - length(trimmed2)
-                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, contexts: modes, deferrals: [{:pre_carry, [carry]} | state.deferrals]}
+                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, contexts: contexts, deferrals: [{:pre_carry, [carry]} | state.deferrals]}
                         next(trimmed2, new_state)
                       _ ->
                          # Coalesce EOLs, emit one EOL before next token
