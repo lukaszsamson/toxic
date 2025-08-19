@@ -29,11 +29,11 @@ defmodule Toxic.Driver do
 
   def ensure_state_valid(%__MODULE__{contexts: contexts} = state) do
     case contexts do
-      [] -> raise ArgumentError, message: "modes is empty"
-      [mode] when mode != :normal -> raise ArgumentError, message: "modes contains invalid top mode #{inspect(mode)}"
+      [] -> raise ArgumentError, message: "contexts is empty"
+      [mode] when mode != :normal -> raise ArgumentError, message: "contexts contains invalid top mode #{inspect(mode)}"
       list when is_list(list) ->
         if List.last(list) != :normal do
-          raise ArgumentError, message: "modes contains invalid top mode #{inspect(contexts)}"
+          raise ArgumentError, message: "contexts contains invalid top entry #{inspect(contexts)}"
         end
     end
     state
