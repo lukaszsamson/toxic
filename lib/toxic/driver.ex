@@ -731,12 +731,6 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next(string, %__MODULE__{modes: [{:sigil_mods_pending, pending_token, len} | modes_rest]} = state) do
-    # Migrate to deferrals: emit pending modifiers after consuming len characters
-    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, len, nil} | state.deferrals]}
-    next(string, new_state)
-  end
-
   defp sigil_from_interp({:sigil_info, sigil_atom, _interpol?, start_delim}), do: {sigil_atom, start_delim}
   defp sigil_from_interp(_), do: {:sigil, nil}
 
