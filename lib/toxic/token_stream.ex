@@ -48,7 +48,7 @@ defmodule Toxic.TokenStream do
   # Default options
   @default_opts [
     unescape: true,
-    max_batch: 256,
+    max_batch: 25600,
     eol_mode: :emit,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer]
@@ -67,9 +67,11 @@ defmodule Toxic.TokenStream do
   @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
     opts = Keyword.merge(@default_opts, opts)
+    driver = Toxic.Driver.new()
+    driver = %{driver | line: line, column: column}
 
     %__MODULE__{
-      driver: Toxic.Driver.new(),
+      driver: driver,
       source: source,
       opts: opts
     }
@@ -254,16 +256,16 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  # @doc """
-  # Get the current absolute position (start of next token).
-  # """
-  # @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
-  # def position(%__MODULE__{driver: driver} = stream) do
-  #   # Extract position from driver record using record macros
-  #   line = toxic_driver(driver, :line)
-  #   column = toxic_driver(driver, :column)
-  #   {{line, column}, stream}
-  # end
+  @doc """
+  Get the current absolute position (start of next token).
+  """
+  @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
+  def position(%__MODULE__{driver: driver} = stream) do
+    # Extract position from driver
+    line = driver.line
+    column = driver.column
+    {{line, column}, stream}
+  end
 
   @doc """
   Convert the stream to an Elixir Stream for enumeration.
