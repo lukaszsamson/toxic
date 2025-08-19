@@ -68,6 +68,22 @@ defmodule Toxic.Driver do
     {:ok, pending_token, remaining, new_state}
   end
 
+  # Transform-next handling: decide identifier kind based on lookahead without consuming input
+  def next(string, %__MODULE__{deferrals: [{:transform_next, :identifier, id_token} | rest]} = state) when is_list(string) do
+    trimmed = trim_leading_spaces(string)
+
+    new_token =
+      cond do
+        begins_with_do_keyword(trimmed) -> put_elem(id_token, 0, :do_identifier)
+        List.starts_with?(trimmed, [?(]) -> put_elem(id_token, 0, :paren_identifier)
+        List.starts_with?(trimmed, [?[ ]) -> put_elem(id_token, 0, :bracket_identifier)
+        is_op_identifier_pattern(trimmed) -> put_elem(id_token, 0, :op_identifier)
+        true -> id_token
+      end
+
+    {:ok, new_token, string, %{state | deferrals: rest}}
+  end
+
   # Handle escaped newline at beginning: skip EOL emission and advance line/column
   def next([?\\, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
     stripped = trim_leading_spaces(tail)
@@ -150,6 +166,10 @@ defmodule Toxic.Driver do
       end
     {:ok, pending, [], new_state}
   end
+  # Flush transform-next on EOF (no lookahead): emit as-is
+  def next([], %__MODULE__{deferrals: [{:transform_next, :identifier, id_token} | rest]} = state) do
+    {:ok, id_token, [], %{state | deferrals: rest}}
+  end
   # Backward compatibility: if old modes are still present for EOF, handle them
   def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
@@ -186,9 +206,6 @@ defmodule Toxic.Driver do
   end
 
   # Support emitting closers at BOL after an EOL token with count>0
-  def next([], %__MODULE__{modes: [{:identifier_pending, id_token} | modes_rest]} = state) do
-    {:ok, id_token, [], %{state | modes: modes_rest}}
-  end
 
   def next([], %__MODULE__{modes: [:normal | _]} = state) do
     {:eof, state}
@@ -258,37 +275,7 @@ defmodule Toxic.Driver do
     next(string, new_state)
   end
 
-  # Handle pending identifier - decide type based on next token
-  def next(string, %__MODULE__{modes: [{:identifier_pending, id_token} | modes_rest]} = state) when is_list(string) do
-    # Inspect string to see what follows without advancing tokenizer position
-    trimmed = trim_leading_spaces(string)
-
-    cond do
-      # Check if followed by "do" keyword - convert to do_identifier
-      begins_with_do_keyword(trimmed) ->
-        do_id_token = put_elem(id_token, 0, :do_identifier)
-        {:ok, do_id_token, string, %{state | modes: modes_rest}}
-
-      # Check if followed by "(" - convert to paren_identifier
-      List.starts_with?(trimmed, [?(]) ->
-        paren_id_token = put_elem(id_token, 0, :paren_identifier)
-        {:ok, paren_id_token, string, %{state | modes: modes_rest}}
-
-      # Check if followed by "[" - convert to bracket_identifier
-      List.starts_with?(trimmed, [?[]) ->
-        bracket_id_token = put_elem(id_token, 0, :bracket_identifier)
-        {:ok, bracket_id_token, string, %{state | modes: modes_rest}}
-
-      # Check for op_identifier pattern: dual_op followed by non-space
-      is_op_identifier_pattern(trimmed) ->
-        op_id_token = put_elem(id_token, 0, :op_identifier)
-        {:ok, op_id_token, string, %{state | modes: modes_rest}}
-
-      # For now, other cases just emit as regular identifier
-      true ->
-        {:ok, id_token, string, %{state | modes: modes_rest}}
-    end
-  end
+  # (identifier_pending removed; all producers migrated to transform_next)
 
   # Coalesce consecutive EOLs and emit exactly one EOL before the next non-EOL token
   def next(string, %__MODULE__{modes: [{:eol_carry, eol_token} | modes_rest]} = state) when is_list(string) do
@@ -305,9 +292,9 @@ defmodule Toxic.Driver do
               line: line,
               column: column,
               scope: scope,
-              modes: [{:identifier_pending, id_token} | modes_rest]
-            } |> dbg
-            next(rest, new_state) |> dbg
+              deferrals: [{:transform_next, :identifier, id_token} | state.deferrals]
+            }
+            next(rest, new_state)
           {:unary_op, _, :not} ->
             # Check if this 'not' will be merged with 'in' - if so, don't emit separate EOL
             trimmed = trim_leading_spaces(rest)
@@ -562,12 +549,12 @@ defmodule Toxic.Driver do
                 {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
             end
           {:identifier, _, _} = id_token ->
-            # Don't emit immediately - carry and call tokenize again to decide identifier type
+            # Don't emit immediately - defer classification via transform-next
             new_state = %{state |
               line: line,
               column: column,
               scope: scope,
-              modes: [{:identifier_pending, id_token} | modes]
+              deferrals: [{:transform_next, :identifier, id_token} | state.deferrals]
             }
             next(rest, new_state)
           _ ->
