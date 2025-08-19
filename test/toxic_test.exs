@@ -3654,4 +3654,55 @@ defmodule ToxicTest do
     # Note: vc_merge_conflict_test is skipped as it tests tokenize_error
     # Note: invalid_sigil_delimiter_test is skipped as it tests tokenize_error
   end
+
+  test "try keyword as do_identifier after newline" do
+    # # Regression test for List.ex tokenization - 'try' should be :do_identifier not :identifier
+
+    # # This works (no spaces between try and do)
+    # assert tokenize("try do\n:ok\nend") == {:ok, [
+    #   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+    #   {:do, {{1, 5}, {1, 7}, nil}},
+    #   {:eol, {{1, 7}, {2, 1}, 1}},
+    #   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+    #   {:eol, {{2, 4}, {3, 1}, 1}},
+    #   {:end, {{3, 1}, {3, 4}, nil}}], ""}
+
+    # # This should also work (spaces between try and do)
+    # assert tokenize("try  do\n:ok\nend") == {:ok, [
+    #   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
+    #   {:do, {{1, 6}, {1, 8}, nil}},
+    #   {:eol, {{1, 8}, {2, 1}, 1}},
+    #   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+    #   {:eol, {{2, 4}, {3, 1}, 1}},
+    #   {:end, {{3, 1}, {3, 4}, nil}}], ""}
+
+    # # This should also work (indented try do on same line)
+    # assert tokenize("  try do\n  :ok\n  end") == {:ok, [
+    #   {:do_identifier, {{1, 3}, {1, 6}, ~c"try"}, :try},
+    #   {:do, {{1, 7}, {1, 9}, nil}},
+    #   {:eol, {{1, 9}, {2, 1}, 1}},
+    #   {:atom, {{2, 3}, {2, 6}, ~c"ok"}, :ok},
+    #   {:eol, {{2, 6}, {3, 1}, 1}},
+    #   {:end, {{3, 3}, {3, 6}, nil}}], ""}
+
+    # The originally failing case from List.ex
+    source = """
+    def example do
+      try do
+        :ok
+      end
+    end
+    """
+
+    {:ok, tokens, _} = tokenize(source)
+    try_token = Enum.find(tokens, fn
+      {:do_identifier, _, ~c"try", :try} -> true
+      {:identifier, _, ~c"try", :try} -> true
+      _ -> false
+    end)
+
+    assert try_token != nil, "Should find a try token"
+    assert match?({:do_identifier, _, ~c"try", :try}, try_token),
+           "try should be :do_identifier, got: #{inspect(try_token)}"
+  end
 end

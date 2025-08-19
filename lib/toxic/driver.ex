@@ -191,30 +191,30 @@ defmodule Toxic.Driver do
 
   # Handle pending identifier - decide type based on next token
   def next(string, %__MODULE__{modes: [{:identifier_pending, id_token} | modes_rest]} = state) when is_list(string) do
-    # Inspect string to see what follows without advancing tokenizer position  
+    # Inspect string to see what follows without advancing tokenizer position
     trimmed = trim_leading_spaces(string)
-    
+
     cond do
       # Check if followed by "do" keyword - convert to do_identifier
       begins_with_do_keyword(trimmed) ->
         do_id_token = put_elem(id_token, 0, :do_identifier)
         {:ok, do_id_token, string, %{state | modes: modes_rest}}
-      
+
       # Check if followed by "(" - convert to paren_identifier
       List.starts_with?(trimmed, [?(]) ->
         paren_id_token = put_elem(id_token, 0, :paren_identifier)
         {:ok, paren_id_token, string, %{state | modes: modes_rest}}
-      
+
       # Check if followed by "[" - convert to bracket_identifier
       List.starts_with?(trimmed, [?[]) ->
         bracket_id_token = put_elem(id_token, 0, :bracket_identifier)
         {:ok, bracket_id_token, string, %{state | modes: modes_rest}}
-      
+
       # Check for op_identifier pattern: dual_op followed by non-space
       is_op_identifier_pattern(trimmed) ->
         op_id_token = put_elem(id_token, 0, :op_identifier)
         {:ok, op_id_token, string, %{state | modes: modes_rest}}
-      
+
       # For now, other cases just emit as regular identifier
       true ->
         {:ok, id_token, string, %{state | modes: modes_rest}}
@@ -228,9 +228,17 @@ defmodule Toxic.Driver do
         # Keep coalescing EOLs
         next(rest, %{state | line: line, column: column, scope: scope, modes: [{:eol_carry, new_eol} | modes_rest]})
       {:token, token, rest, line, column, scope} ->
-        # Check if this is a token type that should fold EOLs
-        # Only keyword operators should fold EOLs, all other tokens should emit separate EOLs
+        # Check if this is a token type that should fold EOLs or needs special handling
         case token do
+          {:identifier, _, _} = id_token ->
+            # Handle identifiers in eol_carry mode: resolve identifier first, then emit EOL
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: [{:identifier_pending, id_token} | modes_rest]
+            } |> dbg
+            next(rest, new_state) |> dbg
           {:unary_op, _, :not} ->
             # Check if this 'not' will be merged with 'in' - if so, don't emit separate EOL
             trimmed = trim_leading_spaces(rest)
@@ -462,10 +470,10 @@ defmodule Toxic.Driver do
             end
           {:identifier, _, _} = id_token ->
             # Don't emit immediately - carry and call tokenize again to decide identifier type
-            new_state = %{state | 
-              line: line, 
-              column: column, 
-              scope: scope, 
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
               modes: [{:identifier_pending, id_token} | modes]
             }
             next(rest, new_state)
@@ -637,18 +645,6 @@ defmodule Toxic.Driver do
     new_state = %{state | modes: modes_rest, column: state.column + len}
     {_consumed, rest} = Enum.split(string, len)
     {:ok, pending_token, rest, new_state}
-  end
-
-  # Helper function to create proper identifier token with multiline support
-  defp check_call_identifier_multiline(line, column, end_line, end_column, info, atom, rest, _scope) do
-    case rest do
-      [?( | _] ->
-        {:paren_identifier, {{line, column}, {end_line, end_column}, info}, atom}
-      [?[ | _] ->
-        {:bracket_identifier, {{line, column}, {end_line, end_column}, info}, atom}
-      _ ->
-        {:identifier, {{line, column}, {end_line, end_column}, info}, atom}
-    end
   end
 
   defp sigil_from_interp({:sigil_info, sigil_atom, _interpol?, start_delim}), do: {sigil_atom, start_delim}
