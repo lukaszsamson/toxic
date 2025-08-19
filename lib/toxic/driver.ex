@@ -3,7 +3,7 @@ defmodule Toxic.Driver do
     line: 1,
     column: 1,
     scope: nil,
-    modes: [:normal],
+    contexts: [:normal],
     # New: prioritized deferral list for delayed emissions
     # Entries: {:emit_next, token, consume_len, after_action | nil}
     #  - consume_len: non-neg integer to consume from input and advance column
@@ -27,13 +27,13 @@ defmodule Toxic.Driver do
     }
   end
 
-  def ensure_state_valid(%__MODULE__{modes: modes} = state) do
-    case modes do
+  def ensure_state_valid(%__MODULE__{contexts: contexts} = state) do
+    case contexts do
       [] -> raise ArgumentError, message: "modes is empty"
       [mode] when mode != :normal -> raise ArgumentError, message: "modes contains invalid top mode #{inspect(mode)}"
       list when is_list(list) ->
         if List.last(list) != :normal do
-          raise ArgumentError, message: "modes contains invalid top mode #{inspect(modes)}"
+          raise ArgumentError, message: "modes contains invalid top mode #{inspect(contexts)}"
         end
     end
     state
@@ -60,7 +60,7 @@ defmodule Toxic.Driver do
     new_state =
       case next_action do
         {:push_interp, kind, interpolation, delim} ->
-          %{state | column: new_column, modes: [{:interp, kind, interpolation, delim} | state.modes], deferrals: rest}
+          %{state | column: new_column, contexts: [{:interp, kind, interpolation, delim} | state.contexts], deferrals: rest}
         nil ->
           %{state | column: new_column, deferrals: rest}
       end
@@ -152,7 +152,7 @@ defmodule Toxic.Driver do
                     # Pass through token, keep strategy for later
                     {:ok, token, rest_input, %{state | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)]}}
                   {:switch_to_interp, token, rest_input, line, column, scope, interp_kind, delim, interpolation} ->
-                    {:ok, token, rest_input, %{state | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)], modes: [{:interp, interp_kind, interpolation, delim} | state.modes]}}
+                    {:ok, token, rest_input, %{state | line: line, column: column, scope: scope, deferrals: [{:eol_strategy, strat} | drop_eol_strategies(rest)], contexts: [{:interp, interp_kind, interpolation, delim} | state.contexts]}}
                   {:eof, line, column, scope} ->
                     # Nothing to do; drop strategy at EOF
                     {:eof, %{state | line: line, column: column, scope: scope, deferrals: drop_eol_strategies(rest)}}
@@ -266,71 +266,71 @@ defmodule Toxic.Driver do
   end
 
   # Handle escaped newline at beginning: skip EOL emission and advance line/column
-  def next([?\\, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?\\, ?\n | tail], %__MODULE__{contexts: [:normal | _]} = state) do
     stripped = trim_leading_spaces(tail)
     new_col = 1 + (length(tail) - length(stripped))
     next(stripped, %{state | line: state.line + 1, column: new_col})
   end
-  def next([?\\, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?\\, ?\r, ?\n | tail], %__MODULE__{contexts: [:normal | _]} = state) do
     stripped = trim_leading_spaces(tail)
     new_col = 1 + (length(tail) - length(stripped))
     next(stripped, %{state | line: state.line + 1, column: new_col})
   end
 
   # Fold ",\n" into a single comma token with extra=1 (no EOL token)
-  def next([?,, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
+  def next([?,, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:',', meta}
     new_state = %{state |
       line: state.line + 1,
       column: 1,
-      modes: [:normal | modes_rest],
+      contexts: [:normal | contexts_rest],
       deferrals: [{:pre_carry, [token]} | state.deferrals]
     }
     {:ok, token, tail, new_state}
   end
-  def next([?,, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
+  def next([?,, ?\r, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:',', meta}
     new_state = %{state |
       line: state.line + 1,
       column: 1,
-      modes: [:normal | modes_rest],
+      contexts: [:normal | contexts_rest],
       deferrals: [{:pre_carry, [token]} | state.deferrals]
     }
     {:ok, token, tail, new_state}
   end
 
   # Fold ";\n" into a single semicolon token with extra=1 (no EOL token)
-  def next([?;, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
+  def next([?;, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:';', meta}
     new_state = %{state |
       line: state.line + 1,
       column: 1,
-      modes: [:normal | modes_rest],
+      contexts: [:normal | contexts_rest],
       deferrals: [{:pre_carry, [token]} | state.deferrals]
     }
     {:ok, token, tail, new_state}
   end
-  def next([?;, ?\r, ?\n | tail], %__MODULE__{modes: [:normal | modes_rest]} = state) do
+  def next([?;, ?\r, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, 1}
     token = {:';', meta}
     new_state = %{state |
       line: state.line + 1,
       column: 1,
-      modes: [:normal | modes_rest],
+      contexts: [:normal | contexts_rest],
       deferrals: [{:pre_carry, [token]} | state.deferrals]
     }
     {:ok, token, tail, new_state}
   end
 
   # Handle "\n=>" and "\r\n=>" by emitting only assoc_op with EOL count and no EOL token
-  def next([?\n, ?=, ?> | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?\n, ?=, ?> | tail], %__MODULE__{contexts: [:normal | _]} = state) do
     meta = {{state.line + 1, 1}, {state.line + 1, 3}, 1}
     {:ok, {:assoc_op, meta, :"=>"}, tail, %{state | line: state.line + 1, column: 3}}
   end
-  def next([?\r, ?\n, ?=, ?> | tail], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([?\r, ?\n, ?=, ?> | tail], %__MODULE__{contexts: [:normal | _]} = state) do
     meta = {{state.line + 1, 1}, {state.line + 1, 3}, 1}
     {:ok, {:assoc_op, meta, :"=>"}, tail, %{state | line: state.line + 1, column: 3}}
   end
@@ -341,7 +341,7 @@ defmodule Toxic.Driver do
     new_state =
       case next_action do
         {:push_interp, kind, interpolation, delim} ->
-          %{state | modes: [{:interp, kind, interpolation, delim} | state.modes], deferrals: rest}
+          %{state | contexts: [{:interp, kind, interpolation, delim} | state.contexts], deferrals: rest}
         nil ->
           %{state | deferrals: rest}
       end
@@ -354,7 +354,7 @@ defmodule Toxic.Driver do
 
   # Support emitting closers at BOL after an EOL token with count>0
 
-  def next([], %__MODULE__{modes: [:normal | _]} = state) do
+  def next([], %__MODULE__{contexts: [:normal | _]} = state) do
     {:eof, state}
   end
   def next([], %__MODULE__{} = state), do: {:eof, state}
@@ -362,25 +362,25 @@ defmodule Toxic.Driver do
   # Apply pre_carry (if present) with BOL indent adjustment
   def next(string, %__MODULE__{deferrals: [{:pre_carry, _} | _]} = state) when is_list(string) do
     {carry, rest_deferrals} = take_pre_carry(state.deferrals)
-    case state.modes do
-      [{:bol_indent, indent_col} | modes_rest] ->
+    case state.contexts do
+      [{:bol_indent, indent_col} | contexts_rest] ->
         case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, carry) do
           {:token, token, rest, line, column, scope} ->
             adjusted = adjust_bol_operator(token, line, indent_col)
-            {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest, deferrals: rest_deferrals}}
+            {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, contexts: contexts_rest, deferrals: rest_deferrals}}
           {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, modes: [{:interp, interp_kind, interpolation, delim} | modes_rest]}}
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: [{:interp, interp_kind, interpolation, delim} | contexts_rest]}}
           {:eof, line, column, scope} ->
-            {:eof, %{state | line: line, column: column, scope: scope, modes: modes_rest, deferrals: rest_deferrals}}
+            {:eof, %{state | line: line, column: column, scope: scope, contexts: contexts_rest, deferrals: rest_deferrals}}
           {:error, reason, rest, _tokens, _warnings} ->
-            {:error, reason, rest, %{state | modes: modes_rest, deferrals: rest_deferrals}}
+            {:error, reason, rest, %{state | contexts: contexts_rest, deferrals: rest_deferrals}}
         end
       _ ->
         case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, carry) do
           {:token, token, rest, line, column, scope} ->
             {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
           {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, modes: [{:interp, interp_kind, interpolation, delim} | state.modes]}}
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: [{:interp, interp_kind, interpolation, delim} | state.contexts]}}
           {:eof, line, column, scope} ->
             {:eof, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
           {:error, reason, rest, _tokens, _warnings} ->
@@ -390,30 +390,30 @@ defmodule Toxic.Driver do
   end
 
   # If we have a recorded beginning-of-line indentation, adjust the first operator token accordingly
-  def next(string, %__MODULE__{modes: [{:bol_indent, indent_col} | modes_rest]} = state) when is_list(string) do
+  def next(string, %__MODULE__{contexts: [{:bol_indent, indent_col} | contexts_rest]} = state) when is_list(string) do
     tokens = []
     case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
       {:token, token, rest, line, column, scope} ->
         adjusted = adjust_bol_operator(token, line, indent_col)
-        {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        {:ok, adjusted, rest, %{state | line: line, column: column, scope: scope, contexts: contexts_rest}}
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-        {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes_rest]}}
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, contexts: [{:interp, interp_kind, interpolation, delim} | contexts_rest]}}
       {:eof, line, column, scope} ->
-        {:eof, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        {:eof, %{state | line: line, column: column, scope: scope, contexts: contexts_rest}}
       {:error, reason, rest, _tokens, _warnings} ->
-        {:error, reason, rest, %{state | modes: modes_rest}}
+        {:error, reason, rest, %{state | contexts: contexts_rest}}
     end
   end
 
   # If we are inside an interpolation (i.e., :normal stacked over {:interp,...})
   # and the next char is '}', emit end_interpolation and return to interp mode.
-  def next([?} | rest], %__MODULE__{modes: [:normal, {:interp, kind, interpolation, delim} | modes_rest]} = state) do
+  def next([?} | rest], %__MODULE__{contexts: [:normal, {:interp, kind, interpolation, delim} | contexts_rest]} = state) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
-    new_state = %{state | column: state.column + 1, modes: [{:interp, kind, interpolation, delim} | modes_rest]}
+    new_state = %{state | column: state.column + 1, contexts: [{:interp, kind, interpolation, delim} | contexts_rest]}
     {:ok, {:end_interpolation, meta, kind}, rest, new_state}
   end
 
-  def next(string, %__MODULE__{modes: [:normal | _] = modes} = state) when is_list(string) do
+  def next(string, %__MODULE__{contexts: [:normal | _] = modes} = state) when is_list(string) do
     # TODO: eliminate tokens
     # Handle escaped newlines at the driver level to avoid emitting EOL tokens
     case string do
@@ -448,18 +448,18 @@ defmodule Toxic.Driver do
         case token do
           {:., _} = dot_token ->
             # Carry the dot so the next token sees previous_was_dot/1
-            new_state = %{state | line: line, column: column, scope: scope, modes: modes, deferrals: [{:pre_carry, [dot_token]} | state.deferrals]}
+            new_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:pre_carry, [dot_token]} | state.deferrals]}
             {:ok, dot_token, rest, new_state}
           {:unary_op, _meta, :not} ->
             trimmed = trim_leading_spaces(rest)
             if begins_with_in_keyword(trimmed) do
             # Suppress standalone 'not'; carry it so tokenizer can merge into 'not in'
             spaces = length(rest) - length(trimmed)
-            next_state = %{state | line: line, column: column + spaces, scope: scope, modes: modes, deferrals: [{:pre_carry, [token]} | state.deferrals]}
+            next_state = %{state | line: line, column: column + spaces, scope: scope, contexts: modes, deferrals: [{:pre_carry, [token]} | state.deferrals]}
               next(trimmed, next_state)
             else
               # Arm eol_strategy to await 'in' after the upcoming EOL
-              new_state = %{state | line: line, column: column, scope: scope, modes: modes, deferrals: [{:eol_strategy, %{await_in?: true}} | state.deferrals]}
+              new_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:eol_strategy, %{await_in?: true}} | state.deferrals]}
               {:ok, token, rest, new_state}
             end
           {:eol, _meta} = eol_token ->
@@ -471,7 +471,7 @@ defmodule Toxic.Driver do
                  case trimmed do
                   [?/ , ?/ | _] ->
                      # Suppress EOL for comment start
-                     next_state = %{state | line: line, column: column, scope: scope, modes: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
+                      next_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
                     next(trimmed, next_state)
           [head | rest_after_op] when head in [?- , ?+ , ?@] ->
                     # Check if this is a standalone operator at beginning of line
@@ -490,7 +490,7 @@ defmodule Toxic.Driver do
                         {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
                       _ ->
                         # Continuation operator: carry EOL into next operator so tokenizer can fold it
-                        next_state = %{state | line: line, column: column, scope: scope, modes: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
+                        next_state = %{state | line: line, column: column, scope: scope, contexts: modes, deferrals: [{:pre_carry, [eol_token]} | state.deferrals]}
                         next(trimmed, next_state)
                     end
                   [46 | _] ->
@@ -522,7 +522,7 @@ defmodule Toxic.Driver do
                         total = 1 + extra_eols
                         carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
                         spaces = length(after_eols) - length(trimmed2)
-                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, modes: modes, deferrals: [{:pre_carry, [carry]} | state.deferrals]}
+                        new_state = %{state | line: line + extra_eols, column: 1 + spaces, scope: scope, contexts: modes, deferrals: [{:pre_carry, [carry]} | state.deferrals]}
                         next(trimmed2, new_state)
                       _ ->
                          # Coalesce EOLs, emit one EOL before next token
@@ -556,9 +556,9 @@ defmodule Toxic.Driver do
             }
             next(rest, new_state)
           _ ->
-            case state.modes do
-              [{:bol_indent, indent_col} | modes_rest2] ->
-                {:ok, adjust_bol_operator(token, line, indent_col), rest, %{state | line: line, column: column, scope: scope, modes: modes_rest2}}
+            case state.contexts do
+              [{:bol_indent, indent_col} | contexts_rest2] ->
+                {:ok, adjust_bol_operator(token, line, indent_col), rest, %{state | line: line, column: column, scope: scope, contexts: contexts_rest2}}
               _ ->
                 {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
             end
@@ -573,7 +573,7 @@ defmodule Toxic.Driver do
               line: line,
               column: column,
               scope: scope,
-              modes: modes,
+              contexts: modes,
               deferrals: [{:emit_next, token, 0, {:push_interp, interp_kind, [], delim}} | state.deferrals]
             }
             {:ok, stored_token, rest, new_state}
@@ -592,7 +592,7 @@ defmodule Toxic.Driver do
             {:ok, stored_token, rest, new_state}
           _ ->
             # Normal case - no stored tokens, emit start token immediately
-            {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: [{:interp, interp_kind, interpolation, delim} | modes]}}
+            {:ok, token, rest, %{state | line: line, column: column, scope: scope, contexts: [{:interp, interp_kind, interpolation, delim} | modes]}}
         end
 
       # Let the general clause handle '}' now that we added a fast path above
@@ -606,7 +606,7 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
+  def next(string, %__MODULE__{contexts: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
     allow_interpol = case {kind, interpolation} do
       {:sigil, {:sigil_info, _sigil_atom, allow?, _delim}} -> allow?
       _ -> true
@@ -625,14 +625,14 @@ defmodule Toxic.Driver do
         end
 
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
-        {:ok, {:begin_interpolation, meta, kind}, rest, %{state | line: line, column: column, scope: scope, modes: [:normal | state.modes]}}
+        {:ok, {:begin_interpolation, meta, kind}, rest, %{state | line: line, column: column, scope: scope, contexts: [:normal | state.contexts]}}
 
       {:done, meta, _binary_part, indent, rest, line, column, scope} when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type = case kind do
           :list_heredoc -> :list_heredoc_end
           :bin_heredoc -> :bin_heredoc_end
         end
-        {:ok, {end_token_type, meta, delim, indent}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+        {:ok, {end_token_type, meta, delim, indent}, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
 
 
       {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
@@ -663,7 +663,7 @@ defmodule Toxic.Driver do
         token_meta = custom_meta || meta
         end_token = {end_token_type, token_meta, delim}
 
-        {:ok, end_token, final_rest, %{state | line: line, column: final_column, scope: scope, modes: modes_rest}}
+        {:ok, end_token, final_rest, %{state | line: line, column: final_column, scope: scope, contexts: modes_rest}}
 
       # Sigil heredoc completion (with indentation)
       {:done, meta, _binary_part, indent, rest, line, column, scope} when kind == :sigil ->
@@ -671,7 +671,7 @@ defmodule Toxic.Driver do
         end_token = {:sigil_end, meta, sigil_atom, start_delim, indent}
         case collect_sigil_modifiers(rest, line, column) do
           {:none} ->
-            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
           {:mods, mods_token, rest_after, new_column} ->
             # Emit end token first, schedule modifiers via deferral (consume characters)
             consume_len = new_column - column
@@ -679,7 +679,7 @@ defmodule Toxic.Driver do
               line: line,
               column: column,
               scope: scope,
-              modes: modes_rest,
+              contexts: modes_rest,
               deferrals: [{:emit_next, mods_token, consume_len, nil} | state.deferrals]
             }
             {:ok, end_token, rest, new_state}
@@ -691,14 +691,14 @@ defmodule Toxic.Driver do
         end_token = {:sigil_end, meta, sigil_atom, start_delim, nil}
         case collect_sigil_modifiers(rest, line, column) do
           {:none} ->
-            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+            {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
           {:mods, mods_token, rest_after, new_column} ->
             consume_len = new_column - column
             new_state = %{state |
               line: line,
               column: column,
               scope: scope,
-              modes: modes_rest,
+              contexts: modes_rest,
               deferrals: [{:emit_next, mods_token, consume_len, nil} | state.deferrals]
             }
             {:ok, end_token, rest, new_state}
@@ -714,7 +714,7 @@ defmodule Toxic.Driver do
               scope(existing_atoms_only: true) -> :kw_identifier_safe_end
               _ -> :kw_identifier_unsafe_end
             end
-            {:ok, {end_token_type, adj_meta, delim}, [ws | tail], %{state | line: line, column: column + 1, scope: scope, modes: modes_rest}};
+            {:ok, {end_token_type, adj_meta, delim}, [ws | tail], %{state | line: line, column: column + 1, scope: scope, contexts: modes_rest}};
           _ ->
             end_token_type = case kind do
               :charlist -> :list_string_end
@@ -722,12 +722,12 @@ defmodule Toxic.Driver do
               :atom_unsafe -> :atom_unsafe_end
               _ -> :bin_string_end
             end
-            {:ok, {end_token_type, meta, delim}, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
+            {:ok, {end_token_type, meta, delim}, rest, %{state | line: line, column: column, scope: scope, contexts: modes_rest}}
         end
 
       {:error, reason} ->
         # Handle errors from interpolation extraction
-        {:error, reason, string, %{state | modes: modes_rest}}
+        {:error, reason, string, %{state | contexts: modes_rest}}
     end
   end
 
