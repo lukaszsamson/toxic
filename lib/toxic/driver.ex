@@ -278,15 +278,16 @@ defmodule Toxic.Driver do
                   {:token, token, rest_input, line, column, scope} ->
                     case token do
                       {:identifier, _, _} = id_token ->
+                        # Emit the coalesced EOL first, then transform/emit the identifier next
                         new_state = %{
                           state
                           | line: line,
                             column: column,
                             scope: scope,
-                            deferrals: [{:transform_next, :identifier, id_token} | rest]
+                            deferrals: [{:transform_next, :identifier, id_token} | drop_eol_strategies(rest)]
                         }
 
-                        next(rest_input, new_state)
+                        {:ok, eol_token, rest_input, new_state}
 
                       {:unary_op, _, :not} ->
                         # If next after spaces is 'in', carry both 'not' and EOL so tokenizer can merge
