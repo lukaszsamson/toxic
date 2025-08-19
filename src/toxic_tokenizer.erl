@@ -5,8 +5,8 @@
 -module(toxic_tokenizer).
 -include("toxic.hrl").
 -include("toxic_tokenizer.hrl").
--export([invalid_do_error/1, terminator/1, unescape_tokens/4]).
--export([ranges_to_legacy/1, collapse_linear_ranges/1, tokenize/1, tokenize_single/5]).
+-export([invalid_do_error/1, terminator/1, unescape_tokens/4, tokenize/1]).
+-export([ranges_to_legacy/1, collapse_linear_ranges/1, tokenize_single/5]).
 %% Driver API exports
 -export([current_terminators/1, peek_missing_terminator/1]).
 
@@ -113,37 +113,6 @@
 -define(xor_op3(T1, T2, T3),
   T1 =:= $^, T2 =:= $^, T3 =:= $^).
 
-tokenize_single(String, Line, Column, #toxic_tokenizer{} = Scope) ->
-  tokenize_single(String, Line, Column, Scope, []);
-
-tokenize_single(String, Line, Column, Opts) ->
-  IdentifierTokenizer = toxic_config:identifier_tokenizer(),
-
-  Scope =
-    lists:foldl(fun
-      ({check_terminators, false}, Acc) ->
-        Acc#toxic_tokenizer{cursor_completion=false, terminators=none};
-      ({check_terminators, {cursor, Terminators}}, Acc) ->
-        Acc#toxic_tokenizer{cursor_completion=prune_and_cursor, terminators=Terminators};
-      ({existing_atoms_only, ExistingAtomsOnly}, Acc) when is_boolean(ExistingAtomsOnly) ->
-        Acc#toxic_tokenizer{existing_atoms_only=ExistingAtomsOnly};
-      ({static_atoms_encoder, StaticAtomsEncoder}, Acc) when is_function(StaticAtomsEncoder) ->
-        Acc#toxic_tokenizer{static_atoms_encoder=StaticAtomsEncoder};
-      ({preserve_comments, PreserveComments}, Acc) when is_function(PreserveComments) ->
-        Acc#toxic_tokenizer{preserve_comments=PreserveComments};
-      ({unescape, Unescape}, Acc) when is_boolean(Unescape) ->
-        Acc#toxic_tokenizer{unescape=Unescape};
-      ({indentation, Indentation}, Acc) when Indentation >= 0 ->
-        Acc#toxic_tokenizer{column=Indentation+1};
-      (_, Acc) ->
-        Acc
-    end, #toxic_tokenizer{identifier_tokenizer=IdentifierTokenizer}, Opts),
-
-  tokenize_single(String, Line, Column, Scope, []).
-
-tokenize_single(String, Line, Opts) ->
-  tokenize_single(String, Line, 1, Opts).
-
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
   ranges_to_legacy_after_collapse(TokensWithRanges, false, []).
@@ -207,44 +176,6 @@ ranges_convert_part({StartMeta, EndMeta, Tokens}) when is_tuple(StartMeta), is_t
   {legacy_meta(StartMeta), legacy_meta(EndMeta), ranges_to_legacy(Tokens)};
 ranges_convert_part(Other) ->
   Other.
-
-contains_linear_markers(Tokens) ->
-  lists:any(fun
-    ({Type, _, _}) -> is_linear_type(Type);
-    ({Type, _, _, _}) -> is_linear_type(Type);
-    ({Type, _, _, _, _}) -> is_linear_type(Type);
-    ({Type, _, _, _, _, _}) -> is_linear_type(Type);
-    (_) -> false
-  end, Tokens).
-
-is_linear_type(bin_string_start) -> true;
-is_linear_type(bin_string_end) -> true;
-is_linear_type(list_string_start) -> true;
-is_linear_type(list_string_end) -> true;
-is_linear_type(bin_heredoc_start) -> true;
-is_linear_type(bin_heredoc_end) -> true;
-is_linear_type(list_heredoc_start) -> true;
-is_linear_type(list_heredoc_end) -> true;
-is_linear_type(sigil_start) -> true;
-is_linear_type(sigil_end) -> true;
-is_linear_type(sigil_modifiers) -> true;
-is_linear_type(kw_identifier_unsafe_start) -> true;
-is_linear_type(kw_identifier_unsafe_end) -> true;
-is_linear_type(kw_identifier_safe_start) -> true;
-is_linear_type(kw_identifier_safe_end) -> true;
-is_linear_type(quoted_identifier_start) -> true;
-is_linear_type(quoted_identifier_end) -> true;
-is_linear_type(quoted_op_identifier_end) -> true;
-is_linear_type(quoted_paren_identifier_end) -> true;
-is_linear_type(quoted_bracket_identifier_end) -> true;
-is_linear_type(atom_unsafe_start) -> true;
-is_linear_type(atom_unsafe_end) -> true;
-is_linear_type(atom_safe_start) -> true;
-is_linear_type(atom_safe_end) -> true;
-is_linear_type(begin_interpolation) -> true;
-is_linear_type(end_interpolation) -> true;
-is_linear_type(string_fragment) -> true;
-is_linear_type(_) -> false.
 
 %% Public: collapse linear markers back to legacy container tokens, preserving range metas
 collapse_linear_ranges(Tokens) -> linear_to_legacy(Tokens).
@@ -511,7 +442,7 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
   linear_to_legacy(T, [Tok | Out], Stack);
 
 %% Close quoted identifier and emit identifier token
-linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   % Convert parts to identifier atom and extract content end position  
   {Atom, ContentEnd} = case Parts of
@@ -585,7 +516,7 @@ linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_id
   linear_to_legacy(T, [IdentTok | Out], Stack);
 
 %% Close quoted identifier followed by do and emit do_identifier + do
-linear_to_legacy([{quoted_do_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -603,7 +534,7 @@ linear_to_legacy([{quoted_do_identifier_end, EndMeta, Delim} | T], Out, [{quoted
   linear_to_legacy(T, [DoIdTok | Out], Stack);
 
 %% Close quoted identifier where next token is dual_op start -> op_identifier
-linear_to_legacy([{quoted_op_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -630,7 +561,7 @@ linear_to_legacy([{quoted_op_identifier_end, EndMeta, Delim} | T], Out, [{quoted
   linear_to_legacy(T, [IdentTok | Out], Stack);
 
 %% Close quoted paren identifier and emit paren_identifier token
-linear_to_legacy([{quoted_paren_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   % Convert parts to identifier atom and extract content end position  
   {Atom, ContentEnd} = case Parts of
@@ -704,7 +635,7 @@ linear_to_legacy([{quoted_paren_identifier_end, EndMeta, Delim} | T], Out, [{quo
   linear_to_legacy(T, [IdentTok | Out], Stack);
 
 %% Close quoted bracket identifier and emit bracket_identifier token
-linear_to_legacy([{quoted_bracket_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   % Convert parts to identifier atom and extract content end position  
   {Atom, ContentEnd} = case Parts of
@@ -829,7 +760,7 @@ tokenize_single([], EndLine, EndColumn, #toxic_tokenizer{terminators=[{Start, {S
 
 tokenize_single([], Line, Column, #toxic_tokenizer{} = Scope, Tokens) ->
   #toxic_tokenizer{ascii_identifiers_only=Ascii, warnings=Warnings} = Scope,
-  AllWarnings = maybe_unicode_lint_warnings(Ascii, Tokens, Warnings),
+  _AllWarnings = maybe_unicode_lint_warnings(Ascii, Tokens, Warnings),
   % {ok, Line, Column, AllWarnings, Tokens, []};
   yield([], Line, Column + 1, Scope, Tokens);
 
@@ -1362,36 +1293,6 @@ tokenize_single(String, Line, Column, OriginalScope, Tokens) ->
       error(Reason, String, OriginalScope, Tokens)
   end.
 
-%% Linearization helpers
-linearize_parts(Parts, Scope, Kind) when is_list(Parts) ->
-  lists:flatten([linearize_part(Part, Scope, Kind) || Part <- Parts]);
-linearize_parts(Part, Scope, Kind) -> linearize_parts([Part], Scope, Kind).
-
-linearize_part({{SL, SC}, _End, _} = _StartMeta, _Scope, _Kind) when is_integer(SL), is_integer(SC) ->
-  []; %% handled as interpolation tuple below (guard to keep dialyzer happy)
-linearize_part({StartMeta, EndMeta, Tokens}, Scope, Kind) when is_list(Tokens) ->
-  [
-    {begin_interpolation, StartMeta, map_kind(Kind)}
-    | linearize_inner_tokens(Tokens, Scope)
-  ] ++ [{end_interpolation, EndMeta, map_kind(Kind)}];
-linearize_part(Bin, _Scope, _Kind) when is_binary(Bin); is_list(Bin) ->
-  %% Convert literal to binary, compute a best-effort fragment meta by length. The tokenizer callers
-  %% already pass precise metas for begin/end markers; consumers can rely on them for structure.
-  %% Here we emit without a precise fragment meta if unavailable, using nil extra meta for now.
-  %% TODO: Track precise fragment spans during extraction to fill Meta.
-  Binary = case is_binary(Bin) of true -> Bin; false -> toxic_utils:characters_to_binary(Bin) end,
-  [{string_fragment, {undefined, undefined, nil}, Binary}].
-
-linearize_inner_tokens(Tokens, _Scope) -> Tokens.
-
-map_kind(string) -> string;
-map_kind(charlist) -> charlist;
-map_kind(heredoc) -> heredoc;
-map_kind(sigil) -> sigil;
-map_kind(kw_identifier) -> kw_identifier;
-map_kind(atom) -> atom;
-map_kind(_) -> string.
-
 previous_was_dot([{'.', _} | _]) -> true;
 previous_was_dot(_) -> false.
 
@@ -1470,31 +1371,6 @@ handle_heredocs(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
     error ->
       Message = "heredoc allows only whitespace characters followed by a new line after opening ",
       error({?LOC(Line, Column + 3), io_lib:format(Message, []), [H, H, H]}, [H, H, H] ++ T, Scope, _Tokens)
-  end;
-handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
-  % Non-linearized mode - keep old implementation for compatibility
-  case extract_heredoc_with_interpolation(Line, Column, Scope, true, T, H) of
-    {ok, NewLine, NewColumn, Parts, Rest, NewScope} ->
-        StartTok = case H of
-          $' -> {list_heredoc_start, make_meta(Line, Column, Line, Column + 3, nil, NewScope), "'''"};
-          _  -> {bin_heredoc_start,  make_meta(Line, Column, Line, Column + 3, nil, NewScope), "\"\"\""}
-        end,
-        case unescape_tokens(Parts, Line, Column, NewScope) of
-          {ok, Unescaped} ->
-            Seq = linearize_parts(Unescaped, NewScope, heredoc),
-            EndTok = case H of
-              $' -> {list_heredoc_end, make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope), "'''", NewColumn - 4};
-              _  -> {bin_heredoc_end,  make_meta(NewLine, NewColumn - 3, NewLine, NewColumn, nil, NewScope),  "\"\"\"", NewColumn - 4}
-            end,
-            Emitted = [StartTok] ++ Seq ++ [EndTok],
-            NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-            yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-          {error, Reason} ->
-            error(Reason, Rest, NewScope, Tokens)
-        end;
-
-    {error, Reason} ->
-      error(Reason, [H, H, H] ++ T, Scope, Tokens)
   end.
 
 handle_strings(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
@@ -1636,14 +1512,6 @@ eol(_Line, _Column, [{Kind, {{Line, Column}, {_EndLine, _EndColumn}, Count}} | T
 eol(Line, Column, Tokens, Scope) ->
   [{eol, make_meta(Line, Column, Line + 1, 1, 1, Scope)} | Tokens].
 
-is_unnecessary_quote([Part], Scope) when is_list(Part) ->
-  case (Scope#toxic_tokenizer.identifier_tokenizer):tokenize(Part) of
-    {identifier, _, [], _, true, Special} -> not lists:member(at, Special);
-    _ -> false
-  end;
-is_unnecessary_quote(_Parts, _Scope) ->
-  false.
-
 unsafe_to_atom(Part, Line, Column, #toxic_tokenizer{}) when
     is_binary(Part) andalso byte_size(Part) > 255;
     is_list(Part) andalso length(Part) > 255 ->
@@ -1736,29 +1604,7 @@ unsafe_to_atom(List, Line, Column, #toxic_tokenizer{}) when is_list(List) ->
       end
   end.
 
-collect_modifiers([H | T], Buffer) when ?is_downcase(H) or ?is_upcase(H) or ?is_digit(H) ->
-  collect_modifiers(T, [H | Buffer]);
-
-collect_modifiers(Rest, Buffer) ->
-  {Rest, lists:reverse(Buffer)}.
-
 %% Heredocs
-
-extract_heredoc_with_interpolation(Line, Column, Scope, Interpol, T, H) ->
-  case extract_heredoc_header(T) of
-    {ok, Headerless} ->
-      %% We prepend a new line so we can transparently remove
-      %% spaces later. This new line is removed by calling "tl"
-      %% in the final heredoc body three lines below.
-      % TODO: yield(begin_heredoc) instead of calling extract
-      % TODO: push interpolation mode onto the stack
-      % TODO: push opening terminator onto the stack
-      error;
-
-    error ->
-      Message = "heredoc allows only whitespace characters followed by a new line after opening ",
-      {error, {?LOC(Line, Column + 3), io_lib:format(Message, []), [H, H, H]}}
-  end.
 
 extract_heredoc_header("\r\n" ++ Rest) ->
   {ok, Rest};
@@ -1768,49 +1614,6 @@ extract_heredoc_header([H | T]) when ?is_horizontal_space(H) ->
   extract_heredoc_header(T);
 extract_heredoc_header(_) ->
   error.
-
-extract_heredoc_indent(Part, {Warned, Line}, Indent) when is_list(Part) ->
-  extract_heredoc_indent(Part, [], Warned, Line, Indent);
-extract_heredoc_indent({_, {EndLine, _, _}, _} = Part, {Warned, _Line}, _Indent) ->
-  {Part, {Warned, EndLine}}.
-
-extract_heredoc_indent([$\n | Rest], Acc, Warned, Line, Indent) ->
-  {Trimmed, ShouldWarn} = trim_space(Rest, Indent),
-  Warn = if ShouldWarn, not Warned -> Line + 1; true -> Warned end,
-  extract_heredoc_indent(Trimmed, [$\n | Acc], Warn, Line + 1, Indent);
-extract_heredoc_indent([Head | Rest], Acc, Warned, Line, Indent) ->
-  extract_heredoc_indent(Rest, [Head | Acc], Warned, Line, Indent);
-extract_heredoc_indent([], Acc, Warned, Line, _Indent) ->
-  {lists:reverse(Acc), {Warned, Line}}.
-
-trim_space(Rest, 0) -> {Rest, false};
-trim_space([$\r, $\n | _] = Rest, _) -> {Rest, false};
-trim_space([$\n | _] = Rest, _) -> {Rest, false};
-trim_space([H | T], Spaces) when ?is_horizontal_space(H) -> trim_space(T, Spaces - 1);
-trim_space([], _Spaces) -> {[], false};
-trim_space(Rest, _Spaces) -> {Rest, true}.
-
-maybe_heredoc_warn(false, _Column, Scope, _Marker) ->
-  Scope;
-maybe_heredoc_warn(Line, Column, Scope, Marker) ->
-  Msg = io_lib:format("outdented heredoc line. The contents inside the heredoc should be indented "
-                      "at the same level as the closing ~ts. The following is forbidden:~n~n"
-                      "    def text do~n"
-                      "      \"\"\"~n"
-                      "    contents~n"
-                      "      \"\"\"~n"
-                      "    end~n~n"
-                      "Instead make sure the contents are indented as much as the heredoc closing:~n~n"
-                      "    def text do~n"
-                      "      \"\"\"~n"
-                      "      contents~n"
-                      "      \"\"\"~n"
-                      "    end~n~n"
-                      "The current heredoc line is indented too little", [[Marker, Marker, Marker]]),
-
-  prepend_warning(Line, Column, Msg, Scope).
-
-extract_heredoc_head([[$\n|H]|T]) -> [H|T].
 
 unescape_tokens(Tokens, Line, Column, #toxic_tokenizer{unescape=true}) ->
   case toxic_interpolation:unescape_tokens(Tokens) of
@@ -2060,14 +1863,6 @@ check_call_identifier(Line, Column, Info, Atom, Length, [$[ | _], Scope) ->
 check_call_identifier(Line, Column, Info, Atom, Length, _Rest, Scope) ->
   {identifier, make_meta_len(Line, Column, Length, Info, Scope), Atom}.
 
-%% Version for multi-line tokens with explicit end position
-check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, [$( | _], Scope) ->
-  {paren_identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom};
-check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, [$[ | _], Scope) ->
-  {bracket_identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom};
-check_call_identifier_multiline(Line, Column, EndLine, EndColumn, Info, Atom, _Rest, Scope) ->
-  {identifier, make_meta(Line, Column, EndLine, EndColumn, Info, Scope), Atom}.
-
 add_token_with_eol({unary_op, _, _} = Left, T) -> [Left | T];
 add_token_with_eol(Left, [{eol, _} | T]) -> [Left | T];
 add_token_with_eol(Left, T) -> [Left | T].
@@ -2076,24 +1871,6 @@ previous_was_eol([{',', {_, _, Count}} | _]) when Count > 0 -> Count;
 previous_was_eol([{';', {_, _, Count}} | _]) when Count > 0 -> Count;
 previous_was_eol([{eol, {_, _, Count}} | _]) when Count > 0 -> Count;
 previous_was_eol(_) -> nil.
-
-%% Error handling
-
-interpolation_error(Reason, Rest, Scope, Tokens, Extension, Args, Line, Column, Opening, Closing) ->
-  error(interpolation_format(Reason, Extension, Args, Line, Column, Opening, Closing), Rest, Scope, Tokens).
-
-interpolation_format({string, EndLine, EndColumn, Message, Token}, Extension, Args, Line, Column, Opening, Closing) ->
-  Meta = [
-    {opening_delimiter, list_to_atom(Opening)},
-    {expected_delimiter, list_to_atom(Closing)},
-    {line, Line},
-    {column, Column},
-    {end_line, EndLine},
-    {end_column, EndColumn}
-  ],
-  {Meta, [Message, io_lib:format(Extension, Args)], Token};
-interpolation_format({_, _, _} = Reason, _Extension, _Args, _Line, _Column, _Opening, _Closing) ->
-  Reason.
 
 %% Terminators
 
@@ -2256,12 +2033,6 @@ missing_terminator_hint(Start, End, #toxic_tokenizer{mismatch_hints=Hints}) ->
     false ->
       ""
   end.
-
-string_type($") -> bin_string;
-string_type($') -> list_string.
-
-heredoc_type($") -> bin_heredoc;
-heredoc_type($') -> list_heredoc.
 
 sigil_terminator($() -> $);
 sigil_terminator($[) -> $];
@@ -2434,7 +2205,7 @@ tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Col
       error({make_meta_len(Line, Column - 1 - length(SigilName), 1, nil, Scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens)
   end;
 
-tokenize_sigil_contents([H | T] = Original, [S | _] = SigilName, Line, Column, Scope, Tokens)
+tokenize_sigil_contents([H | T] = _Original, [S | _] = SigilName, Line, Column, Scope, _Tokens)
     when ?is_sigil(H) ->
   % Streaming mode for regular sigils
   SigilAtom = list_to_atom("sigil_" ++ SigilName),
@@ -2456,24 +2227,6 @@ tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Toke
 tokenize_sigil_contents([], _SigilName, Line, Column, Scope, Tokens) ->
   % Yield directly - incomplete sigil case
   yield([], Line, Column, Scope, Tokens).
-
-add_sigil_token(SigilName, Line, Column, NewLine, NewColumn, Parts, Rest, Scope, Tokens, Indentation, Delimiter) ->
-  TokenColumn = Column - 1 - length(SigilName),
-  MaybeEncoded = case SigilName of
-    % Single-letter sigils present no risk of atom exhaustion (limited possibilities)
-    [_Char] -> {ok, list_to_atom("sigil_" ++ SigilName)};
-    _ -> unsafe_to_atom("sigil_" ++ SigilName, Line, TokenColumn, Scope)
-  end,
-  case MaybeEncoded of
-    {ok, Atom} ->
-      {Final, Modifiers} = collect_modifiers(Rest, []),
-      NewColumnWithModifiers = NewColumn + length(Modifiers),
-      Token = {sigil, make_meta(Line, TokenColumn, NewLine, NewColumnWithModifiers, nil, Scope), Atom, Parts, Modifiers, Indentation, Delimiter},
-      yield(Final, NewLine, NewColumnWithModifiers, Scope, [Token | Tokens]);
-
-    {error, Reason} ->
-      error(Reason, Rest, Scope, Tokens)
-  end.
 
 %% Fail early on invalid do syntax. For example, after
 %% most keywords, after comma and so on.
@@ -2773,21 +2526,6 @@ prune_tokens([_ | Tokens], Opener) ->
 prune_tokens([], _Opener) ->
   [].
 
-
-%% Helper: if top of tail is interp and next char is '}', emit end_interpolation
-maybe_end_interpolation([$} | Rest], Line, Column, Scope, Driver, [{interp, Kind, Quote} | Tail]) ->
-  EndMeta = make_meta_len(Line, Column, 1, nil, Scope),
-  Tok = {end_interpolation, EndMeta, Kind},
-  Drv1 = Driver#toxic_driver{
-    source = unicode:characters_to_binary(Rest),
-    line = Line,
-    column = Column + 1,
-    mode = [{interp, Kind, Quote} | Tail],
-    eof = (Rest =:= [])
-  },
-  {ok, Tok, Drv1};
-maybe_end_interpolation(_, _Line, _Column, _Scope, _Driver, _Tail) -> continue.
-
 %% =============================================================================
 %% Helper functions for tokenize_single
 %% =============================================================================
@@ -2800,98 +2538,9 @@ yield(Rest, NewLine, NewColumn, NewScope, [Token | _Tokens]) ->
 yield(_Rest, NewLine, NewColumn, NewScope, []) ->
   {eof, NewLine, NewColumn, NewScope}.
 
-%% @doc Return error from tokenize_single  
-%% Converts error cases to {error, Meta, Reason, Rest, NewLine, NewColumn, NewScope}
-%% Note: Line/Column need to be passed in since tokenizer record doesn't track position
-error_single(Reason, Rest, Line, Column, Scope, _Tokens) ->
-  {error, Reason, [], Rest, Line, Column, Scope}.
-
 %% =============================================================================
 %% Driver input consumption helpers
 %% =============================================================================
-
-%% @doc Non-consuming peek of N codepoints from driver source
-%% @spec driver_peek(Driver, N) -> {ListOfCPs, Driver}
-driver_peek(#toxic_driver{source = Source} = Driver, N) when is_binary(Source) ->
-  case unicode:characters_to_list(Source) of
-    {error, _, _} -> {[], Driver};
-    {incomplete, _, _} -> {[], Driver};
-    Charlist when is_list(Charlist) ->
-      Peeked = lists:sublist(Charlist, N),
-      {Peeked, Driver}
-  end;
-driver_peek(#toxic_driver{source = SourceFun} = Driver, N) when is_function(SourceFun) ->
-  % For function sources, we'd need to fetch and cache
-  % For now, return empty 
-  {[], Driver}.
-
-%% @doc Consume N codepoints from driver source  
-%% @spec driver_take(Driver, N) -> {TakenCPs, Driver1}
-driver_take(#toxic_driver{source = Source} = Driver, N) when is_binary(Source) ->
-  case unicode:characters_to_list(Source) of
-    {error, _, _} -> {[], Driver};
-    {incomplete, _, _} -> {[], Driver};
-    Charlist when is_list(Charlist) ->
-      {Taken, Rest} = case length(Charlist) of
-        Len when Len =< N -> {Charlist, []};
-        _ -> {lists:sublist(Charlist, N), lists:nthtail(N, Charlist)}
-      end,
-      % Update position tracking
-      {NewLine, NewColumn, ConsumedBytes} = update_position_from_chars(Taken, Driver#toxic_driver.line, Driver#toxic_driver.column),
-      UpdatedDriver = Driver#toxic_driver{
-        source = case Rest of
-          [] -> <<>>;
-          _ -> unicode:characters_to_binary(Rest)
-        end,
-        offset = Driver#toxic_driver.offset + ConsumedBytes,
-        line = NewLine,
-        column = NewColumn
-      },
-      {Taken, UpdatedDriver}
-  end;
-driver_take(#toxic_driver{source = SourceFun} = Driver, N) when is_function(SourceFun) ->
-  % For function sources, more complex logic needed
-  {[], Driver}.
-
-%% @doc Consume codepoints while predicate is true
-%% @spec driver_take_while(Driver, Pred) -> {TakenCPs, Driver1}
-driver_take_while(#toxic_driver{source = Source} = Driver, Pred) when is_binary(Source) ->
-  case unicode:characters_to_list(Source) of
-    {error, _, _} -> {[], Driver};
-    {incomplete, _, _} -> {[], Driver};
-    Charlist when is_list(Charlist) ->
-      {Taken, Rest} = lists:splitwith(Pred, Charlist),
-      % Update position tracking
-      {NewLine, NewColumn, ConsumedBytes} = update_position_from_chars(Taken, Driver#toxic_driver.line, Driver#toxic_driver.column),
-      UpdatedDriver = Driver#toxic_driver{
-        source = case Rest of
-          [] -> <<>>;
-          _ -> unicode:characters_to_binary(Rest)
-        end,
-        offset = Driver#toxic_driver.offset + ConsumedBytes,
-        line = NewLine,
-        column = NewColumn
-      },
-      {Taken, UpdatedDriver}
-  end;
-driver_take_while(#toxic_driver{source = SourceFun} = Driver, Pred) when is_function(SourceFun) ->
-  % For function sources, more complex logic needed
-  {[], Driver}.
-
-%% @doc Helper to update line/column position from consumed characters
-%% Returns {NewLine, NewColumn, ConsumedBytes}
-update_position_from_chars(Chars, Line, Column) ->
-  update_position_from_chars(Chars, Line, Column, 0).
-
-update_position_from_chars([], Line, Column, Bytes) ->
-  {Line, Column, Bytes};
-update_position_from_chars([$\n | Rest], Line, _Column, Bytes) ->
-  update_position_from_chars(Rest, Line + 1, 1, Bytes + 1);
-update_position_from_chars([$\r | Rest], Line, Column, Bytes) ->
-  % Handle \r but don't advance line (will be handled by \n if CRLF)
-  update_position_from_chars(Rest, Line, Column, Bytes + 1);
-update_position_from_chars([_Char | Rest], Line, Column, Bytes) ->
-  update_position_from_chars(Rest, Line, Column + 1, Bytes + 1).
 
 %% @doc Get current terminator stack from driver
 %% @spec current_terminators(Driver) -> [{Start, Meta, Indent}]
