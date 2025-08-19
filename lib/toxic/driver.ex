@@ -355,10 +355,7 @@ defmodule Toxic.Driver do
   def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
   end
-  def next([], %__MODULE__{modes: [{:eol_carry, eol_token} | modes_rest]} = state) do
-    # Bridge legacy mode to new deferral on EOF
-    {:ok, eol_token, [], %{state | modes: modes_rest}}
-  end
+  # eol_carry EOF flush is no longer needed; handled by eol_strategy EOF deferral flush
 
   # Awaiting 'in' after an EOL following 'not' (legacy). Bridge to eol_strategy.
   def next(string, %__MODULE__{modes: [{:await_in_after_eol} | modes_rest]} = state) when is_list(string) do
@@ -373,12 +370,12 @@ defmodule Toxic.Driver do
     {:eof, state}
   end
   def next([], %__MODULE__{} = state), do: {:eof, state}
-  
+
   # Generic compatibility: convert a top carry_tokens into pre_carry for next call
   def next(string, %__MODULE__{modes: [{:carry_tokens, carry} | modes_rest]} = state) when is_list(string) do
     next(string, %{state | modes: modes_rest, deferrals: [{:pre_carry, carry} | state.deferrals]})
   end
-  
+
   # Apply pre_carry (if present) with BOL indent adjustment
   def next(string, %__MODULE__{deferrals: [{:pre_carry, _} | _]} = state) when is_list(string) do
     {carry, rest_deferrals} = take_pre_carry(state.deferrals)
@@ -434,15 +431,6 @@ defmodule Toxic.Driver do
   # Emit a previously scanned token without consuming input (migrated to deferrals)
   def next(string, %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) when is_list(string) do
     new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending, 0, nil} | state.deferrals]}
-    next(string, new_state)
-  end
-
-  # (identifier_pending removed; all producers migrated to transform_next)
-
-  # Legacy eol_carry mode bridged to eol_strategy (compat during migration)
-  def next(string, %__MODULE__{modes: [{:eol_carry, eol_token} | modes_rest]} = state) when is_list(string) do
-    # Convert to deferral and strip legacy mode
-    new_state = %{state | modes: modes_rest, deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]}
     next(string, new_state)
   end
 
