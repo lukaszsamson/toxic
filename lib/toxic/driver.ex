@@ -3,7 +3,12 @@ defmodule Toxic.Driver do
     line: 1,
     column: 1,
     scope: nil,
-    modes: [:normal]
+    modes: [:normal],
+    # New: prioritized deferral list for delayed emissions
+    # Entries: {:emit_next, token, consume_len, after_action | nil}
+    #  - consume_len: non-neg integer to consume from input and advance column
+    #  - after_action: {:push_interp, kind, interpolation, delim} | nil
+    deferrals: []
   ]
 
   require Record
@@ -39,6 +44,28 @@ defmodule Toxic.Driver do
     state = result |> Tuple.to_list() |> List.last()
     ensure_state_valid(state)
     result
+  end
+
+  # Unified deferral handling: emit a queued token before consuming input
+  def next(string, %__MODULE__{deferrals: [{:emit_next, pending_token, consume_len, next_action} | rest]} = state) when is_list(string) do
+    {consumed, remaining} =
+      if consume_len > 0 do
+        Enum.split(string, consume_len)
+      else
+        {[], string}
+      end
+
+    new_column = state.column + length(consumed)
+
+    new_state =
+      case next_action do
+        {:push_interp, kind, interpolation, delim} ->
+          %{state | column: new_column, modes: [{:interp, kind, interpolation, delim} | state.modes], deferrals: rest}
+        nil ->
+          %{state | column: new_column, deferrals: rest}
+      end
+
+    {:ok, pending_token, remaining, new_state}
   end
 
   # Handle escaped newline at beginning: skip EOL emission and advance line/column
@@ -92,11 +119,19 @@ defmodule Toxic.Driver do
   end
 
 
-  # Emit pending token or coalesced EOL on EOF before falling back to generic eof
-  def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
-    {:ok, pending, [], %{state | modes: modes_rest}}
+  # Emit pending deferral or coalesced EOL on EOF before falling back to generic eof
+  def next([], %__MODULE__{deferrals: [{:emit_next, pending, _len, next_action} | rest]} = state) do
+    new_state =
+      case next_action do
+        {:push_interp, kind, interpolation, delim} ->
+          %{state | modes: [{:interp, kind, interpolation, delim} | state.modes], deferrals: rest}
+        nil ->
+          %{state | deferrals: rest}
+      end
+    {:ok, pending, [], new_state}
   end
-  def next([], %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) do
+  # Backward compatibility: if old modes are still present for EOF, handle them
+  def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
   end
   def next([], %__MODULE__{modes: [{:eol_carry, eol_token} | modes_rest]} = state) do
@@ -184,9 +219,10 @@ defmodule Toxic.Driver do
     end
   end
 
-  # Emit a previously scanned token without consuming input (input already advanced earlier)
+  # Emit a previously scanned token without consuming input (migrated to deferrals)
   def next(string, %__MODULE__{modes: [{:pending_token, pending} | modes_rest]} = state) when is_list(string) do
-    {:ok, pending, string, %{state | modes: modes_rest}}
+    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending, 0, nil} | state.deferrals]}
+    next(string, new_state)
   end
 
   # Handle pending identifier - decide type based on next token
@@ -248,13 +284,25 @@ defmodule Toxic.Driver do
               carry_state = %{state | line: line, column: column, scope: scope, modes: [{:carry_tokens, [token, eol_token]} | modes_rest]}
               next(rest, carry_state)
             else
-              # Standalone 'not', emit separate EOL
-              new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+              # Standalone 'not', emit separate EOL and defer the unary
+              new_state = %{state |
+                line: line,
+                column: column,
+                scope: scope,
+                modes: modes_rest,
+                deferrals: [{:emit_next, token, 0, nil} | state.deferrals]
+              }
               {:ok, eol_token, rest, new_state}
             end
           {:unary_op, _, _} ->
             # Other unary_op always emits separate EOL, never folds it
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: modes_rest,
+              deferrals: [{:emit_next, token, 0, nil} | state.deferrals]
+            }
             {:ok, eol_token, rest, new_state}
           # Keyword operators that should fold EOLs
           {:when_op, _, _} ->
@@ -304,13 +352,25 @@ defmodule Toxic.Driver do
             {:ok, token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
           _ ->
             # All other tokens (int, identifier, literals, etc.) should emit separate EOL
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:pending_token, token} | modes_rest]}
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: modes_rest,
+              deferrals: [{:emit_next, token, 0, nil} | state.deferrals]
+            }
             {:ok, eol_token, rest, new_state}
         end
       {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
-        # Emit EOL first, then handle interp start as a pending token
-        new_modes = [{:pending_token, token}, {:interp, interp_kind, interpolation, delim} | modes_rest]
-        {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope, modes: new_modes}}
+        # Emit EOL first, then defer interp start token and push interp after
+        new_state = %{state |
+          line: line,
+          column: column,
+          scope: scope,
+          modes: modes_rest,
+          deferrals: [{:emit_next, token, 0, {:push_interp, interp_kind, interpolation, delim}} | state.deferrals]
+        }
+        {:ok, eol_token, rest, new_state}
       {:eof, line, column, scope} ->
         # End of input: emit the coalesced EOL and finish
         {:ok, eol_token, [], %{state | line: line, column: column, scope: scope, modes: modes_rest}}
@@ -490,16 +550,27 @@ defmodule Toxic.Driver do
         # Check if there are stored tokens to emit first (for quoted identifiers and call identifiers)
         case interpolation do
           [stored_token | _remaining_tokens] when interp_kind == :quoted_identifier ->
-            # Emit stored token first, then switch to interp mode with start token pending
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:interp_with_pending, interp_kind, token, delim} | modes]}
+            # Emit stored token first, then use deferral to emit start then push interp
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: modes,
+              deferrals: [{:emit_next, token, 0, {:push_interp, interp_kind, [], delim}} | state.deferrals]
+            }
             {:ok, stored_token, rest, new_state}
           [stored_token | _] when interp_kind == :call_identifier and delim == :op_kw ->
             # For "+: <space> <digit>", Elixir does not emit a separate dual_op before kw_identifier.
             # So we should emit only kw_identifier and drop the carried dual_op token for parity.
             {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
           [stored_token | _remaining_tokens] when interp_kind == :call_identifier ->
-            # Emit stored token (dot) first, then queue identifier token; ensure we don't lose it at EOF
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:call_identifier_pending, token} | modes]}
+            # Emit stored token (dot) first, then use deferral to emit the identifier
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              deferrals: [{:emit_next, token, 0, nil} | state.deferrals]
+            }
             {:ok, stored_token, rest, new_state}
           _ ->
             # Normal case - no stored tokens, emit start token immediately
@@ -518,15 +589,16 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %__MODULE__{modes: [{:interp_with_pending, kind, pending_token, delim} | modes_rest]} = state) do
-    # Emit the pending start token and switch to normal interp mode
-    new_state = %{state | modes: [{:interp, kind, [], delim} | modes_rest]}
-    {:ok, pending_token, string, new_state}
+    # Migrate to deferrals: emit pending token, then push interp context
+    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, 0, {:push_interp, kind, [], delim}} | state.deferrals]}
+    # Immediately service deferral (no input consumption), to preserve behavior
+    next(string, new_state)
   end
 
   def next(string, %__MODULE__{modes: [{:call_identifier_pending, pending_token} | modes_rest]} = state) do
-    # Emit the pending identifier token and return to normal mode
-    new_state = %{state | modes: modes_rest}
-    {:ok, pending_token, string, new_state}
+    # Migrate to deferrals: emit pending identifier next without consuming input
+    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, 0, nil} | state.deferrals]}
+    next(string, new_state)
   end
 
   def next(string, %__MODULE__{modes: [{:interp, kind, interpolation, delim} | modes_rest]} = state) do
@@ -596,8 +668,15 @@ defmodule Toxic.Driver do
           {:none} ->
             {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
           {:mods, mods_token, rest_after, new_column} ->
-            # Emit end token first, queue modifiers for next call
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:sigil_mods_pending, mods_token, new_column - column} | modes_rest]}
+            # Emit end token first, schedule modifiers via deferral (consume characters)
+            consume_len = new_column - column
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: modes_rest,
+              deferrals: [{:emit_next, mods_token, consume_len, nil} | state.deferrals]
+            }
             {:ok, end_token, rest, new_state}
         end
 
@@ -609,7 +688,14 @@ defmodule Toxic.Driver do
           {:none} ->
             {:ok, end_token, rest, %{state | line: line, column: column, scope: scope, modes: modes_rest}}
           {:mods, mods_token, rest_after, new_column} ->
-            new_state = %{state | line: line, column: column, scope: scope, modes: [{:sigil_mods_pending, mods_token, new_column - column} | modes_rest]}
+            consume_len = new_column - column
+            new_state = %{state |
+              line: line,
+              column: column,
+              scope: scope,
+              modes: modes_rest,
+              deferrals: [{:emit_next, mods_token, consume_len, nil} | state.deferrals]
+            }
             {:ok, end_token, rest, new_state}
         end
 
@@ -641,10 +727,9 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %__MODULE__{modes: [{:sigil_mods_pending, pending_token, len} | modes_rest]} = state) do
-    # Emit the pending sigil_modifiers token and consume its characters from input
-    new_state = %{state | modes: modes_rest, column: state.column + len}
-    {_consumed, rest} = Enum.split(string, len)
-    {:ok, pending_token, rest, new_state}
+    # Migrate to deferrals: emit pending modifiers after consuming len characters
+    new_state = %{state | modes: modes_rest, deferrals: [{:emit_next, pending_token, len, nil} | state.deferrals]}
+    next(string, new_state)
   end
 
   defp sigil_from_interp({:sigil_info, sigil_atom, _interpol?, start_delim}), do: {sigil_atom, start_delim}
