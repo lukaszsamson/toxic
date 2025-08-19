@@ -359,11 +359,6 @@ defmodule Toxic.Driver do
   end
   def next([], %__MODULE__{} = state), do: {:eof, state}
 
-  # Generic compatibility: convert a top carry_tokens into pre_carry for next call
-  def next(string, %__MODULE__{modes: [{:carry_tokens, carry} | modes_rest]} = state) when is_list(string) do
-    next(string, %{state | modes: modes_rest, deferrals: [{:pre_carry, carry} | state.deferrals]})
-  end
-
   # Apply pre_carry (if present) with BOL indent adjustment
   def next(string, %__MODULE__{deferrals: [{:pre_carry, _} | _]} = state) when is_list(string) do
     {carry, rest_deferrals} = take_pre_carry(state.deferrals)
@@ -393,12 +388,6 @@ defmodule Toxic.Driver do
         end
     end
   end
-  # Carried EOL with pending BOL indent: convert carry_tokens to pre_carry, then adjust operator
-  def next(string, %__MODULE__{modes: [{:carry_tokens, carry}, {:bol_indent, indent_col} | modes_rest]} = state) when is_list(string) do
-    next(string, %{state | modes: [{:bol_indent, indent_col} | modes_rest], deferrals: [{:pre_carry, carry} | state.deferrals]})
-  end
-
-  # (removed erroneous generic pre_carry handler)
 
   # If we have a recorded beginning-of-line indentation, adjust the first operator token accordingly
   def next(string, %__MODULE__{modes: [{:bol_indent, indent_col} | modes_rest]} = state) when is_list(string) do
