@@ -355,14 +355,6 @@ defmodule Toxic.Driver do
   def next([], %__MODULE__{modes: [{:call_identifier_pending, pending} | modes_rest]} = state) do
     {:ok, pending, [], %{state | modes: modes_rest}}
   end
-  # eol_carry EOF flush is no longer needed; handled by eol_strategy EOF deferral flush
-
-  # Awaiting 'in' after an EOL following 'not' (legacy). Bridge to eol_strategy.
-  def next(string, %__MODULE__{modes: [{:await_in_after_eol} | modes_rest]} = state) when is_list(string) do
-    # Arm strategy to suppress the immediate EOL and look for 'in'
-    new_state = %{state | modes: modes_rest, deferrals: [{:eol_strategy, %{await_in?: true}} | state.deferrals]}
-    next(string, new_state)
-  end
 
   # Support emitting closers at BOL after an EOL token with count>0
 
