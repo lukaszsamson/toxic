@@ -797,9 +797,6 @@ combine_range_meta(Start, End) -> {Start, End}.
 tokenize_single(_, Line, Column, #toxic_tokenizer{} = Scope, Tokens) when not is_integer(Line) orelse not is_integer(Column) ->
   error({badarg, tokenize, line_or_column_not_integer, {Line, Column, Scope, Tokens}});
 
-tokenize_single(String, Line, Column, #toxic_tokenizer{mode = [{interp, string, _Delim, _Frames} | _]} = Scope, Tokens) when is_list(String) ->
-  toxic_interpolation:extract_single(String, Line, Column, Scope, Tokens);
-
 tokenize_single([$}], Line, Column, #toxic_tokenizer{mode = [normal | _]} = Scope, Tokens) ->
   % TODO: yield(end_interpolation)
   % TODO: pop normal mode from the stack
@@ -1507,83 +1504,7 @@ handle_strings(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
     $" -> {bin_string_start, string}
   end,
   StartTok = {StartType, make_meta(Line, Column - 1, Line, Column, nil, Scope), H},
-  {switch_to_interp, StartTok, T, Line, Column, Scope, Kind, H, []};
-handle_strings(T, Line, Column, H, Scope, Tokens) ->
-  % Non-linearized mode uses the old implementation to emit container tokens
-  handle_strings_old(T, Line, Column, H, Scope, Tokens).
-
-handle_strings_old(T, Line, Column, H, Scope, Tokens) ->
-  % Keep old implementation for fallback
-  case toxic_interpolation:extract(Line, Column, Scope, true, T, H) of
-    {error, Reason} ->
-      interpolation_error(Reason, [H | T], Scope, Tokens, " (for string starting at line ~B)", [Line], Line, Column-1, [H], [H]);
-
-    {NewLine, NewColumn, Parts, [$: | Rest], InterScope} when ?is_space(hd(Rest)) ->
-      NewScope = case is_unnecessary_quote(Parts, InterScope) of
-        true ->
-          WarnMsg = io_lib:format(
-            "found quoted keyword \"~ts\" but the quotes are not required. "
-            "Note that keywords are always atoms, even when quoted. "
-            "Similar to atoms, keywords made exclusively of ASCII "
-            "letters, numbers, and underscores and not beginning with a "
-            "number do not require quotes",
-            [hd(Parts)]
-          ),
-          prepend_warning(Line, Column-1, WarnMsg, InterScope);
-
-        false when H =:= $' ->
-          WarnMsg = "single quotes around keywords are deprecated. Use double quotes instead",
-          prepend_warning(Line, Column-1, WarnMsg, InterScope);
-
-        false ->
-          InterScope
-      end,
-
-      %% Linearized quoted keyword identifier
-      case unescape_tokens(Parts, Line, Column, NewScope) of
-        {ok, Unescaped} ->
-          StartTok = {kw_identifier_unsafe_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H},
-          Seq = linearize_parts(Unescaped, NewScope, kw_identifier),
-          EndTok = {kw_identifier_unsafe_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H},
-          ColonTok = {':', make_meta(NewLine, NewColumn, NewLine, NewColumn + 1, nil, NewScope)},
-          Emitted = [StartTok] ++ Seq ++ [EndTok, ColonTok],
-          NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-          yield(Rest, NewLine, NewColumn + 1, NewScope, NewTokens);
-        {error, Reason} ->
-          error(Reason, Rest, NewScope, Tokens)
-      end;
-
-    {NewLine, NewColumn, Parts, Rest, InterScope} ->
-      NewScope =
-        case H of
-          $' ->
-            Message = "using single-quoted strings to represent charlists is deprecated.\n"
-              "Use ~c\"\" if you indeed want a charlist or use \"\" instead.\n"
-              "You may run \"mix format --migrate\" to change all single-quoted\n"
-              "strings to use the ~c sigil and fix this warning.",
-            prepend_warning(Line, Column-1, Message, InterScope);
-
-          _ ->
-            InterScope
-        end,
-
-        %% Linearized normal string/charlist with proper unescape error handling
-        case unescape_tokens(Parts, Line, Column, NewScope) of
-          {ok, Unescaped} ->
-            {StartTok, EndTok} = case H of
-              $' -> { {list_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
-                    , {list_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} };
-              _  -> { {bin_string_start, make_meta(Line, Column - 1, Line, Column, nil, NewScope), H}
-                    , {bin_string_end, make_meta(NewLine, NewColumn - 1, NewLine, NewColumn, nil, NewScope), H} }
-            end,
-            Seq = linearize_parts(Unescaped, NewScope, (if H =:= $' -> charlist; true -> string end)),
-            Emitted = [StartTok] ++ Seq ++ [EndTok],
-            NewTokens = lists:foldl(fun(E, Acc) -> [E | Acc] end, Tokens, lists:reverse(Emitted)),
-            yield(Rest, NewLine, NewColumn, NewScope, NewTokens);
-          {error, Reason} ->
-            error(Reason, Rest, NewScope, Tokens)
-        end
-  end.
+  {switch_to_interp, StartTok, T, Line, Column, Scope, Kind, H, []}.
 
 handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
   Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
@@ -1832,24 +1753,7 @@ extract_heredoc_with_interpolation(Line, Column, Scope, Interpol, T, H) ->
       % TODO: yield(begin_heredoc) instead of calling extract
       % TODO: push interpolation mode onto the stack
       % TODO: push opening terminator onto the stack
-
-      case toxic_interpolation:extract(Line, Column, Scope, Interpol, [$\n|Headerless], [H,H,H]) of
-        {NewLine, NewColumn, Parts0, Rest, InterScope} ->
-          Indent = NewColumn - 4,
-          Fun = fun(Part, Acc) -> extract_heredoc_indent(Part, Acc, Indent) end,
-          {Parts1, {ShouldWarn, _}} = lists:mapfoldl(Fun, {false, Line}, Parts0),
-          Parts2 = extract_heredoc_head(Parts1),
-          NewScope = maybe_heredoc_warn(ShouldWarn, Column, InterScope, H),
-          try
-            {ok, NewLine, NewColumn, tokens_to_binary(Parts2), Rest, NewScope}
-          catch
-            error:#{'__struct__' := 'Elixir.UnicodeConversionError', message := Message} ->
-              {error, interpolation_format(Message, " (for heredoc starting at line ~B)", [Line], Line, Column, [H, H, H], [H, H, H])}
-          end;
-
-        {error, Reason} ->
-          {error, interpolation_format(Reason, " (for heredoc starting at line ~B)", [Line], Line, Column, [H, H, H], [H, H, H])}
-      end;
+      error;
 
     error ->
       Message = "heredoc allows only whitespace characters followed by a new line after opening ",
