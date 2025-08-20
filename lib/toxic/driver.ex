@@ -284,7 +284,9 @@ defmodule Toxic.Driver do
                           | line: line,
                             column: column,
                             scope: scope,
-                            deferrals: [{:transform_next, :identifier, id_token} | drop_eol_strategies(rest)]
+                            deferrals: [
+                              {:transform_next, :identifier, id_token} | drop_eol_strategies(rest)
+                            ]
                         }
 
                         {:ok, eol_token, rest_input, new_state}
@@ -708,6 +710,21 @@ defmodule Toxic.Driver do
     {:ok, id_token, [], %{state | deferrals: rest}}
   end
 
+  # Flush pre_carry on EOF: let tokenizer produce the carried token(s)
+  def next([], %__MODULE__{deferrals: [{:pre_carry, _} | _]} = state) do
+    {carry, rest_deferrals} = take_pre_carry(state.deferrals)
+    case :toxic_tokenizer.tokenize_single([], state.line, state.column, state.scope, carry) do
+      {:token, token, rest, line, column, scope} ->
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
+      {:switch_to_interp, token, rest, line, column, scope, interp_kind, delim, interpolation} ->
+        {:ok, token, rest, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals, contexts: [{:interp, interp_kind, interpolation, delim} | state.contexts]}}
+      {:eof, line, column, scope} ->
+        {:eof, %{state | line: line, column: column, scope: scope, deferrals: rest_deferrals}}
+      {:error, reason, rest, _tokens, _warnings} ->
+        {:error, reason, rest, %{state | deferrals: rest_deferrals}}
+    end
+  end
+
   # Support emitting closers at BOL after an EOL token with count>0
 
   def next([], %__MODULE__{contexts: [:normal | _]} = state) do
@@ -905,7 +922,7 @@ defmodule Toxic.Driver do
             trimmed = trim_leading_spaces(rest)
 
             if begins_with_in_keyword(trimmed) do
-              # Suppress standalone 'not'; carry it so tokenizer can merge into 'not in'
+              # Carry 'not' so tokenizer can merge into 'not in' without emitting EOL
               spaces = length(rest) - length(trimmed)
 
               next_state = %{
@@ -919,172 +936,181 @@ defmodule Toxic.Driver do
 
               next(trimmed, next_state)
             else
-              # Emit 'not' token normally, but mark to await 'in' after any subsequent EOL
-              new_state = %{
-                state
-                | line: line,
-                  column: column,
-                  scope: scope,
-                  contexts: contexts,
-                  deferrals: [{:eol_strategy, %{eol: nil, await_in?: true}} | state.deferrals]
-              }
-
-              {:ok, token, rest, new_state}
+              # Emit 'not' as a standalone unary operator; tokenizer will handle following EOL correctly
+              {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
             end
 
           {:eol, _meta} = eol_token ->
             # Lookahead after EOL
             trimmed = trim_leading_spaces(rest)
 
-            # Special case: previous was 'not' and next is keyword 'in' -> suppress EOL and carry it
+            # If carried NOT and next is standalone IN, suppress EOL and carry it so tokenizer merges
+            carried_not_merges_in =
+              case peek_pre_carry(state.deferrals) do
+                {[{:unary_op, _, :not}], _} -> begins_with_in_keyword(trimmed)
+                _ -> false
+              end
 
-            case trimmed do
-              [?/, ?/ | _] ->
-                # Suppress EOL for comment start
-                next_state = %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope,
-                    contexts: contexts,
-                    deferrals: [{:pre_carry, [eol_token]} | state.deferrals]
-                }
+            if carried_not_merges_in do
+              next_state = %{
+                state
+                | line: line,
+                  column: column,
+                  scope: scope,
+                  contexts: contexts,
+                  deferrals: [{:pre_carry, [eol_token]} | state.deferrals]
+              }
 
-                next(trimmed, next_state)
+              next(trimmed, next_state)
+            else
+              case trimmed do
+                [?/, ?/ | _] ->
+                  # Suppress EOL for comment start
+                  next_state = %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope,
+                      contexts: contexts,
+                      deferrals: [{:pre_carry, [eol_token]} | state.deferrals]
+                  }
 
-              [head | rest_after_op] when head in [?-, ?+, ?@] ->
-                # Check if this is a standalone operator at beginning of line
-                # If operator is followed by space/tab + non-operator, it's likely standalone
-                case rest_after_op do
-                  [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                    # Use eol_strategy to let tokenizer decide
-                    new_state = %{
-                      state
-                      | line: line,
-                        column: column,
-                        scope: scope,
-                        deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                    }
+                  next(trimmed, next_state)
 
-                    next(rest, new_state)
+                [head | rest_after_op] when head in [?-, ?+, ?@] ->
+                  # Check if this is a standalone operator at beginning of line
+                  # If operator is followed by space/tab + non-operator, it's likely standalone
+                  case rest_after_op do
+                    [?\s | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                      # Use eol_strategy to let tokenizer decide
+                      new_state = %{
+                        state
+                        | line: line,
+                          column: column,
+                          scope: scope,
+                          deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                      }
 
-                  [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                    # Use eol_strategy to let tokenizer decide
-                    new_state = %{
-                      state
-                      | line: line,
-                        column: column,
-                        scope: scope,
-                        deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                    }
+                      next(rest, new_state)
 
-                    next(rest, new_state)
+                    [?\t | [char | _]] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                      # Use eol_strategy to let tokenizer decide
+                      new_state = %{
+                        state
+                        | line: line,
+                          column: column,
+                          scope: scope,
+                          deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                      }
 
-                  [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
-                    # This is a standalone unary operator like "\n-1" - emit separate EOL
-                    {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
+                      next(rest, new_state)
 
-                  _ ->
-                    # Continuation operator: carry EOL into next operator so tokenizer can fold it
-                    next_state = %{
-                      state
-                      | line: line,
-                        column: column,
-                        scope: scope,
-                        contexts: contexts,
-                        deferrals: [{:pre_carry, [eol_token]} | state.deferrals]
-                    }
+                    [char | _] when char not in [?-, ?+, ?@, ?\s, ?\t, ?\n, ?\r] ->
+                      # This is a standalone unary operator like "\n-1" - emit separate EOL
+                      {:ok, eol_token, rest, %{state | line: line, column: column, scope: scope}}
 
-                    next(trimmed, next_state)
-                end
+                    _ ->
+                      # Continuation operator: carry EOL into next operator so tokenizer can fold it
+                      next_state = %{
+                        state
+                        | line: line,
+                          column: column,
+                          scope: scope,
+                          contexts: contexts,
+                          deferrals: [{:pre_carry, [eol_token]} | state.deferrals]
+                      }
 
-              [?. | _] ->
-                # Suppress EOL before dot; do not emit EOL, continue scanning at dot
-                next(rest, %{state | line: line, column: column, scope: scope})
+                      next(trimmed, next_state)
+                  end
 
-              [?] | _] ->
-                # Use eol_strategy to let tokenizer decide
-                new_state = %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope,
-                    deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                }
+                [?. | _] ->
+                  # Suppress EOL before dot; do not emit EOL, continue scanning at dot
+                  next(rest, %{state | line: line, column: column, scope: scope})
 
-                next(rest, new_state)
+                [?] | _] ->
+                  # Use eol_strategy to let tokenizer decide
+                  new_state = %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope,
+                      deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                  }
 
-              [?} | _] ->
-                # Use eol_strategy to let tokenizer decide
-                new_state = %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope,
-                    deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                }
+                  next(rest, new_state)
 
-                next(rest, new_state)
+                [?} | _] ->
+                  # Use eol_strategy to let tokenizer decide
+                  new_state = %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope,
+                      deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                  }
 
-              [?) | _] ->
-                # Use eol_strategy to let tokenizer decide
-                new_state = %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope,
-                    deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                }
+                  next(rest, new_state)
 
-                next(rest, new_state)
+                [?) | _] ->
+                  # Use eol_strategy to let tokenizer decide
+                  new_state = %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope,
+                      deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                  }
 
-              [?>, ?> | _] ->
-                # Use eol_strategy to let tokenizer decide
-                new_state = %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope,
-                    deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                }
+                  next(rest, new_state)
 
-                next(rest, new_state)
+                [?>, ?> | _] ->
+                  # Use eol_strategy to let tokenizer decide
+                  new_state = %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope,
+                      deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                  }
 
-              _ ->
-                # Assoc op '=>' after multiple EOLs
-                {after_eols, extra_eols} = count_leading_eols(rest)
-                trimmed2 = trim_leading_spaces(after_eols)
+                  next(rest, new_state)
 
-                case trimmed2 do
-                  [?=, ?> | _] ->
-                    {:eol, {{sl, sc}, _endpos, _}} = eol_token
-                    total = 1 + extra_eols
-                    carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
-                    spaces = length(after_eols) - length(trimmed2)
+                _ ->
+                  # Assoc op '=>' after multiple EOLs
+                  {after_eols, extra_eols} = count_leading_eols(rest)
+                  trimmed2 = trim_leading_spaces(after_eols)
 
-                    new_state = %{
-                      state
-                      | line: line + extra_eols,
-                        column: 1 + spaces,
-                        scope: scope,
-                        contexts: contexts,
-                        deferrals: [{:pre_carry, [carry]} | state.deferrals]
-                    }
+                  case trimmed2 do
+                    [?=, ?> | _] ->
+                      {:eol, {{sl, sc}, _endpos, _}} = eol_token
+                      total = 1 + extra_eols
+                      carry = {:eol, {{sl, sc}, {sl + total, 1}, total}}
+                      spaces = length(after_eols) - length(trimmed2)
 
-                    next(trimmed2, new_state)
+                      new_state = %{
+                        state
+                        | line: line + extra_eols,
+                          column: 1 + spaces,
+                          scope: scope,
+                          contexts: contexts,
+                          deferrals: [{:pre_carry, [carry]} | state.deferrals]
+                      }
 
-                  _ ->
-                    # Coalesce EOLs, emit one EOL before next token
-                    new_state = %{
-                      state
-                      | line: line,
-                        column: column,
-                        scope: scope,
-                        deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
-                    }
+                      next(trimmed2, new_state)
 
-                    next(rest, new_state)
-                end
+                    _ ->
+                      # Coalesce EOLs, emit one EOL before next token
+                      new_state = %{
+                        state
+                        | line: line,
+                          column: column,
+                          scope: scope,
+                          deferrals: [{:eol_strategy, %{eol: eol_token}} | state.deferrals]
+                      }
+
+                      next(rest, new_state)
+                  end
+              end
             end
 
           {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
@@ -1480,4 +1506,14 @@ defmodule Toxic.Driver do
       _ -> false
     end)
   end
+
+  # Collect but do not clear pre_carry tokens from deferrals
+  defp peek_pre_carry(deferrals) do
+    pre = Enum.filter(deferrals, &match?({:pre_carry, _}, &1))
+    tokens = Enum.flat_map(pre, fn {:pre_carry, toks} -> toks end)
+    rest = Enum.reject(deferrals, &match?({:pre_carry, _}, &1))
+    {tokens, rest}
+  end
+
+  # (dedupe removed duplicate peek_pre_carry)
 end

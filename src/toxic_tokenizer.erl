@@ -1316,6 +1316,18 @@ strip_horizontal_space([H | T], Counter) when ?is_horizontal_space(H) ->
 strip_horizontal_space(T, Counter) ->
   {T, Counter}.
 
+% Consume one or more escaped newlines ("\\\n" or "\\\r\n") and following
+% horizontal spaces, returning the rest, the number of spaces on the last
+% logical line, and the count of escaped newlines seen.
+strip_horizontal_space_after_escaped_newlines("\\\n" ++ Rest, _SpacesAcc, EscAcc) ->
+  strip_horizontal_space_after_escaped_newlines(Rest, 0, EscAcc + 1);
+strip_horizontal_space_after_escaped_newlines("\\\r\n" ++ Rest, _SpacesAcc, EscAcc) ->
+  strip_horizontal_space_after_escaped_newlines(Rest, 0, EscAcc + 1);
+strip_horizontal_space_after_escaped_newlines([H | T], SpacesAcc, EscAcc) when ?is_horizontal_space(H) ->
+  strip_horizontal_space_after_escaped_newlines(T, SpacesAcc + 1, EscAcc);
+strip_horizontal_space_after_escaped_newlines(Rest, SpacesAcc, EscAcc) ->
+  {Rest, SpacesAcc, EscAcc}.
+
 tokenize_dot(T, Line, Column, DotInfo, Scope, Tokens) ->
   case strip_horizontal_space(T, 0) of
     {[$# | R], _} ->
@@ -2088,36 +2100,20 @@ tokenize_keyword(block, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
   yield(Rest, Line, Column + Length, Scope, [Token | Tokens]);
 
 tokenize_keyword(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens) ->
-  % Special handling for "not" followed by escaped newline and then "in"
-  case {Atom, Rest} of
-    {'not', "\\\n" ++ RestAfterEscape} ->
-      % Look ahead to see if "in" follows the escaped newline
-      case strip_horizontal_space(RestAfterEscape, 0) of
-        {"in" ++ InRest, ExtraSpaces} ->
-          % Create a "not in" token spanning across the escaped newline
-          EndColumn = 2 + ExtraSpaces,  % "in" length + any spaces before it
-          Meta = make_meta(Line, Column, Line + 1, EndColumn + 1, nil, Scope),
+  % Handle escaped newline(s) + horizontal spaces between 'not' and 'in' on the same logical line
+  case Atom of
+    'not' ->
+      case strip_horizontal_space_after_escaped_newlines(Rest, 0, 0) of
+        {"in" ++ InRest, SpacesAfter, EscapedCount} when EscapedCount > 0 ->
+          EndLine = Line + EscapedCount,
+          EndColumn = 2 + SpacesAfter,
+          Meta = make_meta(Line, Column, EndLine, EndColumn + 1, nil, Scope),
           NewTokens = add_token_with_eol({in_op, Meta, 'not in'}, Tokens),
-          yield(InRest, Line + 1, EndColumn + 1, Scope, NewTokens);
+          yield(InRest, EndLine, EndColumn + 1, Scope, NewTokens);
         _ ->
-          % Not followed by "in", process normally
-          normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
-      end;
-    {'not', "\\\r\n" ++ RestAfterEscape} ->
-      % Handle Windows-style escaped newline
-      case strip_horizontal_space(RestAfterEscape, 0) of
-        {"in" ++ InRest, ExtraSpaces} ->
-          % Create a "not in" token spanning across the escaped newline
-          EndColumn = 2 + ExtraSpaces,  % "in" length + any spaces before it
-          Meta = make_meta(Line, Column, Line + 1, EndColumn + 1, nil, Scope),
-          NewTokens = add_token_with_eol({in_op, Meta, 'not in'}, Tokens),
-          yield(InRest, Line + 1, EndColumn + 1, Scope, NewTokens);
-        _ ->
-          % Not followed by "in", process normally
           normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
       end;
     _ ->
-      % Normal keyword processing
       normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
   end.
 
@@ -2129,6 +2125,30 @@ normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
 
       _ ->
         case {Kind, Tokens} of
+          %% Across EOL: allow top tokens to be not and eol in any order
+          {in_op, [{eol, _} | [{unary_op, NotInfo, 'not'} | T]]} ->
+            Start = case NotInfo of
+              {{SL, SC}, _, _} -> {SL, SC};
+              {SL, SC, _} -> {SL, SC}
+            end,
+            {_, ExtraSpaces} = strip_horizontal_space(Rest, 0),
+            EndLine = Line,
+            EndColumn = Column + Length + ExtraSpaces,
+            %% previous_was_eol(T) remains accurate for remaining tail
+            Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, 1, Scope),
+            add_token_with_eol({in_op, Meta, 'not in'}, T);
+
+          {in_op, [{unary_op, NotInfo, 'not'} | [{eol, _} | T]]} ->
+            Start = case NotInfo of
+              {{SL, SC}, _, _} -> {SL, SC};
+              {SL, SC, _} -> {SL, SC}
+            end,
+            {_, ExtraSpaces} = strip_horizontal_space(Rest, 0),
+            EndLine = Line,
+            EndColumn = Column + Length + ExtraSpaces,
+            Meta = make_meta(element(1, Start), element(2, Start), EndLine, EndColumn, 1, Scope),
+            add_token_with_eol({in_op, Meta, 'not in'}, T);
+
           {in_op, [{unary_op, NotInfo, 'not'} | T]} ->
             %% Build a range from the start of 'not' to the end of 'in'
             Start = case NotInfo of
