@@ -1879,10 +1879,15 @@ add_token_with_eol({unary_op, _, _} = Left, T) -> [Left | T];
 add_token_with_eol(Left, [{eol, _} | T]) -> [Left | T];
 add_token_with_eol(Left, T) -> [Left | T].
 
-previous_was_eol([{',', {_, _, Count}} | _]) when Count > 0 -> Count;
-previous_was_eol([{';', {_, _, Count}} | _]) when Count > 0 -> Count;
-previous_was_eol([{eol, {_, _, Count}} | _]) when Count > 0 -> Count;
-previous_was_eol(_) -> nil.
+previous_was_eol([Token | _]) ->
+  case Token of
+    {';', {{_, _}, {_, _}, Count}} when Count > 0 -> Count;
+    {',', {{_, _}, {_, _}, Count}} when Count > 0 -> Count;
+    {eol, {{_, _}, {_, _}, Count}} when Count > 0 -> Count;
+    {eol, {_, _, Count}} when Count > 0 -> Count;
+    _ -> nil
+  end;
+previous_was_eol([]) -> nil.
 
 %% Terminators
 
@@ -2277,6 +2282,7 @@ is_valid_do([{Atom, _} | _]) ->
     'else'   -> false;
     'catch'  -> false;
     'rescue' -> false;
+    '.'      -> false;  % do after dot should be treated as identifier
     _        -> true
   end;
 is_valid_do(_) ->

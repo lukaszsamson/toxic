@@ -7,7 +7,9 @@ defmodule Toxic.Driver do
             # Entries: {:emit_next, token, consume_len, after_action | nil}
             #  - consume_len: non-neg integer to consume from input and advance column
             #  - after_action: {:push_interp, kind, interpolation, delim} | nil
-            deferrals: []
+            deferrals: [],
+            # Track the most recent token emitted (for carry context)
+            recent_token: nil
 
   require Record
 
@@ -105,16 +107,28 @@ defmodule Toxic.Driver do
       when is_list(string) do
     trimmed = trim_leading_spaces(string)
 
-    new_token =
-      cond do
-        begins_with_do_keyword(trimmed) -> put_elem(id_token, 0, :do_identifier)
-        List.starts_with?(trimmed, [?(]) -> put_elem(id_token, 0, :paren_identifier)
-        List.starts_with?(trimmed, [?[]) -> put_elem(id_token, 0, :bracket_identifier)
-        is_op_identifier_pattern(trimmed) -> put_elem(id_token, 0, :op_identifier)
-        true -> id_token
-      end
-
-    {:ok, new_token, string, %{state | deferrals: rest}}
+    cond do
+      begins_with_do_keyword(trimmed) ->
+        # When identifier is followed by 'do', emit the identifier immediately as do_identifier
+        # because we know it will be converted when 'do' is processed
+        do_id_token = put_elem(id_token, 0, :do_identifier)
+        {:ok, do_id_token, string, %{state | deferrals: rest}}
+        
+      List.starts_with?(string, [?(]) ->
+        new_token = put_elem(id_token, 0, :paren_identifier)
+        {:ok, new_token, string, %{state | deferrals: rest}}
+        
+      List.starts_with?(string, [?[]) ->
+        new_token = put_elem(id_token, 0, :bracket_identifier)
+        {:ok, new_token, string, %{state | deferrals: rest}}
+        
+      is_op_identifier_pattern(trimmed) ->
+        new_token = put_elem(id_token, 0, :op_identifier)
+        {:ok, new_token, string, %{state | deferrals: rest}}
+        
+      true ->
+        {:ok, id_token, string, %{state | deferrals: rest}}
+    end
   end
 
   # Handle empty input with eol_strategy: emit the deferred EOL directly
@@ -623,11 +637,10 @@ defmodule Toxic.Driver do
       state
       | line: state.line + 1,
         column: 1,
-        contexts: [:normal | contexts_rest],
-        deferrals: [{:pre_carry, [token]} | state.deferrals]
+        contexts: [:normal | contexts_rest]
     }
 
-    {:ok, token, tail, new_state}
+    return_token(token, tail, new_state)
   end
 
   def next([?,, ?\r, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
@@ -638,11 +651,10 @@ defmodule Toxic.Driver do
       state
       | line: state.line + 1,
         column: 1,
-        contexts: [:normal | contexts_rest],
-        deferrals: [{:pre_carry, [token]} | state.deferrals]
+        contexts: [:normal | contexts_rest]
     }
 
-    {:ok, token, tail, new_state}
+    return_token(token, tail, new_state)
   end
 
   # Fold ";\n" into a single semicolon token with extra=1 (no EOL token)
@@ -654,11 +666,10 @@ defmodule Toxic.Driver do
       state
       | line: state.line + 1,
         column: 1,
-        contexts: [:normal | contexts_rest],
-        deferrals: [{:pre_carry, [token]} | state.deferrals]
+        contexts: [:normal | contexts_rest]
     }
 
-    {:ok, token, tail, new_state}
+    return_token(token, tail, new_state)
   end
 
   def next([?;, ?\r, ?\n | tail], %__MODULE__{contexts: [:normal | contexts_rest]} = state) do
@@ -669,11 +680,10 @@ defmodule Toxic.Driver do
       state
       | line: state.line + 1,
         column: 1,
-        contexts: [:normal | contexts_rest],
-        deferrals: [{:pre_carry, [token]} | state.deferrals]
+        contexts: [:normal | contexts_rest]
     }
 
-    {:ok, token, tail, new_state}
+    return_token(token, tail, new_state)
   end
 
   # Handle "\n=>" and "\r\n=>" by emitting only assoc_op with EOL count and no EOL token
@@ -900,23 +910,28 @@ defmodule Toxic.Driver do
         :ok
     end
 
-    tokens = []
+    # Collect pre_carry tokens and clear them from deferrals
+    {carry_tokens, remaining_deferrals} = peek_pre_carry(state.deferrals)
+    
+    # Include recent semicolon/comma with EOL in carry for => tokenization
+    carry_with_recent = case state.recent_token do
+      {:";", {{_, _}, {_, _}, eol_count}} when is_integer(eol_count) and eol_count > 0 ->
+        [state.recent_token | carry_tokens]
+      {:",", {{_, _}, {_, _}, eol_count}} when is_integer(eol_count) and eol_count > 0 ->
+        [state.recent_token | carry_tokens]
+      _ ->
+        carry_tokens
+    end
+    
+    state = %{state | deferrals: remaining_deferrals}
 
-    case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, tokens) do
+    case :toxic_tokenizer.tokenize_single(string, state.line, state.column, state.scope, carry_with_recent) do
       {:token, token, rest, line, column, scope} ->
         case token do
           {:., _} = dot_token ->
-            # Carry the dot so the next token sees previous_was_dot/1
-            new_state = %{
-              state
-              | line: line,
-                column: column,
-                scope: scope,
-                contexts: contexts,
-                deferrals: [{:pre_carry, [dot_token]} | state.deferrals]
-            }
-
-            {:ok, dot_token, rest, new_state}
+            # Emit dot token immediately, carry will be added by pre_carry handling in next call
+            return_token(dot_token, rest,
+             %{state | line: line, column: column, scope: scope, contexts: contexts})
 
           {:unary_op, _meta, :not} ->
             trimmed = trim_leading_spaces(rest)
@@ -1113,17 +1128,64 @@ defmodule Toxic.Driver do
               end
             end
 
-          {Kind, {{sl, sc}, {el, ec}, extra}} when Kind in [:",", :";"] ->
+          {:";", {{sl, sc}, {el, ec}, extra}} ->
+            IO.puts("DEBUG: Processing semicolon in Driver: #{inspect {:";", {{sl, sc}, {el, ec}, extra}}} rest: #{inspect Enum.take(rest, 5)}")
             # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
             case rest do
               [?\n | tail] ->
-                new_token = {Kind, {{sl, sc}, {el, ec}, (extra || 0) + 1}}
-                new_state = %{state | line: line + 1, column: 1, scope: scope}
+                new_token = {:";", {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                IO.puts("DEBUG: Adding semicolon pre_carry: #{inspect new_token}")
+                new_state = %{
+                  state | 
+                  line: line + 1, 
+                  column: 1, 
+                  scope: scope,
+                  # Carry the comma/semicolon with EOL for next tokenization
+                  deferrals: [{:pre_carry, [new_token]} | state.deferrals]
+                }
                 {:ok, new_token, tail, new_state}
 
               [?\r, ?\n | tail] ->
-                new_token = {Kind, {{sl, sc}, {el, ec}, (extra || 0) + 1}}
-                new_state = %{state | line: line + 1, column: 1, scope: scope}
+                new_token = {:";", {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                new_state = %{
+                  state | 
+                  line: line + 1, 
+                  column: 1, 
+                  scope: scope,
+                  # Carry the comma/semicolon with EOL for next tokenization
+                  deferrals: [{:pre_carry, [new_token]} | state.deferrals]
+                }
+                {:ok, new_token, tail, new_state}
+
+              _ ->
+                {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+            end
+            
+          {:",", {{sl, sc}, {el, ec}, extra}} ->
+            # If a newline follows immediately, fold it into this token's extra instead of emitting EOL
+            case rest do
+              [?\n | tail] ->
+                new_token = {:",", {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                new_state = %{
+                  state | 
+                  line: line + 1, 
+                  column: 1, 
+                  scope: scope,
+                  # Carry the comma/semicolon with EOL for next tokenization
+                  deferrals: [{:pre_carry, [new_token]} | state.deferrals]
+                }
+                {:ok, new_token, tail, new_state}
+
+              [?\r, ?\n | tail] ->
+                new_token = {:",", {{sl, sc}, {el, ec}, (extra || 0) + 1}}
+                new_state = %{
+                  state | 
+                  line: line + 1, 
+                  column: 1, 
+                  scope: scope,
+                  # Carry the comma/semicolon with EOL for next tokenization
+                  deferrals: [{:pre_carry, [new_token]} | state.deferrals]
+                }
                 {:ok, new_token, tail, new_state}
 
               _ ->
@@ -1145,11 +1207,11 @@ defmodule Toxic.Driver do
           _ ->
             case state.contexts do
               [{:bol_indent, indent_col} | contexts_rest2] ->
-                {:ok, adjust_bol_operator(token, line, indent_col), rest,
-                 %{state | line: line, column: column, scope: scope, contexts: contexts_rest2}}
+                return_token(adjust_bol_operator(token, line, indent_col), rest,
+                 %{state | line: line, column: column, scope: scope, contexts: contexts_rest2})
 
               _ ->
-                {:ok, token, rest, %{state | line: line, column: column, scope: scope}}
+                return_token(token, rest, %{state | line: line, column: column, scope: scope})
             end
         end
 
@@ -1513,6 +1575,11 @@ defmodule Toxic.Driver do
     tokens = Enum.flat_map(pre, fn {:pre_carry, toks} -> toks end)
     rest = Enum.reject(deferrals, &match?({:pre_carry, _}, &1))
     {tokens, rest}
+  end
+
+  # Helper to return a token and update recent_token in state
+  defp return_token(token, rest, state) do
+    {:ok, token, rest, %{state | recent_token: token}}
   end
 
   # (dedupe removed duplicate peek_pre_carry)
