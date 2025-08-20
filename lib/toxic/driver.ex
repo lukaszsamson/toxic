@@ -913,11 +913,14 @@ defmodule Toxic.Driver do
     # Collect pre_carry tokens and clear them from deferrals
     {carry_tokens, remaining_deferrals} = peek_pre_carry(state.deferrals)
     
-    # Include recent semicolon/comma with EOL in carry for => tokenization
+    # Include recent tokens in carry for proper context detection
     carry_with_recent = case state.recent_token do
       {:";", {{_, _}, {_, _}, eol_count}} when is_integer(eol_count) and eol_count > 0 ->
         [state.recent_token | carry_tokens]
       {:",", {{_, _}, {_, _}, eol_count}} when is_integer(eol_count) and eol_count > 0 ->
+        [state.recent_token | carry_tokens]
+      {:., {{_, _}, {_, _}, _}} ->
+        # Include dot tokens so previous_was_dot works correctly
         [state.recent_token | carry_tokens]
       _ ->
         carry_tokens
