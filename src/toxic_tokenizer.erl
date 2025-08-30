@@ -771,188 +771,15 @@ tokenize_single(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
   Reason = {make_meta_len(Line, 1, 1, nil, Scope), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
   error(Reason, Original, Scope, Tokens);
 
-% Base integers
 
-tokenize_single([$0, $x, H | T], Line, Column, Scope, Tokens) when ?is_hex(H) ->
-  {Rest, Number, OriginalRepresentation, Length} = tokenize_hex(T, [H], 1),
-  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
-tokenize_single([$0, $b, H | T], Line, Column, Scope, Tokens) when ?is_bin(H) ->
-  {Rest, Number, OriginalRepresentation, Length} = tokenize_bin(T, [H], 1),
-  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
-tokenize_single([$0, $o, H | T], Line, Column, Scope, Tokens) when ?is_octal(H) ->
-  {Rest, Number, OriginalRepresentation, Length} = tokenize_octal(T, [H], 1),
-  Token = {int, make_meta_len(Line, Column, 2 + Length, Number, Scope), OriginalRepresentation},
-  yield(Rest, Line, Column + 2 + Length, Scope, [Token | Tokens]);
 
-% Comments
 
-tokenize_single([$# | String], Line, Column, Scope, Tokens) ->
-  case tokenize_comment(String, [$#]) of
-    {error, Char} ->
-      error_comment(Char, [$# | String], Line, Column, Scope, Tokens);
-    {Rest, Comment} ->
-      preserve_comments(Line, Column, Tokens, Comment, Rest, Scope),
-      % Check if comment ends with newline and handle appropriately
-      case Rest of
-        "\n" ++ ActualRest ->
-          % Comment followed by newline - generate eol token
-          tokenize_eol(ActualRest, Line, Scope, eol(Line, Column, reset_eol(Tokens), Scope));
-        "\r\n" ++ ActualRest ->
-          % Comment followed by CRLF - generate eol token
-          tokenize_eol(ActualRest, Line, Scope, eol(Line, Column, reset_eol(Tokens), Scope));
-        _ ->
-          % Comment at EOF or followed by other content - no eol token
-          yield(Rest, Line, Column, Scope, reset_eol(Tokens))
-      end
-  end;
 
-% Sigils
 
-tokenize_single([$~, H | _T] = Original, Line, Column, Scope, Tokens) when ?is_upcase(H) orelse ?is_downcase(H) ->
-  tokenize_sigil(Original, Line, Column, Scope, Tokens);
 
-% Char tokens
 
-% We tokenize char literals (?a) as {char, _, CharInt} instead of {number, _,
-% CharInt}. This is exactly what Erlang does with Erlang char literals
-% ($a). This means we'll have to adjust the error message for char literals in
-% toxic_errors.erl as by default {char, _, _} tokens are "hijacked" by Erlang
-% and printed with Erlang syntax ($a) in the parser's error messages.
-
-tokenize_single([$?, $\\, H | T], Line, Column, Scope, Tokens) ->
-  Char = toxic_interpolation:unescape_map(H),
-
-  NewScope = if
-    H =:= Char, H =/= $\\ ->
-      case handle_char(Char) of
-        {Escape, Name} ->
-          Msg = io_lib:format("found ?\\ followed by code point 0x~.16B (~ts), please use ?~ts instead",
-                              [Char, Name, Escape]),
-          prepend_warning(Line, Column, Msg, Scope);
-
-        false when ?is_downcase(H); ?is_upcase(H) ->
-          Msg = io_lib:format("unknown escape sequence ?\\~tc, use ?~tc instead", [H, H]),
-          prepend_warning(Line, Column, Msg, Scope);
-
-        false ->
-          Scope
-      end;
-    true ->
-      Scope
-  end,
-
-  % Check if we have a literal newline after the escape
-  {Token, Rest, NewLine, NewColumn} = case {H, T} of
-    {$\n, _} ->
-      % ?\\\n - escaped newline, consume the actual newline
-      {{char, make_meta(Line, Column, Line + 1, 1, [$?, $\\, $\n], Scope), Char}, T, Line + 1, 1};
-    _ ->
-      % Regular escaped char
-      {{char, make_meta_len(Line, Column, 3, [$?, $\\, H], Scope), Char}, T, Line, Column + 3}
-  end,
-  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-
-tokenize_single([$?, Char | T], Line, Column, Scope, Tokens) ->
-  NewScope = case handle_char(Char) of
-    {Escape, Name} ->
-      Msg = io_lib:format("found ? followed by code point 0x~.16B (~ts), please use ?~ts instead",
-                          [Char, Name, Escape]),
-      prepend_warning(Line, Column, Msg, Scope);
-    false ->
-      Scope
-  end,
-  
-  % Check if the char is a newline
-  {Token, Rest, NewLine, NewColumn} = case Char of
-    $\n ->
-      % ?\n - raw newline character, consume it and move to next line
-      {{char, make_meta(Line, Column, Line + 1, 1, [$?, $\n], Scope), Char}, T, Line + 1, 1};
-    _ ->
-      % Regular char
-      {{char, make_meta_len(Line, Column, 2, [$?, Char], Scope), Char}, T, Line, Column + 2}
-  end,
-  yield(Rest, NewLine, NewColumn, NewScope, [Token | Tokens]);
-
-% Heredocs
-
-tokenize_single("\"\"\"" ++ T, Line, Column, Scope, Tokens) ->
-  handle_heredocs(T, Line, Column, $", Scope, Tokens);
-
-%% TODO: Remove me in Elixir v2.0
-tokenize_single("'''" ++ T, Line, Column, Scope, Tokens) ->
-  NewScope = prepend_warning(Line, Column, "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead", Scope),
-  handle_heredocs(T, Line, Column, $', NewScope, Tokens);
-
-% Strings
-
-tokenize_single([$" | T], Line, Column, Scope, Tokens) ->
-  handle_strings(T, Line, Column + 1, $", Scope, Tokens);
-
-%% TODO: Remove me in Elixir v2.0
-tokenize_single([$' | T], Line, Column, Scope, Tokens) ->
-  handle_strings(T, Line, Column + 1, $', Scope, Tokens);
-
-% Operator atoms
-
-tokenize_single(".:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '.'} | Tokens]);
-
-tokenize_single("<<>>:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
-tokenize_single("%{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 4, Scope, [{kw_identifier, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
-tokenize_single("%:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
-tokenize_single("&:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 2, Scope, [{kw_identifier, make_meta_len(Line, Column, 2, nil, Scope), '&'} | Tokens]);
-tokenize_single("{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 3, Scope, [{kw_identifier, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
-tokenize_single("..//:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
-  yield(Rest, Line, Column + 5, Scope, [{kw_identifier, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
-
-tokenize_single(":<<>>" ++ Rest, Line, Column, Scope, Tokens) ->
-  yield(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '<<>>'} | Tokens]);
-tokenize_single(":%{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  yield(Rest, Line, Column + 4, Scope, [{atom, make_meta_len(Line, Column, 4, nil, Scope), '%{}'} | Tokens]);
-tokenize_single(":%" ++ Rest, Line, Column, Scope, Tokens) ->
-  yield(Rest, Line, Column + 2, Scope, [{atom, make_meta_len(Line, Column, 2, nil, Scope), '%'} | Tokens]);
-tokenize_single(":{}" ++ Rest, Line, Column, Scope, Tokens) ->
-  yield(Rest, Line, Column + 3, Scope, [{atom, make_meta_len(Line, Column, 3, nil, Scope), '{}'} | Tokens]);
-tokenize_single(":..//" ++ Rest, Line, Column, Scope, Tokens) ->
-  yield(Rest, Line, Column + 5, Scope, [{atom, make_meta_len(Line, Column, 5, nil, Scope), '..//'} | Tokens]);
-
-% ## Three Token Operators
-tokenize_single([$:, T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when
-    ?unary_op3(T1, T2, T3); ?comp_op3(T1, T2, T3); ?and_op3(T1, T2, T3); ?or_op3(T1, T2, T3);
-    ?arrow_op3(T1, T2, T3); ?xor_op3(T1, T2, T3); ?concat_op3(T1, T2, T3); ?ellipsis_op3(T1, T2, T3) ->
-  Token = {atom, make_meta_len(Line, Column, 4, nil, Scope), list_to_atom([T1, T2, T3])},
-  yield(Rest, Line, Column + 4, Scope, [Token | Tokens]);
-
-% ## Two Token Operators
-
-tokenize_single([$:, $:, $: | Rest], Line, Column, Scope, Tokens) ->
-  Message = "atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity",
-  NewScope = prepend_warning(Line, Column, Message, Scope),
-  Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), '::'},
-  yield(Rest, Line, Column + 3, NewScope, [Token | Tokens]);
-
-tokenize_single([$:, T1, T2 | Rest], Line, Column, Scope, Tokens) when
-    ?comp_op2(T1, T2); ?rel_op2(T1, T2); ?and_op(T1, T2); ?or_op(T1, T2);
-    ?arrow_op(T1, T2); ?in_match_op(T1, T2); ?concat_op(T1, T2); ?power_op(T1, T2);
-    ?stab_op(T1, T2); ?range_op(T1, T2) ->
-  Token = {atom, make_meta_len(Line, Column, 3, nil, Scope), list_to_atom([T1, T2])},
-  yield(Rest, Line, Column + 3, Scope, [Token | Tokens]);
-
-% ## Single Token Operators
-tokenize_single([$:, T | Rest], Line, Column, Scope, Tokens) when
-    ?at_op(T); ?unary_op(T); ?capture_op(T); ?dual_op(T); ?mult_op(T);
-    ?rel_op(T); ?match_op(T); ?pipe_op(T); T =:= $. ->
-  Token = {atom, make_meta_len(Line, Column, 2, nil, Scope), list_to_atom([T])},
-  yield(Rest, Line, Column + 2, Scope, [Token | Tokens]);
 
 % ## Stand-alone tokens
 
@@ -1368,32 +1195,6 @@ handle_char(_)  -> false.
 
 %% Handlers
 
-handle_heredocs(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
-  % Linearized streaming mode for heredocs
-  % First check if the heredoc header is valid (only whitespace + newline after opening)
-  case extract_heredoc_header(T) of
-    {ok, Headerless} ->
-      {StartType, Kind} = case H of
-        $' -> {list_heredoc_start, list_heredoc};
-        $" -> {bin_heredoc_start, bin_heredoc}
-      end,
-      StartTok = {StartType, make_meta(Line, Column, Line, Column + 3, nil, Scope), [H, H, H]},
-      % For streaming mode, don't prepend newline - handle it in interpolation extraction
-      {switch_to_interp, StartTok, Headerless, Line + 1, 1, Scope, Kind, [H, H, H], []};
-    error ->
-      Message = "heredoc allows only whitespace characters followed by a new line after opening ",
-      error({?LOC(Line, Column + 3), io_lib:format(Message, []), [H, H, H]}, [H, H, H] ++ T, Scope, _Tokens)
-  end.
-
-handle_strings(T, Line, Column, H, #toxic_tokenizer{} = Scope, _Tokens) ->
-  % Linearized streaming mode
-  {StartType, Kind} = case H of
-    $' -> {list_string_start, charlist};
-    $" -> {bin_string_start, string}
-  end,
-  StartTok = {StartType, make_meta(Line, Column - 1, Line, Column, nil, Scope), H},
-  {switch_to_interp, StartTok, T, Line, Column, Scope, Kind, H, []}.
-
 handle_unary_op([$: | Rest], Line, Column, _Kind, Length, Op, Scope, Tokens) when ?is_space(hd(Rest)) ->
   Token = {kw_identifier, make_meta_len(Line, Column, Length + 1, nil, Scope), Op},
   yield(Rest, Line, Column + Length + 1, Scope, [Token | Tokens]);
@@ -1616,17 +1417,6 @@ unsafe_to_atom(List, Line, Column, #toxic_tokenizer{}) when is_list(List) ->
       end
   end.
 
-%% Heredocs
-
-extract_heredoc_header("\r\n" ++ Rest) ->
-  {ok, Rest};
-extract_heredoc_header("\n" ++ Rest) ->
-  {ok, Rest};
-extract_heredoc_header([H | T]) when ?is_horizontal_space(H) ->
-  extract_heredoc_header(T);
-extract_heredoc_header(_) ->
-  error.
-
 unescape_tokens(Tokens, Line, Column, #toxic_tokenizer{unescape=true}) ->
   case toxic_interpolation:unescape_tokens(Tokens) of
     {ok, Result} ->
@@ -1686,29 +1476,6 @@ tokenize_number(Rest, Acc, Length, false) ->
   {Number, Original} = reverse_number(Acc, [], []),
   {Rest, list_to_integer(Number), Original, Length}.
 
-tokenize_hex([H | T], Acc, Length) when ?is_hex(H) ->
-  tokenize_hex(T, [H | Acc], Length + 1);
-tokenize_hex([$_, H | T], Acc, Length) when ?is_hex(H) ->
-  tokenize_hex(T, [H, $_ | Acc], Length + 2);
-tokenize_hex(Rest, Acc, Length) ->
-  {Number, Original} = reverse_number(Acc, [], []),
-  {Rest, list_to_integer(Number, 16), [$0, $x | Original], Length}.
-
-tokenize_octal([H | T], Acc, Length) when ?is_octal(H) ->
-  tokenize_octal(T, [H | Acc], Length + 1);
-tokenize_octal([$_, H | T], Acc, Length) when ?is_octal(H) ->
-  tokenize_octal(T, [H, $_ | Acc], Length + 2);
-tokenize_octal(Rest, Acc, Length) ->
-  {Number, Original} = reverse_number(Acc, [], []),
-  {Rest, list_to_integer(Number, 8), [$0, $o | Original], Length}.
-
-tokenize_bin([H | T], Acc, Length) when ?is_bin(H) ->
-  tokenize_bin(T, [H | Acc], Length + 1);
-tokenize_bin([$_, H | T], Acc, Length) when ?is_bin(H) ->
-  tokenize_bin(T, [H, $_ | Acc], Length + 2);
-tokenize_bin(Rest, Acc, Length) ->
-  {Number, Original} = reverse_number(Acc, [], []),
-  {Rest, list_to_integer(Number, 2), [$0, $b | Original], Length}.
 
 reverse_number([$_ | T], Number, Original) ->
   reverse_number(T, Number, [$_ | Original]);
@@ -2051,12 +1818,6 @@ missing_terminator_hint(Start, End, #toxic_tokenizer{mismatch_hints=Hints}) ->
       ""
   end.
 
-sigil_terminator($() -> $);
-sigil_terminator($[) -> $];
-sigil_terminator(${) -> $};
-sigil_terminator($<) -> $>;
-sigil_terminator(O) -> O.
-
 terminator('fn') -> 'end';
 terminator('do') -> 'end';
 terminator('(')  -> ')';
@@ -2176,82 +1937,6 @@ normal_keyword_processing(Kind, Rest, Line, Column, Atom, Length, Scope, Tokens)
 
   yield(Rest, Line, Column + Length, Scope, NewTokens).
 
-tokenize_sigil([$~ | T], Line, Column, Scope, Tokens) ->
-  case tokenize_sigil_name(T, [], Line, Column + 1, Scope, Tokens) of
-    {ok, Name, Rest, NewLine, NewColumn, NewScope, NewTokens} ->
-      tokenize_sigil_contents(Rest, Name, NewLine, NewColumn, NewScope, NewTokens);
-
-    {error, Message, Token} ->
-      Reason = {make_meta_len(Line, Column, 1, nil, Scope), Message, Token},
-      error(Reason, T, Scope, Tokens)
-  end.
-
-% A one-letter sigil is ok both as upcase as well as downcase.
-tokenize_sigil_name([S | T], [], Line, Column, Scope, Tokens) when ?is_downcase(S) ->
-  tokenize_lower_sigil_name(T, [S], Line, Column + 1, Scope, Tokens);
-tokenize_sigil_name([S | T], [], Line, Column, Scope, Tokens) when ?is_upcase(S) ->
-    tokenize_upper_sigil_name(T, [S], Line, Column + 1, Scope, Tokens).
-
-tokenize_lower_sigil_name([S | _T] = Original, [_ | _] = NameAcc, _Line, _Column, _Scope, _Tokens) when ?is_downcase(S) ->
-  SigilName = lists:reverse(NameAcc) ++ Original,
-  {error, sigil_name_error(), [$~] ++ SigilName};
-tokenize_lower_sigil_name(T, NameAcc, Line, Column, Scope, Tokens) ->
-  {ok, lists:reverse(NameAcc), T, Line, Column, Scope, Tokens}.
-
-% If we have an uppercase letter, we keep tokenizing the name.
-% A digit is allowed but an uppercase letter or digit must proceed it.
-tokenize_upper_sigil_name([S | T], NameAcc, Line, Column, Scope, Tokens) when ?is_upcase(S); ?is_digit(S) ->
-  tokenize_upper_sigil_name(T, [S | NameAcc], Line, Column + 1, Scope, Tokens);
-% With a lowercase letter and a non-empty NameAcc we return an error.
-tokenize_upper_sigil_name([S | _T] = Original, [_ | _] = NameAcc, _Line, _Column, _Scope, _Tokens) when ?is_downcase(S) ->
-  SigilName = lists:reverse(NameAcc) ++ Original,
-  {error,  sigil_name_error(), [$~] ++ SigilName};
-% We finished the letters, so the name is over.
-tokenize_upper_sigil_name(T, NameAcc, Line, Column, Scope, Tokens) ->
-  {ok, lists:reverse(NameAcc), T, Line, Column, Scope, Tokens}.
-
-sigil_name_error() ->
-  "invalid sigil name, it should be either a one-letter lowercase letter or an " ++
-  "uppercase letter optionally followed by uppercase letters and digits, got: ".
-
-tokenize_sigil_contents([H, H, H | T] = Original, [S | _] = SigilName, Line, Column, Scope, Tokens)
-    when ?is_quote(H) ->
-  % Streaming mode for sigil heredocs
-  case extract_heredoc_header(T) of
-    {ok, Headerless} ->
-      SigilAtom = list_to_atom("sigil_" ++ SigilName),
-      StartCol = Column - length(SigilName) - 1,
-      StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column + 3, nil, Scope), SigilAtom, <<H,H,H>>},
-      % Switch to interpolation streaming; pass closing delimiter [H,H,H]
-      % Store sigil info in interpolation payload: {sigil_info, SigilAtom, Interpol?, StartDelim}
-      Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H,H,H>>},
-      {switch_to_interp, StartTok, Headerless, Line + 1, 1, Scope, sigil, [H, H, H], Interp};
-    {error, Message} ->
-      error({make_meta_len(Line, Column - 1 - length(SigilName), 1, nil, Scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens)
-  end;
-
-tokenize_sigil_contents([H | T] = _Original, [S | _] = SigilName, Line, Column, Scope, _Tokens)
-    when ?is_sigil(H) ->
-  % Streaming mode for regular sigils
-  SigilAtom = list_to_atom("sigil_" ++ SigilName),
-  StartCol = Column - length(SigilName) - 1,
-  StartTok = {sigil_start, make_meta(Line, StartCol, Line, Column + 1, nil, Scope), SigilAtom, <<H>>},
-  Interp = {sigil_info, SigilAtom, ?is_downcase(S), <<H>>},
-  % Switch to interpolation with closing terminator derived from opening
-  {switch_to_interp, StartTok, T, Line, Column + 1, Scope, sigil, sigil_terminator(H), Interp};
-
-tokenize_sigil_contents([H | _] = Original, SigilName, Line, Column, Scope, Tokens) ->
-  MessageString =
-    "\"~ts\" (column ~p, code point U+~4.16.0B). The available delimiters are: "
-    "//, ||, \"\", '', (), [], {}, <>",
-  Message = io_lib:format(MessageString, [[H], Column, H]),
-  ErrorColumn = Column - 1 - length(SigilName),
-  error({make_meta_len(Line, ErrorColumn, 1, nil, Scope), "invalid sigil delimiter: ", Message}, [$~] ++ SigilName ++ Original, Scope, Tokens);
-
-% Incomplete sigil.
-tokenize_sigil_contents([], _SigilName, Line, Column, Scope, Tokens) ->
-  % Yield directly - incomplete sigil case
-  yield([], Line, Column, Scope, Tokens).
 
 %% Fail early on invalid do syntax. For example, after
 %% most keywords, after comma and so on.

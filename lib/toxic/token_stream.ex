@@ -35,7 +35,7 @@ defmodule Toxic.TokenStream do
   # TODO: Make sure it actually works with binary, iolist and producer function
   @typedoc "Source can be a binary or a producer function"
   @type source ::
-          iodata() | ((non_neg_integer(), non_neg_integer()) -> {:more, binary()} | :eof)
+          iodata() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof)
 
   defstruct buffer: :queue.new(),
             push: [],
@@ -86,13 +86,16 @@ defmodule Toxic.TokenStream do
   def next(%__MODULE__{eof: true, push: [], buffer: buffer} = stream) do
     case :queue.is_empty(buffer) do
       true -> {:eof, stream}
-      false -> do_next(stream)  # Still have tokens in buffer
+      # Still have tokens in buffer
+      false -> do_next(stream)
     end
   end
-  def next(%__MODULE__{eof: true, push: [_|_]} = stream) do
+
+  def next(%__MODULE__{eof: true, push: [_ | _]} = stream) do
     # EOF but still have pushed tokens
     do_next(stream)
   end
+
   def next(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
     if Keyword.get(opts, :error_mode, :tolerant) == :strict do
       {:eof, stream}
@@ -126,6 +129,7 @@ defmodule Toxic.TokenStream do
 
       {:empty, _} ->
         stream = refill_buffer(stream)
+
         if stream.eof do
           {:eof, stream}
         else
@@ -141,6 +145,7 @@ defmodule Toxic.TokenStream do
   """
   @spec peek(t()) :: {:ok, token(), t()} | {:eof, t()}
   def peek(%__MODULE__{eof: true} = stream), do: {:eof, stream}
+
   def peek(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
     if Keyword.get(opts, :error_mode, :tolerant) == :strict do
       {:eof, stream}
@@ -161,6 +166,7 @@ defmodule Toxic.TokenStream do
     case :queue.peek(buffer) do
       {:value, token} ->
         token = process_token(token, stream)
+
         if token == nil do
           # Skip nil tokens and peek the next one
           # We need to consume it temporarily
@@ -173,6 +179,7 @@ defmodule Toxic.TokenStream do
 
       :empty ->
         stream = refill_buffer(stream)
+
         if stream.eof do
           {:eof, stream}
         else
@@ -195,25 +202,25 @@ defmodule Toxic.TokenStream do
 
     # TODO: make sure this works correctly: if unable to fill n, stream should not be marked as EOFed
 
-    if stream.eof do
-      {:eof, stream}
-    else
-      push_tokens = Enum.take(stream.push, n)
-      needed = n - length(push_tokens)
+    push_tokens = Enum.take(stream.push, n)
+    needed = n - length(push_tokens)
 
+    tokens =
       if needed > 0 do
         buffer_tokens = :queue.to_list(stream.buffer) |> Enum.take(needed)
-        tokens = push_tokens ++ buffer_tokens
-
-        if length(tokens) < n do
-          {:eof, stream}
-        else
-          tokens = Enum.map(tokens, &process_token(&1, stream))
-          {:ok, tokens, stream}
-        end
+        push_tokens ++ buffer_tokens
       else
-        {:ok, push_tokens, stream}
+        push_tokens
       end
+
+    processed =
+      tokens
+      |> Enum.map(&process_token(&1, stream))
+      |> Enum.reject(&is_nil/1)
+
+    case {processed, stream.eof} do
+      {[], true} -> {:eof, stream}
+      _ -> {:ok, processed, stream}
     end
   end
 
@@ -249,6 +256,7 @@ defmodule Toxic.TokenStream do
         if delete_checkpoint? do
           Process.delete({__MODULE__, :checkpoint, ref})
         end
+
         %{stream | push: push, buffer: buffer, driver: driver}
 
       nil ->
@@ -288,7 +296,14 @@ defmodule Toxic.TokenStream do
   Create a stream from a slice of input.
   """
   # TODO: better docs
-  @spec slice(t() | iodata(), non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer(), options()) :: t()
+  @spec slice(
+          t() | iodata(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          options()
+        ) :: t()
   def slice(source, start_offset, end_offset, line_base, column_base, opts \\ []) do
     slice_source = extract_slice(source, start_offset, end_offset)
     new(slice_source, line_base, column_base, opts)
@@ -330,9 +345,8 @@ defmodule Toxic.TokenStream do
   # Private functions
 
   defp normalize_source_for_driver(source) when is_binary(source), do: String.to_charlist(source)
-  defp normalize_source_for_driver(source) when is_list(source) do
-    source |> IO.iodata_to_binary() |> String.to_charlist()
-  end
+  defp normalize_source_for_driver(source) when is_list(source), do: source
+
   defp normalize_source_for_driver(source) when is_function(source, 2) do
     # For function sources, convert to charlist on each call
     fn line, column ->
@@ -355,62 +369,68 @@ defmodule Toxic.TokenStream do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
     # TODO: slicing source
     source_string = normalize_source_for_driver(stream.source)
-    {tokens, source_string, new_driver, eof} = fetch_tokens_from_driver(stream.driver, source_string, max_batch, [], 0, opts)
 
-    {tokens, source_string,  new_driver, eof}
+    {tokens, source_string, new_driver, eof, error} =
+      fetch_tokens_from_driver(stream.driver, source_string, max_batch, [], 0, opts)
+
+    {tokens, source_string, new_driver, eof, error}
   end
 
-  defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, _opts) when count >= max_batch do
-    {Enum.reverse(acc), source_string, driver, false}
+  defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, _opts)
+       when count >= max_batch do
+    {Enum.reverse(acc), source_string, driver, false, nil}
   end
 
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
     case Toxic.Driver.next_with_validation(source_string, driver) do
       {:ok, token, new_source_string, new_driver} ->
-        processed_token = process_token(token, %__MODULE__{opts: opts})
-        if processed_token == nil do
-          # Skip nil tokens (e.g., filtered EOL) and continue with updated state
-          fetch_tokens_from_driver(new_driver, new_source_string, max_batch, acc, count, opts)
-        else
-          fetch_tokens_from_driver(new_driver, new_source_string, max_batch, [processed_token | acc], count + 1, opts)
-        end
+        # Do not pre-process tokens here; keep batching bounded by driver steps
+        fetch_tokens_from_driver(
+          new_driver,
+          new_source_string,
+          max_batch,
+          [token | acc],
+          count + 1,
+          opts
+        )
 
       {:eof, driver} ->
-        {Enum.reverse(acc), [], driver, true}
+        {Enum.reverse(acc), [], driver, true, nil}
 
-      {:error_token, meta, reason, driver} ->
-        error_token = {:error_token, meta, reason}
-        fetch_tokens_from_driver(driver, source_string, max_batch, [error_token | acc], count + 1, opts)
-
-      {:error, _reason, _string, driver} ->
-        # Error from driver - stop fetching tokens
-        {Enum.reverse(acc), [], driver, false}
+      {:error, reason, rest_string, driver} ->
+        # Propagate error; keep rest_string as the current source
+        {Enum.reverse(acc), rest_string, driver, false, reason}
     end
   end
 
   defp refill_buffer(%__MODULE__{eof: true} = stream), do: stream
+
   defp refill_buffer(%__MODULE__{opts: opts} = stream) do
     max_batch = Keyword.get(opts, :max_batch, 256)
 
-    {tokens, source, new_driver, eof} = fetch_tokens_from_driver(stream, max_batch, opts)
+    {tokens, source, new_driver, eof, error} = fetch_tokens_from_driver(stream, max_batch, opts)
 
-    new_buffer = Enum.reduce(tokens, stream.buffer, fn token, buf ->
-      :queue.in(token, buf)
-    end)
+    new_buffer =
+      Enum.reduce(tokens, stream.buffer, fn token, buf ->
+        :queue.in(token, buf)
+      end)
 
     # Only set EOF if driver is at EOF AND we got no new tokens
     stream_eof = eof and tokens == []
 
-    %{stream |
-      buffer: new_buffer,
-      driver: new_driver,
-      source: source,
-      eof: stream_eof
+    %{
+      stream
+      | buffer: new_buffer,
+        driver: new_driver,
+        source: source,
+        eof: stream_eof,
+        error: error || stream.error
     }
   end
 
   defp maybe_refill_buffer(%__MODULE__{buffer: buffer, opts: opts} = stream) do
     min_size = div(Keyword.get(opts, :max_batch, 256), 4)
+
     if :queue.len(buffer) < min_size do
       refill_buffer(stream)
     else
@@ -420,6 +440,7 @@ defmodule Toxic.TokenStream do
 
   defp ensure_buffer_size(%__MODULE__{} = stream, needed) do
     buffer_size = :queue.len(stream.buffer) + length(stream.push)
+
     if buffer_size < needed and not stream.eof do
       stream
       |> refill_buffer()
@@ -429,13 +450,13 @@ defmodule Toxic.TokenStream do
     end
   end
 
-
   defp process_token(token, %__MODULE__{opts: opts}) do
-    token = if Keyword.get(opts, :eol_mode, :embed) == :embed do
-      filter_eol_token(token)
-    else
-      token
-    end
+    token =
+      if Keyword.get(opts, :eol_mode, :embed) == :embed do
+        filter_eol_token(token)
+      else
+        token
+      end
 
     # Apply space-sensitive rewrites if needed
     apply_rewrites(token)
@@ -446,6 +467,7 @@ defmodule Toxic.TokenStream do
   defp filter_eol_token(token), do: token
 
   defp apply_rewrites(nil), do: nil
+
   defp apply_rewrites(token) do
     # Space-sensitive rewrites would go here
     # For now, just return the token as-is
