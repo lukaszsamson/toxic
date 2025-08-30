@@ -123,7 +123,7 @@ defmodule Toxic.Tokenizer do
   # Heredocs
 
   def tokenize_single([?", ?", ?" | t], line, column, scope, tokens) do
-    Toxic.string().handle_heredocs(t, line, column, ?", scope, tokens)
+    Toxic.String.handle_heredocs(t, line, column, ?", scope, tokens)
   end
 
   def tokenize_single([?', ?', ?' | t], line, column, scope, tokens) do
@@ -131,7 +131,7 @@ defmodule Toxic.Tokenizer do
     new_scope = scope
 
     # new_scope = prepend_warning(line, column, "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"),
-    Toxic.string().handle_heredocs(t, line, column, ?', new_scope, tokens)
+    Toxic.String.handle_heredocs(t, line, column, ?', new_scope, tokens)
   end
 
   # Strings

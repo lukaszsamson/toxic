@@ -71,14 +71,17 @@ defmodule Toxic.Driver do
         state.column,
         state.scope,
         carry_with_recent
-      ) |> dbg
+      )
+      |> dbg
 
     handle_tokenize_result(state, result)
   end
 
   def next(
         string,
-        %__MODULE__{contexts: [{:interp, kind, interpolation_allowed?, delim} | contexts_rest] = contexts} =
+        %__MODULE__{
+          contexts: [{:interp, kind, interpolation_allowed?, delim} | contexts_rest] = contexts
+        } =
           state
       ) do
     case :toxic_interpolation.extract_stream_event(
@@ -110,7 +113,25 @@ defmodule Toxic.Driver do
             end
         end
 
+      # TODO: refactor - add indent in other clauses
+      {:done, meta, _binary_part, indent, rest, line, column, scope}
+      when kind in [:bin_heredoc, :list_heredoc] ->
+        end_token_type =
+          case kind do
+            :list_heredoc -> :list_heredoc_end
+            :bin_heredoc -> :bin_heredoc_end
+          end
+
+        return_token({end_token_type, meta, delim, indent}, rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            contexts: contexts_rest
+        })
+
       {:done, meta, _binary_part, rest, line, column, scope} ->
+        # TODO: why binary_part?
         case rest do
           # [?:, ws | tail] when is_space(ws) ->
           #   {{sl, sc}, {el, ec}, extra} = meta
@@ -134,8 +155,8 @@ defmodule Toxic.Driver do
                 _ -> :bin_string_end
               end
 
-              dbg(rest)
-              dbg({line, column})
+            dbg(rest)
+            dbg({line, column})
 
             return_token({end_token_type, meta, delim}, rest, %{
               state
@@ -145,8 +166,16 @@ defmodule Toxic.Driver do
                 contexts: contexts_rest
             })
         end
+
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
-        updated = %{state | line: line, column: column, scope: scope, contexts: [:normal | contexts]}
+        updated = %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            contexts: [:normal | contexts]
+        }
+
         return_token({:begin_interpolation, meta, kind}, rest, updated)
     end
   end

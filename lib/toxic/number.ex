@@ -70,6 +70,7 @@ defmodule Toxic.Number do
   # Cast to float...
   def tokenize_number(rest, acc, length, true) do
     dbg()
+
     try do
       {number, original} = reverse_number(acc, [], [])
       {rest, List.to_float(number), original, length}
