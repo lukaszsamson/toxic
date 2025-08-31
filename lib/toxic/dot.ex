@@ -74,7 +74,7 @@ defmodule Toxic.Dot do
     start_tok = {:quoted_identifier_start, meta(line, column, line, 1, nil), h}
 
     multiple(
-      [{:token_with_eol, dot_token}, {:switch_to_interp, start_tok, :quoted_identifier, h}],
+      [{:token_with_eol, dot_token}, {:switch_to_interp, start_tok, :quoted_identifier, true, h}],
       t,
       line,
       column + 1,

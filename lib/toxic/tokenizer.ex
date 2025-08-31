@@ -602,7 +602,7 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?. | t], line, column, scope, tokens) do
-    Toxic.Dot.tokenize_dot(t, line, column + 1, {line, column, nil}, scope, tokens)
+    Toxic.Dot.tokenize_dot(t, line, column + 1, meta(line, column, 1, nil), scope, tokens)
   end
 
   # Identifiers

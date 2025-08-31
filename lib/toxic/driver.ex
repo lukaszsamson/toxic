@@ -196,6 +196,25 @@ defmodule Toxic.Driver do
             contexts: contexts_rest
         })
 
+      {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
+        end_token_type =
+          case rest do
+            [?( | _] -> :quoted_paren_identifier_end
+            [?[ | _] -> :quoted_bracket_identifier_end
+            _ -> :quoted_identifier_end
+          end
+
+        dbg(rest)
+        dbg({line, column})
+
+        return_token({end_token_type, meta, delim}, rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            contexts: contexts_rest
+        })
+
       {:done, meta, _binary_part, rest, line, column, scope} ->
         # TODO: why binary_part?
         case rest do
@@ -266,7 +285,7 @@ defmodule Toxic.Driver do
           end)
 
         # TODO: figure out
-        {rest, state}
+        {rest, state |> dbg}
 
       {:drop_not, rest, line, column, scope} ->
         {rest, %{state | line: line, column: column, scope: scope, deferrals: tl(deferrals)}}
@@ -305,7 +324,20 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: Enum.reverse(deferrals),
+             output: output ++ Enum.reverse(deferrals),
+             deferrals: [token]
+         }}
+
+      {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
+        IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: output ++ Enum.reverse(deferrals),
              deferrals: [token]
          }}
 
@@ -317,12 +349,21 @@ defmodule Toxic.Driver do
              column: column,
              scope: scope,
              deferrals: [],
-             output: Enum.reverse(deferrals) ++ [token]
+             output: output ++ Enum.reverse(deferrals) ++ [token]
          }}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
-        # TODO: implement identifier change to op_identifier
-        {rest, %{state | line: line, column: column, scope: scope, output: [token]}}
+        [{:identifier, meta, name}] = deferrals
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: [{:op_identifier, meta, name}, token],
+             deferrals: []
+         }}
 
       {{:token_with_eol, {:unary_op, _meta, :not} = token}, rest, line, column, scope} ->
         IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
@@ -350,9 +391,10 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: Enum.reverse(carry_with_recent),
+             output: output ++ Enum.reverse(carry_with_recent),
              deferrals: []
-         }}
+         }
+         |> dbg}
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope} ->
@@ -364,7 +406,7 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: Enum.reverse([start_token | deferrals]),
+             output: output ++ Enum.reverse([start_token | deferrals]),
              deferrals: [],
              contexts: contexts
          }}

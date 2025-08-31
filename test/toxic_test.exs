@@ -2446,10 +2446,6 @@ defmodule ToxicTest do
       assert tokenize("Foo") == {:ok, [{:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo}], ""}
     end
 
-    test "alias with underscore" do
-      assert tokenize("FooBar") == {:ok, [{:alias, {{1, 1}, {1, 7}, ~c"FooBar"}, :FooBar}], ""}
-    end
-
     test "alias with underscore in middle" do
       assert tokenize("Foo_Bar") == {:ok, [{:alias, {{1, 1}, {1, 8}, ~c"Foo_Bar"}, :Foo_Bar}], ""}
     end
@@ -2492,6 +2488,15 @@ defmodule ToxicTest do
                 [
                   {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
                   {:identifier, {{1, 6}, {1, 9}, ~c"bar"}, :bar}
+                ], ""}
+    end
+
+    test "operator kw_identifier" do
+      assert tokenize("+: bar") ==
+               {:ok,
+                [
+                  {:kw_identifier, {{1, 1}, {1, 3}, nil}, :+},
+                  {:identifier, {{1, 4}, {1, 7}, ~c"bar"}, :bar}
                 ], ""}
     end
 

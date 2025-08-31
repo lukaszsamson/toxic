@@ -85,7 +85,7 @@ defmodule Toxic.Operator do
 
   def handle_unary_op([?: | rest], line, column, _kind, length, op, scope, _tokens)
       when is_space(hd(rest)) do
-    token = {:kw_identifier, meta(line, column, length, nil), op}
+    token = {:kw_identifier, meta(line, column, length + 1, nil), op}
     emit(token, rest, line, column + length + 1, scope)
   end
 
