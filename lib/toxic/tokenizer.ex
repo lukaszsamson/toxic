@@ -449,8 +449,8 @@ defmodule Toxic.Tokenizer do
         else: {:atom_unsafe, :atom_unsafe_start}
       )
 
-    start_tok = {start_type, meta(line, column, 2, nil), h}
-    {:switch_to_interp, start_tok, t, line, column + 2, scope, kind, h, []}
+    start_token = {start_type, meta(line, column, 2, nil), h}
+    {{:switch_to_interp, start_token, kind, true, h}, t, line, column + 2, scope}
   end
 
   def tokenize_single(
