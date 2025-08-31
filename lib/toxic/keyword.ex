@@ -16,8 +16,8 @@ defmodule Toxic.Keyword do
     end
   end
 
-  def tokenize_keyword(:token, rest, line, column, _atom, length, scope, _tokens) do
-    token = {:atom, meta(line, column, length, nil)}
+  def tokenize_keyword(:token, rest, line, column, atom, length, scope, _tokens) do
+    token = {atom, meta(line, column, length, nil)}
     emit(token, rest, line, column + length, scope)
   end
 

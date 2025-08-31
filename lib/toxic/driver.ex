@@ -56,8 +56,8 @@ defmodule Toxic.Driver do
     {:eof, state}
   end
 
-  def next([], %__MODULE__{deferrals: [h | t]} = state) do
-    return_token(h, [], %{state | deferrals: t})
+  def next([], %__MODULE__{deferrals: [_h | _t] = deferrals} = state) do
+    next([], %{state | deferrals: [], output: Enum.reverse(deferrals)})
   end
 
   def next(
@@ -89,7 +89,8 @@ defmodule Toxic.Driver do
       )
       |> dbg
 
-    handle_tokenize_result(state, result)
+    {rest, state} = handle_tokenize_result(state, result)
+    next(rest, state)
   end
 
   def next(
@@ -251,73 +252,89 @@ defmodule Toxic.Driver do
        ) do
     case result do
       :eof ->
-        next([], state)
+        {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
 
       # {:eof, state}
 
       {nil, rest, line, column, scope} ->
-        next(rest, %{state | line: line, column: column, scope: scope})
+        {rest, %{state | line: line, column: column, scope: scope}}
 
       {events, rest, line, column, scope} when is_list(events) ->
+        {rest, state} =
+          Enum.reduce(events, {rest, state}, fn event, {rest, state} ->
+            handle_tokenize_result(state, {event, rest, line, column, scope})
+          end)
+
         # TODO: figure out
-        next(rest, %{state | line: line, column: column, scope: scope})
+        {rest, state}
+
+      {:drop_not, rest, line, column, scope} ->
+        {rest, %{state | line: line, column: column, scope: scope, deferrals: tl(deferrals)}}
 
       {:reset_eol, rest, line, column, scope} ->
         [{kind, meta(start_line, start_column, _end_line, _end_column, _extra)} | t] = deferrals
 
-        next(rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            deferrals: [{kind, meta(start_line, start_column, line, column, 0)} | t]
-        })
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [{kind, meta(start_line, start_column, line, column, 0)} | t]
+         }}
 
       {:increase_eol, rest, line, column, scope} ->
         [{kind, meta(start_line, start_column, _end_line, _end_column, extra)} | t] = deferrals
 
-        next(rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
-        })
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
+         }}
 
       {{:token, {eol, _meta} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         IO.puts("deferring #{inspect(token)}")
 
-        next(rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            output: Enum.reverse(deferrals),
-            deferrals: [token]
-        })
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: Enum.reverse(deferrals),
+             deferrals: [token]
+         }}
 
       {{:token, token}, rest, line, column, scope} ->
-        case deferrals do
-          [] ->
-            return_token(token, rest, %{state | line: line, column: column, scope: scope})
-
-          other ->
-            [h | t] = Enum.reverse(other)
-
-            return_token(h, rest, %{
-              state
-              | line: line,
-                column: column,
-                scope: scope,
-                deferrals: [],
-                output: t ++ [token]
-            })
-        end
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [],
+             output: Enum.reverse(deferrals) ++ [token]
+         }}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
         # TODO: implement identifier change to op_identifier
-        return_token(token, rest, %{state | line: line, column: column, scope: scope})
+        {rest, %{state | line: line, column: column, scope: scope, output: [token]}}
+
+      {{:token_with_eol, {:unary_op, _meta, :not} = token}, rest, line, column, scope} ->
+        IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [token | deferrals]
+         }}
 
       {{:token_with_eol, token}, rest, line, column, scope} ->
         carry_with_recent =
@@ -327,28 +344,30 @@ defmodule Toxic.Driver do
             {left, tokens} -> [left | tokens]
           end
 
-        next(rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            output: Enum.reverse(carry_with_recent),
-            deferrals: []
-        })
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: Enum.reverse(carry_with_recent),
+             deferrals: []
+         }}
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope} ->
         contexts = [{:interp, interp_kind, interpolation_allowed?, delimiter} | contexts]
 
-        next(rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            output: Enum.reverse([start_token | deferrals]),
-            deferrals: [],
-            contexts: contexts
-        })
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: Enum.reverse([start_token | deferrals]),
+             deferrals: [],
+             contexts: contexts
+         }}
     end
   end
 

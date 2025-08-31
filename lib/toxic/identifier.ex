@@ -22,9 +22,9 @@ defmodule Toxic.Identifier do
       {kind, acc, rest, length, ascii, special} ->
         keyword = maybe_keyword? and maybe_keyword?(rest)
 
-        case keyword_or_unsafe_to_atom(keyword, acc, line, column, scope) do
+        case keyword_or_unsafe_to_atom(keyword, acc, line, column, scope) |> dbg do
           {:keyword, atom, type} ->
-            {keyword, atom, type, rest, length}
+            {:keyword, atom, type, rest, length}
 
           {:ok, atom} ->
             {kind, acc, atom, rest, length, ascii, special}

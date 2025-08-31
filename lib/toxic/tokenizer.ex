@@ -620,7 +620,8 @@ defmodule Toxic.Tokenizer do
            column,
            original_scope,
            not previous_was_dot?(tokens)
-         ) do
+         )
+         |> dbg do
       {kind, unencoded, atom, rest, length, ascii, special} ->
         at? = ?@ in special
         scope = track_ascii(ascii, original_scope)
