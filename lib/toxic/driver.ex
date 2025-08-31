@@ -105,15 +105,18 @@ defmodule Toxic.Driver do
            state.scope,
            interpolation_allowed?,
            string,
-           delim
-         ) do
+           delim |> dbg
+         )
+         |> dbg do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
         case kind do
-          # :sigil ->
-          #   part = unescape_sigil_fragment(binary_part, interpolation)
-
-          #   {:ok, {:string_fragment, meta, part}, rest,
-          #    %{state | line: line, column: column, scope: scope}}
+          :sigil ->
+            return_token({:string_fragment, meta, binary_part}, rest, %{
+              state
+              | line: line,
+                column: column,
+                scope: scope
+            })
 
           _ ->
             # TODO: handle unescape error
@@ -127,6 +130,53 @@ defmodule Toxic.Driver do
                 })
             end
         end
+
+      # Sigil completion (no indentation)
+      {:done, meta, _binary_part, rest, line, column, scope} when kind == :sigil ->
+        # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
+        end_token = {:sigil_end, meta, delim, nil}
+
+        {rest, modifiers} = Toxic.Sigil.collect_modifiers(rest)
+        modifiers_length = length(modifiers)
+
+        output =
+          if modifiers_length != 0 do
+            [{:sigil_modifiers, meta(line, column, modifiers_length, nil), modifiers}]
+          else
+            []
+          end
+
+        return_token(end_token, rest, %{
+          state
+          | line: line,
+            column: column + modifiers_length,
+            scope: scope,
+            contexts: contexts_rest,
+            output: output
+        })
+
+      {:done, meta, _binary_part, indent, rest, line, column, scope} when kind == :sigil ->
+        # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
+        end_token = {:sigil_end, meta, delim, indent}
+
+        {rest, modifiers} = Toxic.Sigil.collect_modifiers(rest)
+        modifiers_length = length(modifiers)
+
+        output =
+          if modifiers_length != 0 do
+            [{:sigil_modifiers, meta(line, column, modifiers_length, nil), modifiers}]
+          else
+            []
+          end
+
+        return_token(end_token, rest, %{
+          state
+          | line: line,
+            column: column + modifiers_length,
+            scope: scope,
+            contexts: contexts_rest,
+            output: output
+        })
 
       # TODO: refactor - add indent in other clauses
       {:done, meta, _binary_part, indent, rest, line, column, scope}

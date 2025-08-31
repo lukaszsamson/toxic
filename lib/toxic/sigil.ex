@@ -3,7 +3,7 @@ defmodule Toxic.Sigil do
   import Toxic.Token
 
   def tokenize_sigil([?~ | t], line, column, scope, tokens) do
-    case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) do
+    case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) |> dbg do
       {:ok, name, rest, new_line, new_column, new_scope, new_tokens} ->
         tokenize_sigil_contents(rest, name, new_line, new_column, new_scope, new_tokens)
 
@@ -72,21 +72,35 @@ defmodule Toxic.Sigil do
   # #   "invalid sigil name, it should be either a one-letter lowercase letter or an " ++
   # #   "uppercase letter optionally followed by uppercase letters and digits, got: ".
 
-  # def tokenize_sigil_contents([H, H, H | T] = original, [S | _] = sigil_name, line, column, scope, tokens)
-  #     when is_quote(h) do
-  #   case extract_heredoc_header(t) do
-  #     {ok, Headerless} ->
-  #       sigil_atom = list_to_atom("sigil_" ++ sigil_name)
-  #       start_column = column - length(sigil_name) - 1
-  #       start_token = {sigil_start, make_meta(line, start_column, line, column + 3, nil, scope), sigil_atom, <<H,H,H>>}
-  #       % Switch to interpolation streaming; pass closing delimiter [H,H,H]
-  #       % Store sigil info in interpolation payload: {sigil_info, sigil_atom, Interpol?, StartDelim}
-  #       Interp = {sigil_info, sigil_atom, ?is_downcase(S), <<H,H,H>>}
-  #       {switch_to_interp, start_token, Headerless, line + 1, 1, scope, sigil, [H, H, H], Interp}
-  #     {error, Message} ->
-  #       error({make_meta_len(line, column - 1 - length(sigil_name), 1, nil, scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
-  #   end
-  # end
+  def tokenize_sigil_contents(
+        [h, h, h | t] = _original,
+        [s | _] = sigil_name,
+        line,
+        column,
+        scope,
+        _tokens
+      )
+      when is_quote(h) do
+    case Toxic.String.extract_heredoc_header(t) do
+      {:ok, headerless} ->
+        sigil_atom = List.to_atom(~c"sigil_" ++ sigil_name)
+        start_column = column - length(sigil_name) - 1
+
+        start_token =
+          {:sigil_start, meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
+
+        # Interp = {sigil_info, sigil_atom, ?is_downcase(S), <<H,H,H>>}
+        # {switch_to_interp, start_token, Headerless, line + 1, 1, scope, sigil, [H, H, H], Interp}
+
+        {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, headerless,
+         line + 1, 1, scope}
+
+      :error ->
+        {:error, :invalid_char_after_heredoc_open}
+
+        # error({make_meta_len(line, column - 1 - length(sigil_name), 1, nil, scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
+    end
+  end
 
   def tokenize_sigil_contents(
         [h | t] = _original,
@@ -103,31 +117,43 @@ defmodule Toxic.Sigil do
     start_token =
       {:sigil_start, meta(line, start_column, line, column + 1, nil), sigil_atom, <<h>>}
 
-    interp = {:sigil_info, sigil_atom, is_downcase(s), <<h>>}
+    # interp = {:sigil_info, sigil_atom, is_downcase(s), <<h>>}
 
-    {:switch_to_interp, start_token, t, line, column + 1, scope, :sigil, sigil_terminator(h),
-     interp}
+    # {:switch_to_interp, start_token, t, line, column + 1, scope, :sigil, sigil_terminator(h),
+    #  interp}
+
+    {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, t, line,
+     column + 1, scope}
   end
 
-  # def tokenize_sigil_contents([H | _] = original, sigil_name, line, column, scope, tokens) do
-  #   {:error, :invalid_sigil_delimiter}
-  #   # MessageString =
-  #   #   "\"~ts\" (column ~p, code point U+~4.16.0B). The available delimiters are: "
-  #   #   "//, ||, \"\", '', (), [], {}, <>"
-  #   # Message = io_lib:format(MessageString, [[H], column, H])
-  #   # Errorcolumn = column - 1 - length(sigil_name)
-  #   # error({make_meta_len(line, Errorcolumn, 1, nil, scope), "invalid sigil delimiter: ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
-  # end
+  def tokenize_sigil_contents([_h | _] = _original, _sigil_name, _line, _column, _scope, _tokens) do
+    {:error, :invalid_sigil_delimiter}
+    #   # MessageString =
+    #   #   "\"~ts\" (column ~p, code point U+~4.16.0B). The available delimiters are: "
+    #   #   "//, ||, \"\", '', (), [], {}, <>"
+    #   # Message = io_lib:format(MessageString, [[H], column, H])
+    #   # Errorcolumn = column - 1 - length(sigil_name)
+    #   # error({make_meta_len(line, Errorcolumn, 1, nil, scope), "invalid sigil delimiter: ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
+  end
 
-  # # Incomplete sigil.
-  # def tokenize_sigil_contents([], _sigil_name, line, column, scope, tokens) do
-  #   # Yield directly - incomplete sigil case
-  #   yield([], line, column, scope, tokens)
-  # end
+  # Incomplete sigil.
+  def tokenize_sigil_contents([], _sigil_name, line, column, scope, _tokens) do
+    {nil, [], line, column, scope}
+  end
 
   defp sigil_terminator(?(), do: ?)
   defp sigil_terminator(?[), do: ?]
   defp sigil_terminator(?{), do: ?}
   defp sigil_terminator(?<), do: ?>
   defp sigil_terminator(other), do: other
+
+  def collect_modifiers(string, buffer \\ [])
+
+  def collect_modifiers([h | t], buffer) when is_downcase(h) or is_upcase(h) or is_digit(h) do
+    collect_modifiers(t, [h | buffer])
+  end
+
+  def collect_modifiers(rest, buffer) do
+    {rest, Enum.reverse(buffer)}
+  end
 end

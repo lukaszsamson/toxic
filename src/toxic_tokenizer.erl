@@ -248,7 +248,7 @@ linear_to_legacy([Tok | T], Out, [{interpol, StartMeta, Inner} | Stack]) ->
   linear_to_legacy(T, Out, [{interpol, StartMeta, [Tok | Inner]} | Stack]);
 
 %% Sigil end and optional modifiers
-linear_to_legacy([{sigil_end, EndMeta, SigilAtom, Delim, Indent} | Rest], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, _Mods, pending_end} | Stack]) ->
+linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, _Mods, pending_end} | Stack]) ->
   RevParts0 = lists:reverse(PartsRev),
   RevParts = case RevParts0 of [] -> [<<>>]; Other -> Other end,
   Parts1 = case Indent of
@@ -778,31 +778,6 @@ tokenize_single(("<<<<<<<" ++ _) = Original, Line, 1, Scope, Tokens) ->
 
 
 
-
-
-
-% ## Stand-alone tokens
-
-tokenize_single("=>" ++ Rest, Line, Column, Scope, Tokens) ->
-  EOL = previous_was_eol(Tokens),
-  Token0 = {assoc_op, make_meta_len(Line, Column, 2, EOL, Scope), '=>'},
-  % If previous was EOL, we should not keep the EOL token around; attach its count and drop it
-  Tokens1 = case Tokens of
-    [{eol, _} | Tail] -> Tail;
-    _ -> Tokens
-  end,
-  yield(Rest, Line, Column + 2, Scope, [Token0 | Tokens1]);
-
-tokenize_single("..//" ++ Rest = String, Line, Column, Scope, Tokens) ->
-  case strip_horizontal_space(Rest, 0) of
-    {[$/ | _] = Remaining, Extra} ->
-      Token = {identifier, make_meta_len(Line, Column, 4, nil, Scope), '..//'},
-      yield(Remaining, Line, Column + 4 + Extra, Scope, [Token | Tokens]);
-    {_, _} ->
-      unexpected_token(String, Line, Column, Scope, Tokens)
-  end;
-
-% ## Ternary operator
 
 % ## Three token operators
 tokenize_single([T1, T2, T3 | Rest], Line, Column, Scope, Tokens) when ?unary_op3(T1, T2, T3) ->

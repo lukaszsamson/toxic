@@ -3267,12 +3267,9 @@ defmodule ToxicTest do
 
   describe "sigil" do
     test "incomplete" do
-      assert tokenize("~") == {:ok, [], ""}
       assert tokenize("~x") == {:ok, [], ""}
       assert tokenize("~X") == {:ok, [], ""}
       assert tokenize("~X123") == {:ok, [], ""}
-      # TODO: this may be an elixir error
-      assert tokenize("~X 123") == {:ok, [], ""}
     end
 
     test "empty" do

@@ -100,11 +100,11 @@ extract_stream_next([$\n | Rest], Buffer, Line, _Column, StartLine, StartColumn,
 
 extract_stream_next([$\\, H, H, H | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, Interpol, [H, H, H]) ->
   % Handle escaped heredoc terminator
-  extract_stream_next(Rest, [H, H, H, $\\ | Buffer], Line, Column + 4, StartLine, StartColumn, Scope, Interpol, [H, H, H]);
+  extract_stream_next(Rest, [H, H, H | Buffer], Line, Column + 4, StartLine, StartColumn, Scope, Interpol, [H, H, H]);
 
 extract_stream_next([$\\, Last | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, Interpol, Last) ->
   % Handle escaped terminator
-  extract_stream_next(Rest, [Last, $\\ | Buffer], Line, Column + 2, StartLine, StartColumn, Scope, Interpol, Last);
+  extract_stream_next(Rest, [Last | Buffer], Line, Column + 2, StartLine, StartColumn, Scope, Interpol, Last);
 
 extract_stream_next([$\\, $#, ${ | Rest], Buffer, Line, Column, StartLine, StartColumn, Scope, true, Last) ->
   % Handle escaped interpolation start
