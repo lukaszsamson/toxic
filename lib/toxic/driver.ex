@@ -77,7 +77,7 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %__MODULE__{contexts: [:normal | _] = contexts} = state) do
-    carry_with_recent = state.deferrals
+    carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
 
     result =
       Toxic.Tokenizer.tokenize_single(

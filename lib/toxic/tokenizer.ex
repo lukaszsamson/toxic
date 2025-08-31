@@ -619,7 +619,7 @@ defmodule Toxic.Tokenizer do
            line,
            column,
            original_scope,
-           not previous_was_dot?(tokens)
+           not previous_was_dot?(tokens |> dbg) |> dbg
          )
          |> dbg do
       {kind, unencoded, atom, rest, length, ascii, special} ->
