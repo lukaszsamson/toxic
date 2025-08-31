@@ -233,7 +233,7 @@ defmodule Toxic.Driver do
             deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
         })
 
-      {{:token, {eol, _meta} = token}, rest, line, column, scope} when eol in [:eol, :";"] ->
+      {{:token, {eol, _meta} = token}, rest, line, column, scope} when eol in [:eol, :";", :","] ->
         IO.puts("deferring #{inspect(token)}")
 
         next(rest, %{
@@ -241,7 +241,8 @@ defmodule Toxic.Driver do
           | line: line,
             column: column,
             scope: scope,
-            deferrals: [token | deferrals]
+            output: Enum.reverse(deferrals),
+            deferrals: [token]
         })
 
       {{:token, token}, rest, line, column, scope} ->
