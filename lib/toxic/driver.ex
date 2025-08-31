@@ -207,13 +207,24 @@ defmodule Toxic.Driver do
         dbg(rest)
         dbg({line, column})
 
-        return_token({end_token_type, meta, delim}, rest, %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            contexts: contexts_rest
-        })
+        if end_token_type == :quoted_identifier_end do
+          next(rest, %{
+            state
+            | line: line,
+              column: column,
+              scope: scope,
+              contexts: contexts_rest,
+              deferrals: [{end_token_type, meta, delim}]
+          })
+        else
+          return_token({end_token_type, meta, delim}, rest, %{
+            state
+            | line: line,
+              column: column,
+              scope: scope,
+              contexts: contexts_rest
+          })
+        end
 
       {:done, meta, _binary_part, rest, line, column, scope} ->
         # TODO: why binary_part?
@@ -328,6 +339,23 @@ defmodule Toxic.Driver do
              deferrals: [token]
          }}
 
+      {:transform_into_do_identifier, rest, line, column, scope} ->
+        updated_token =
+          case deferrals do
+            [{:identifier, meta, name}] -> {:do_identifier, meta, name}
+            [{:quoted_identifier_end, meta, name}] -> {:quoted_do_identifier_end, meta, name}
+          end
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: [updated_token],
+             deferrals: []
+         }}
+
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
         IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
 
@@ -353,7 +381,11 @@ defmodule Toxic.Driver do
          }}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
-        [{:identifier, meta, name}] = deferrals
+        updated_token =
+          case deferrals do
+            [{:identifier, meta, name}] -> {:op_identifier, meta, name}
+            [{:quoted_identifier_end, meta, name}] -> {:quoted_op_identifier_end, meta, name}
+          end
 
         {rest,
          %{
@@ -361,7 +393,7 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: [{:op_identifier, meta, name}, token],
+             output: [updated_token, token],
              deferrals: []
          }}
 

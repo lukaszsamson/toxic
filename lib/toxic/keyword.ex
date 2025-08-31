@@ -4,12 +4,25 @@ defmodule Toxic.Keyword do
   import Toxic.Terminator
 
   def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, tokens) do
-    case tokenize_keyword_terminator(line, column, atom, length, tokens) do
+    case tokenize_keyword_terminator(line, column, atom, length, tokens) |> dbg do
+      #     {ok, [Check | T]} ->
+      # handle_terminator(Rest, Line, Column + Length, Scope, Check, T);
       {:ok, list} ->
+        # case list do
+        #   [event, {kind, check}] ->
+        #     {_, rest, line, column, scope} = handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
+        #     {list, rest, line, column, scope}
+        #   [{kind, check}] ->
+        #     {_, rest, line, column, scope} = handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
+        #     {list, rest, line, column, scope}
+        # end
         {_, check} = List.last(list)
 
-      # TODO: this needs refactoring
-      # handle_terminator(rest, line, column + length, scope, check, t)
+        {_, rest, line, column, scope} =
+          handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
+
+        {list, rest, line, column, scope}
+
       {:error, message, _token} ->
         {:error, message}
         # error({?LOC(line, column), Message, Token}, Token ++ rest, scope, tokens)
@@ -52,7 +65,8 @@ defmodule Toxic.Keyword do
       end
   end
 
-  defp tokenize_keyword_terminator(do_line, do_column, :do, length, [{:identifier, _, _} | _t]) do
+  defp tokenize_keyword_terminator(do_line, do_column, :do, length, [{token, _, _} | _t])
+       when token in [:identifier, :quoted_identifier_end] do
     {:ok,
      [
        :transform_into_do_identifier,

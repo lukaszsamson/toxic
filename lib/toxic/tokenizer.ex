@@ -768,10 +768,10 @@ defmodule Toxic.Tokenizer do
 
   # But everything else, except other operators, are
   defp handle_space_sensitive_tokens([sign, not_marker | t], line, column, scope, [
-         {:identifier, _, _} = h | tokens
+         {token, _, _} = h | tokens
        ])
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
-              not_marker != ?> do
+              not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest = [not_marker | t]
     dual_op_token = {:dual_op, meta(line, column, 1, nil), List.to_atom([sign])}
     emit_op_identifier(dual_op_token, rest, line, column + 1, scope)
