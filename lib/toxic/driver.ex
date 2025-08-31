@@ -62,7 +62,10 @@ defmodule Toxic.Driver do
 
   def next(
         [?} | rest],
-        %__MODULE__{contexts: [:normal, {:interp, kind, interpolation, delim} | contexts_rest]} =
+        %__MODULE__{
+          contexts: [:normal, {:interp, kind, interpolation, delim} | contexts_rest],
+          deferrals: deferrals
+        } =
           state
       ) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
@@ -70,10 +73,12 @@ defmodule Toxic.Driver do
     new_state = %{
       state
       | column: state.column + 1,
-        contexts: [{:interp, kind, interpolation, delim} | contexts_rest]
+        contexts: [{:interp, kind, interpolation, delim} | contexts_rest],
+        output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
+        deferrals: []
     }
 
-    return_token({:end_interpolation, meta, kind}, rest, new_state)
+    next(rest, new_state)
   end
 
   def next(string, %__MODULE__{contexts: [:normal | _] = contexts} = state) do
