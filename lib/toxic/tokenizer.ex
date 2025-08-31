@@ -31,7 +31,7 @@ defmodule Toxic.Tokenizer do
 
   # Comments
 
-  def tokenize_single([?# | string], line, column, scope, _tokens) do
+  def tokenize_single([?# | string], line, column, scope, tokens) do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
       {:error, _char} ->
         # error_comment(Char, [$# | string], line, column, scope, _tokens);
@@ -41,7 +41,10 @@ defmodule Toxic.Tokenizer do
         # TODO: preserve comments
         # preserve_comments(line, column, _tokens, Comment, rest),
         # tokenize(rest, line, column, scope, reset_eol(_tokens))
-        {:reset_eol, rest, line, column, scope}
+        case tokens do
+          [{:eol, _meta} | _] -> {:reset_eol, rest, line, column, scope}
+          _ -> {nil, rest, line, column, scope}
+        end
     end
   end
 
@@ -556,12 +559,12 @@ defmodule Toxic.Tokenizer do
     # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
   end
 
-  def tokenize_single([?\\, ?\n | rest], line, _column, scope, tokens) do
-    tokenize_eol(rest, line, scope, tokens)
+  def tokenize_single([?\\, ?\n | rest], line, _column, scope, _tokens) do
+    tokenize_eol(rest, line, scope, nil)
   end
 
-  def tokenize_single([?\\, ?\r, ?\n | rest], line, _column, scope, tokens) do
-    tokenize_eol(rest, line, scope, tokens)
+  def tokenize_single([?\\, ?\r, ?\n | rest], line, _column, scope, _tokens) do
+    tokenize_eol(rest, line, scope, nil)
   end
 
   def tokenize_single([?\n | rest], line, column, scope, tokens) do
@@ -664,7 +667,9 @@ defmodule Toxic.Tokenizer do
             new_scope = scope
 
             # new_scope = maybe_warn_for_ambiguous_bang_before_equals(:identifier, unencoded, rest, line, column, scope)
-            token = Toxic.Identifier.check_call_identifier(line, column, unencoded, atom, rest)
+            token =
+              Toxic.Identifier.check_call_identifier(line, column, length, unencoded, atom, rest)
+
             emit(token, rest, line, column + length, new_scope)
 
           _ ->
@@ -743,13 +748,13 @@ defmodule Toxic.Tokenizer do
 
     case eol do
       nil ->
-        {nil, rest, line + 1, column, indented_scope}
+        {nil, rest, line + 1, 1, indented_scope}
 
       :increase_eol ->
-        {:increase_eol, rest, line + 1, column, indented_scope}
+        {:increase_eol, rest, line + 1, 1, indented_scope}
 
       eol_token ->
-        {{:token, eol_token}, rest, line + 1, column, indented_scope}
+        {{:token, eol_token}, rest, line + 1, 1, indented_scope}
     end
   end
 

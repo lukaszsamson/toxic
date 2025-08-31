@@ -1126,13 +1126,11 @@ defmodule ToxicTest do
     end
 
     test "newline after semicolon" do
-      # TODO: should we include consumed newline?
-      assert tokenize(";\n") == {:ok, [";": {{1, 1}, {1, 2}, 1}], ""}
+      assert tokenize(";\n") == {:ok, [";": {{1, 1}, {2, 1}, 1}], ""}
     end
 
     test "newline after comma" do
-      # TODO: should we include consumed newline?
-      assert tokenize(",\n") == {:ok, [",": {{1, 1}, {1, 2}, 1}], ""}
+      assert tokenize(",\n") == {:ok, [",": {{1, 1}, {2, 1}, 1}], ""}
     end
 
     test "carriage return + newline" do
@@ -1164,6 +1162,10 @@ defmodule ToxicTest do
 
     test "newline after escaped newline" do
       assert tokenize("\\\n\n") == {:ok, [{:eol, {{2, 1}, {3, 1}, 1}}], ""}
+    end
+
+    test "escaped newline after newline" do
+      assert tokenize("\n\\\n ") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
     end
 
     test "horizontal space after escaped newline" do

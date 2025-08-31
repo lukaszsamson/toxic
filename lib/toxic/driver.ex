@@ -1,5 +1,6 @@
 defmodule Toxic.Driver do
   import Toxic.Scope
+  import Toxic.Token
 
   defstruct line: 1,
             column: 1,
@@ -10,6 +11,7 @@ defmodule Toxic.Driver do
             #  - consume_len: non-neg integer to consume from input and advance column
             #  - after_action: {:push_interp, kind, interpolation, delim} | nil
             deferrals: [],
+            output: [],
             # Track the most recent token emitted (for carry context)
             recent_token: nil
 
@@ -22,7 +24,7 @@ defmodule Toxic.Driver do
   end
 
   def next_with_validation(string, state) do
-    result = next(string, state)
+    result = next(string, state) |> dbg
     state = result |> Tuple.to_list() |> List.last()
     ensure_state_valid(state)
     result
@@ -45,6 +47,18 @@ defmodule Toxic.Driver do
     state
   end
 
+  def next(rest, %__MODULE__{output: [h | t]} = state) do
+    return_token(h, rest, %{state | output: t})
+  end
+
+  def next([], %__MODULE__{deferrals: []} = state) do
+    {:eof, state}
+  end
+
+  def next([], %__MODULE__{deferrals: [h | t]} = state) do
+    return_token(h, [], %{state | deferrals: t})
+  end
+
   def next(
         [?} | rest],
         %__MODULE__{contexts: [:normal, {:interp, kind, interpolation, delim} | contexts_rest]} =
@@ -62,7 +76,7 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %__MODULE__{contexts: [:normal | _] = contexts} = state) do
-    carry_with_recent = []
+    carry_with_recent = state.deferrals
 
     result =
       Toxic.Tokenizer.tokenize_single(
@@ -180,12 +194,15 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp handle_tokenize_result(state = %__MODULE__{contexts: contexts}, result) do
-    carry_with_recent = []
-
+  defp handle_tokenize_result(
+         state = %__MODULE__{contexts: contexts, deferrals: deferrals, output: output},
+         result
+       ) do
     case result do
       :eof ->
-        {:eof, state}
+        next([], state)
+
+      # {:eof, state}
 
       {nil, rest, line, column, scope} ->
         next(rest, %{state | line: line, column: column, scope: scope})
@@ -195,30 +212,76 @@ defmodule Toxic.Driver do
         next(rest, %{state | line: line, column: column, scope: scope})
 
       {:reset_eol, rest, line, column, scope} ->
-        # TODO: implement reset mechanism
-        next(rest, %{state | line: line, column: column, scope: scope})
+        [{kind, meta(start_line, start_column, _end_line, _end_column, _extra)} | t] = deferrals
+
+        next(rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            deferrals: [{kind, meta(start_line, start_column, line, column, 0)} | t]
+        })
 
       {:increase_eol, rest, line, column, scope} ->
-        # TODO: implement increase mechanism
-        next(rest, %{state | line: line, column: column, scope: scope})
+        [{kind, meta(start_line, start_column, _end_line, _end_column, extra)} | t] = deferrals
+
+        next(rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
+        })
+
+      {{:token, {eol, _meta} = token}, rest, line, column, scope} when eol in [:eol, :";"] ->
+        IO.puts("deferring #{inspect(token)}")
+
+        next(rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            deferrals: [token | deferrals]
+        })
 
       {{:token, token}, rest, line, column, scope} ->
-        return_token(token, rest, %{state | line: line, column: column, scope: scope})
+        case deferrals do
+          [] ->
+            return_token(token, rest, %{state | line: line, column: column, scope: scope})
+
+          other ->
+            [h | t] = Enum.reverse(other)
+
+            return_token(h, rest, %{
+              state
+              | line: line,
+                column: column,
+                scope: scope,
+                deferrals: [],
+                output: t ++ [token]
+            })
+        end
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
         # TODO: implement identifier change to op_identifier
         return_token(token, rest, %{state | line: line, column: column, scope: scope})
 
       {{:token_with_eol, token}, rest, line, column, scope} ->
-        _carry_with_recent =
-          case {token, carry_with_recent} do
+        carry_with_recent =
+          case {token, deferrals} do
             {{:unary_op, _, _} = left, tokens} -> [left | tokens]
             {left, [{:eol, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
 
-        # TODO: figure out how carry should work
-        return_token(token, rest, %{state | line: line, column: column, scope: scope})
+        next(rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope,
+            output: Enum.reverse(carry_with_recent),
+            deferrals: []
+        })
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope} ->

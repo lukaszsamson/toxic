@@ -1,17 +1,18 @@
 defmodule Toxic.Identifier do
   import Toxic.Scope
   import Toxic.Util
+  import Toxic.Token
 
-  def check_call_identifier(line, column, info, atom, [?( | _]) do
-    {:paren_identifier, {line, column, info}, atom}
+  def check_call_identifier(line, column, length, info, atom, [?( | _]) do
+    {:paren_identifier, meta(line, column, length, info), atom}
   end
 
-  def check_call_identifier(line, column, info, atom, [?[ | _]) do
-    {:bracket_identifier, {line, column, info}, atom}
+  def check_call_identifier(line, column, length, info, atom, [?[ | _]) do
+    {:bracket_identifier, meta(line, column, length, info), atom}
   end
 
-  def check_call_identifier(line, column, info, atom, _rest) do
-    {:identifier, {line, column, info}, atom}
+  def check_call_identifier(line, column, length, info, atom, _rest) do
+    {:identifier, meta(line, column, length, info), atom}
   end
 
   def tokenize_identifier(string, line, column, scope, maybe_keyword?) do

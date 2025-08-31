@@ -92,6 +92,7 @@ defmodule Toxic.Dot do
       Toxic.Identifier.check_call_identifier(
         line,
         column,
+        length,
         unencoded_op,
         List.to_atom(unencoded_op),
         rest
