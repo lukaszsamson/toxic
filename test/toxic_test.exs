@@ -4031,6 +4031,30 @@ defmodule ToxicTest do
     end
   end
 
+  describe "map and struct" do
+    test "map" do
+      # TODO: report to elixir
+      assert tokenize("%{}", must_match_elixir: false) ==
+               {:ok,
+                [
+                  {:%{}, {{1, 1}, {1, 2}, nil}},
+                  {:"{", {{1, 2}, {1, 3}, nil}},
+                  {:"}", {{1, 3}, {1, 4}, nil}}
+                ], ""}
+    end
+
+    test "struct" do
+      assert tokenize("%Foo{}") ==
+               {:ok,
+                [
+                  {:%, {{1, 1}, {1, 2}, nil}},
+                  {:alias, {{1, 2}, {1, 5}, ~c"Foo"}, :Foo},
+                  {:"{", {{1, 5}, {1, 6}, nil}},
+                  {:"}", {{1, 6}, {1, 7}, nil}}
+                ], ""}
+    end
+  end
+
   describe "integration" do
     test "module" do
       assert tokenize("defmodule Foo do\nend") ==
