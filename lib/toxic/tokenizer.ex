@@ -627,7 +627,7 @@ defmodule Toxic.Tokenizer do
 
         case rest do
           [?: | t] when is_space(hd(t)) ->
-            token = {:kw_identifier, meta(line, column, length, unencoded), atom}
+            token = {:kw_identifier, meta(line, column, length + 1, unencoded), atom}
             emit(token, t, line, column + length + 1, scope)
 
           [?: | t] when hd(t) != ?: ->

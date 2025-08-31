@@ -1,6 +1,7 @@
 defmodule Toxic.Driver do
   import Toxic.Scope
   import Toxic.Token
+  import Toxic.CharacterClassifier
 
   defstruct line: 1,
             column: 1,
@@ -147,18 +148,18 @@ defmodule Toxic.Driver do
       {:done, meta, _binary_part, rest, line, column, scope} ->
         # TODO: why binary_part?
         case rest do
-          # [?:, ws | tail] when is_space(ws) ->
-          #   {{sl, sc}, {el, ec}, extra} = meta
-          #   adj_meta = {{sl, sc}, {el, ec + 1}, extra}
+          [?:, ws | tail] when is_space(ws) ->
+            {{sl, sc}, {el, ec}, extra} = meta
+            adj_meta = {{sl, sc}, {el, ec + 1}, extra}
 
-          #   end_token_type =
-          #     case scope do
-          #       scope(existing_atoms_only: true) -> :kw_identifier_safe_end
-          #       _ -> :kw_identifier_unsafe_end
-          #     end
+            end_token_type =
+              case scope do
+                scope(existing_atoms_only: true) -> :kw_identifier_safe_end
+                _ -> :kw_identifier_unsafe_end
+              end
 
-          #   {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
-          #    %{state | line: line, column: column + 1, scope: scope, contexts: contexts_rest}}
+            {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
+             %{state | line: line, column: column + 1, scope: scope, contexts: contexts_rest}}
 
           _ ->
             end_token_type =
@@ -233,7 +234,8 @@ defmodule Toxic.Driver do
             deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
         })
 
-      {{:token, {eol, _meta} = token}, rest, line, column, scope} when eol in [:eol, :";", :","] ->
+      {{:token, {eol, _meta} = token}, rest, line, column, scope}
+      when eol in [:eol, :";", :","] ->
         IO.puts("deferring #{inspect(token)}")
 
         next(rest, %{
@@ -288,11 +290,13 @@ defmodule Toxic.Driver do
        line, column, scope} ->
         contexts = [{:interp, interp_kind, interpolation_allowed?, delimiter} | contexts]
 
-        return_token(start_token, rest, %{
+        next(rest, %{
           state
           | line: line,
             column: column,
             scope: scope,
+            output: Enum.reverse([start_token | deferrals]),
+            deferrals: [],
             contexts: contexts
         })
     end
