@@ -1,5 +1,6 @@
 defmodule Toxic.Util do
   import Toxic.CharacterClassifier, only: [is_horizontal_space: 1]
+  import Toxic.Scope
 
   def strip_horizontal_space([h | t], counter) when is_horizontal_space(h) do
     strip_horizontal_space(t, counter + 1)
@@ -70,5 +71,32 @@ defmodule Toxic.Util do
   # end
   def unsafe_to_atom(list, _line, _column, _scope) when is_list(list) do
     {:ok, List.to_atom(list)}
+  end
+
+  def unescape_tokens(tokens, _line, _column, scope(unescape: true)) do
+    case :toxic_interpolation.unescape_tokens(tokens) do
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, _message, _token} ->
+        {:error, :syntax_error}
+        # {error, {?LOC(Line, Column), Message ++ ". Syntax error after: ", Token}}
+    end
+  end
+
+  def unescape_tokens(tokens, _line, _column, scope(unescape: false)) do
+    try do
+      {:ok, tokens_to_binary(tokens)}
+    rescue
+      UnicodeConversionError ->
+        # {error, {?LOC(Line, Column), "invalid encoding in tokens: ", toxic_utils:characters_to_list(Message)}}
+        {:error, :invalid_encoding}
+    end
+  end
+
+  defp tokens_to_binary(tokens) do
+    for token <- tokens do
+      if is_list(token), do: :toxic_utils.characters_to_binary(token), else: token
+    end
   end
 end

@@ -1950,7 +1950,7 @@ defmodule ToxicTest do
     end
 
     test "indent" do
-      text = '''
+      text = ~c'''
           """
           expected closing '%>' for EEx expression
             |
@@ -1968,7 +1968,7 @@ defmodule ToxicTest do
     end
 
     test "indent interpolation" do
-      text = '''
+      text = ~c'''
             """
             <%= \#{__MODULE__}.switching_map [1, 2, 3], fn x -> %>
             A <%= x %>
@@ -1992,7 +1992,7 @@ defmodule ToxicTest do
     end
 
     test "indent interpolation escaped newline" do
-      text = '''
+      text = ~c'''
             """
             \#{inspect(unquote(module))} does not implement the Access behaviour
 

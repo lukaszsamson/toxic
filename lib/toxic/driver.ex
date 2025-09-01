@@ -81,7 +81,7 @@ defmodule Toxic.Driver do
     next(rest, new_state)
   end
 
-  def next(string, %__MODULE__{contexts: [:normal | _] = contexts} = state) do
+  def next(string, %__MODULE__{contexts: [:normal | _] = _contexts} = state) do
     carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
 
     result =
@@ -141,7 +141,7 @@ defmodule Toxic.Driver do
 
           _ ->
             # TODO: handle unescape error
-            case :toxic_tokenizer.unescape_tokens([binary_part], line, column, scope) do
+            case Toxic.Util.unescape_tokens([binary_part], line, column, scope) do
               {:ok, [unescaped]} ->
                 return_token(
                   {:string_fragment, meta(start_line, start_column, line, end_column, extra),

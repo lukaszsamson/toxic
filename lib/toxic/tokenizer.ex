@@ -306,7 +306,7 @@ defmodule Toxic.Tokenizer do
     Toxic.Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
-  def tokenize_single([?{ | rest], line, column, scope, [{:%, _} | _] = tokens) do
+  def tokenize_single([?{ | _rest], _line, _column, _scope, [{:%, _} | _] = _tokens) do
     {:error, :unexpected_space}
     # Message =
     #   "unexpected space between % and {\n\n"
@@ -379,7 +379,7 @@ defmodule Toxic.Tokenizer do
 
   # Single Token Operators
 
-  def tokenize_single([?& | rest], line, column, scope, tokens) do
+  def tokenize_single([?& | rest], line, column, scope, _tokens) do
     kind =
       case strip_horizontal_space(rest, 0) do
         {[int | _], 0} when is_digit(int) ->
@@ -458,7 +458,7 @@ defmodule Toxic.Tokenizer do
         line,
         column,
         scope = scope(cursor_completion: cursor_completion),
-        tokens
+        _tokens
       ) do
     case Toxic.Identifier.tokenize_identifier(string, line, column, scope, false) do
       {_kind, unencoded, atom, rest, length, ascii?, _special} ->
@@ -554,7 +554,7 @@ defmodule Toxic.Tokenizer do
     # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
   end
 
-  def tokenize_single(~c"\\\r\n" = original, line, column, scope, tokens) do
+  def tokenize_single(~c"\\\r\n" = _original, _line, _column, _scope, _tokens) do
     {:error, :invalid_escape}
     # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
   end
@@ -577,13 +577,13 @@ defmodule Toxic.Tokenizer do
 
   # Others
 
-  def tokenize_single([?%, ?( | rest], line, column, scope, tokens) do
+  def tokenize_single([?%, ?( | _rest], _line, _column, _scope, _tokens) do
     {:error, :invalid_map}
     # Reason = {?LOC(line, column), "expected %{ to define a map, got: ", [$%, $(]}
     # error(Reason, rest, scope, tokens)
   end
 
-  def tokenize_single([?%, ?[ | rest], line, column, scope, tokens) do
+  def tokenize_single([?%, ?[ | _rest], _line, _column, _scope, _tokens) do
     {:error, :invalid_map}
     # Reason = {?LOC(line, column), "expected %{ to define a map, got: ", [$%, $[]}
     # error(Reason, rest, scope, tokens)
@@ -602,7 +602,7 @@ defmodule Toxic.Tokenizer do
      scope}
   end
 
-  def tokenize_single([?% | t], line, column, scope, tokens) do
+  def tokenize_single([?% | t], line, column, scope, _tokens) do
     token = {:%, meta(line, column, 1, nil)}
     emit(token, t, line, column + 1, scope)
   end
@@ -766,14 +766,14 @@ defmodule Toxic.Tokenizer do
 
   # Ambiguous unary/binary operators tokens
   # Keywords are not ambiguous operators
-  defp handle_space_sensitive_tokens([sign, ?:, space | _] = string, line, column, scope, tokens)
+  defp handle_space_sensitive_tokens([sign, ?:, space | _] = string, line, column, scope, _tokens)
        when dual_op(sign) and is_space(space) do
     {nil, string, line, column, scope}
   end
 
   # But everything else, except other operators, are
   defp handle_space_sensitive_tokens([sign, not_marker | t], line, column, scope, [
-         {token, _, _} = h | tokens
+         {token, _, _} = _h | _tokens
        ])
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do

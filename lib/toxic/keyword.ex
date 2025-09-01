@@ -24,35 +24,34 @@ defmodule Toxic.Keyword do
     emit(token, rest, line, column + length, scope)
   end
 
-  def tokenize_keyword(:block, rest, line, column, atom, length, scope, tokens) do
+  def tokenize_keyword(:block, rest, line, column, atom, length, scope, _tokens) do
     token = {:block_identifier, meta(line, column, length, nil), atom}
     emit(token, rest, line, column + length, scope)
   end
 
   def tokenize_keyword(kind, rest, line, column, atom, length, scope, tokens) do
-    new_tokens =
-      case strip_horizontal_space(rest, 0) do
-        {[?/ | _], _} ->
-          token = {:identifier, meta(line, column, length, nil), atom}
-          emit(token, rest, line, column + length, scope)
+    case strip_horizontal_space(rest, 0) do
+      {[?/ | _], _} ->
+        token = {:identifier, meta(line, column, length, nil), atom}
+        emit(token, rest, line, column + length, scope)
 
-        _ ->
-          case {kind, tokens} do
-            {:in_op,
-             [
-               {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}
-               | t
-             ]} ->
-              not_info_meta = meta(start_line, start_column, line, column + length, extra)
-              # TODO: is not added with eol? maybe no need to do that again
-              token = {:in_op, not_info_meta, :"not in"}
-              multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)
+      _ ->
+        case {kind, tokens} do
+          {:in_op,
+           [
+             {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}
+             | _t
+           ]} ->
+            not_info_meta = meta(start_line, start_column, line, column + length, extra)
+            # TODO: is not added with eol? maybe no need to do that again
+            token = {:in_op, not_info_meta, :"not in"}
+            multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)
 
-            {_, _} ->
-              token = {kind, meta(line, column, length, previous_was_eol(tokens)), atom}
-              emit_with_eol(token, rest, line, column + length, scope)
-          end
-      end
+          {_, _} ->
+            token = {kind, meta(line, column, length, previous_was_eol(tokens)), atom}
+            emit_with_eol(token, rest, line, column + length, scope)
+        end
+    end
   end
 
   defp tokenize_keyword_terminator(do_line, do_column, :do, length, [{token, _, _} | _t])

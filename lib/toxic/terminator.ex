@@ -1,9 +1,8 @@
 defmodule Toxic.Terminator do
-  import Toxic.Token
   import Toxic.Scope
   import Toxic.Util
 
-  def handle_terminator(rest, _, _, scope, {:"(", _meta}, [{:alias, _, alias} | tokens])
+  def handle_terminator(_rest, _, _, _scope, {:"(", _meta}, [{:alias, _, alias} | _tokens])
       when is_atom(alias) do
     {:error, :unexpected_token_after_alias}
     # Reason =

@@ -328,18 +328,20 @@ defmodule Toxic.TokenStream do
   Get the current terminator stack.
   """
   @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
-  def current_terminators(%__MODULE__{driver: driver} = stream) do
-    terminators = :toxic_tokenizer.current_terminators(driver)
-    {terminators, stream}
+  def current_terminators(%__MODULE__{driver: _driver} = _stream) do
+    # TODO
+    # terminators = Driver.current_terminators(driver)
+    # {terminators, stream}
   end
 
   @doc """
   Peek at a potentially missing terminator.
   """
   @spec peek_missing_terminator(t()) :: {atom() | nil, t()}
-  def peek_missing_terminator(%__MODULE__{driver: driver} = stream) do
-    closer = :toxic_tokenizer.peek_missing_terminator(driver)
-    {closer, stream}
+  def peek_missing_terminator(%__MODULE__{driver: _driver} = _stream) do
+    # TODO
+    # closer = Driver.peek_missing_terminator(driver)
+    # {closer, stream}
   end
 
   # Private functions
