@@ -258,12 +258,10 @@ linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Me
 
 linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Parts0 = case lists:reverse(PartsRev) of
+  Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty string should have empty binary part, not empty list
     RevParts -> RevParts
   end,
-  %% Remove soft newline markers possibly inserted during unescape
-  Parts = lists:map(fun(P) when is_binary(P) -> remove_soft_breaks(P); (P) -> P end, Parts0),
   Tok = {bin_string, CM, Parts},
   case Stack of
     [{interpol, InterpMeta, InnerRev} | StackRest] ->
@@ -275,12 +273,10 @@ linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, Me
   end;
 linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Parts0 = case lists:reverse(PartsRev) of
+  Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty charlist should use empty binary like bin_string, not empty string
     RevParts -> RevParts
   end,
-  %% Remove soft newline markers possibly inserted during unescape
-  Parts = lists:map(fun(P) when is_binary(P) -> remove_soft_breaks(P); (P) -> P end, Parts0),
   Tok = {list_string, CM, Parts},
   case Stack of
     [{interpol, InterpMeta, InnerRev} | StackRest] ->
@@ -295,11 +291,10 @@ linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_h
   Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
     RevParts -> 
-      StrippedParts = strip_heredoc_indentation(RevParts, Indent),
-      add_missing_empty_fragments(StrippedParts, Indent)
+      TrimmedEscaped = strip_heredoc_indentation(RevParts, Indent),
+      Final = unescape_binary_parts(TrimmedEscaped),
+      add_missing_empty_fragments(Final, Indent)
   end,
-  io:format("DBG bin_heredoc Parts=~p~n", [Parts]),
-  io:format("DBG sentinel_count=~p~n", [count_sentinels(Parts)]),
   Tok = {bin_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
 linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
@@ -307,8 +302,9 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
   Parts = case lists:reverse(PartsRev) of
     [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
     RevParts -> 
-      StrippedParts = strip_heredoc_indentation(RevParts, Indent),
-      add_missing_empty_fragments(StrippedParts)
+      TrimmedEscaped = strip_heredoc_indentation(RevParts, Indent),
+      Final = unescape_binary_parts(TrimmedEscaped),
+      add_missing_empty_fragments(Final)
   end,
   Tok = {list_heredoc, CM, Indent, Parts},
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -752,30 +748,24 @@ strip_bin_indent([$\n | Rest], Indent, _AtLineStart, _SpacesLeft, Acc) ->
 strip_bin_indent([H | Rest], Indent, true, SpacesLeft, Acc) when SpacesLeft > 0, ?is_horizontal_space(H) ->
   %% Trim up to Indent horizontal spaces at start of line
   strip_bin_indent(Rest, Indent, true, SpacesLeft - 1, Acc);
-strip_bin_indent([31 | Rest], Indent, _AtLineStart, _SpacesLeft, Acc) ->
-  %% Soft newline marker (from escaped newline in heredoc). Do not emit,
-  %% and drop ALL following horizontal spaces (not only up to Indent),
-  %% effectively continuing the previous line content.
-  RestNoSpaces = drop_all_horizontal(Rest),
-  strip_bin_indent(RestNoSpaces, Indent, false, Indent, Acc);
 strip_bin_indent([H | Rest], Indent, _AtLineStart, SpacesLeft, Acc) ->
   %% Regular character - keep and mark that we're no longer at line start
   strip_bin_indent(Rest, Indent, false, SpacesLeft, [H | Acc]);
 strip_bin_indent([], _Indent, AtLineStart, SpacesLeft, Acc) ->
   {list_to_binary(lists:reverse(Acc)), AtLineStart, SpacesLeft}.
 
-%% Drop all horizontal spaces and tabs
-drop_all_horizontal([H | T]) when ?is_horizontal_space(H) -> drop_all_horizontal(T);
-drop_all_horizontal(Rest) -> Rest.
-
-count_sentinels(Parts) ->
-  Fun = fun(Part) when is_binary(Part) -> length(binary:matches(Part, <<31>>));
-           (_) -> 0
+%% Helper: unescape only binary parts using the interpolation unescaper
+unescape_binary_parts(Parts) ->
+  Fun = fun(Part) when is_binary(Part) -> unescape_bin(Part);
+           (Other) -> Other
         end,
-  lists:sum(lists:map(Fun, Parts)).
+  lists:map(Fun, Parts).
 
-remove_soft_breaks(Bin) when is_binary(Bin) ->
-  binary:replace(Bin, <<31>>, <<>>, [global]).
+unescape_bin(Bin) ->
+  case toxic_interpolation:unescape_tokens([Bin]) of
+    {ok, [Un]} -> Un;
+    _ -> Bin
+  end.
 
 
 %% Add missing empty fragments for heredocs where interpolation starts at column 1

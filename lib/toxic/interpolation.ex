@@ -209,7 +209,6 @@ defmodule Toxic.Interpolation do
         _last
       ) do
     content = :toxic_utils.characters_to_binary(Enum.reverse(buffer))
-    dbg({start_line, start_column, line, column})
 
     {:fragment, meta(start_line, start_column, line, column, nil), content, [?#, ?{ | rest], line,
      column, scope}

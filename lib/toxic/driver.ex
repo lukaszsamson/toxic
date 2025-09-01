@@ -111,10 +111,9 @@ defmodule Toxic.Driver do
            interpolation_allowed?,
            string,
            delim
-         ) do
+    ) do
       {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
        binary_part, rest, line, column, scope} ->
-        dbg(meta)
 
         {binary_part, line} =
           case state.recent_token do
@@ -131,7 +130,8 @@ defmodule Toxic.Driver do
           end
 
         case kind do
-          :sigil ->
+          # Keep sigils and heredocs escaped; collapse stage will handle each correctly
+          k when k in [:sigil, :bin_heredoc, :list_heredoc] ->
             return_token({:string_fragment, meta, binary_part}, rest, %{
               state
               | line: line,
@@ -139,8 +139,8 @@ defmodule Toxic.Driver do
                 scope: scope
             })
 
+          # Regular strings: unescape immediately
           _ ->
-            # TODO: handle unescape error
             case Toxic.Util.unescape_tokens([binary_part], line, column, scope) do
               {:ok, [unescaped]} ->
                 return_token(

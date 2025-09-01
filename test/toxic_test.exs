@@ -2003,16 +2003,34 @@ defmodule ToxicTest do
       '''
 
       assert tokenize(text) ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 7}, {7, 10}, nil}, 6,
-                   [
-                     "<%= ",
-                     {{2, 11, nil}, {2, 23, nil},
-                      [{:identifier, {{2, 13}, {2, 23}, ~c"__MODULE__"}, :__MODULE__}]},
-                     ".switching_map [1, 2, 3], fn x -> %>\nA <%= x %>\n<% end, fn x -> %>\nB <%= x %>\n<% end %>\n"
-                   ]}
-                ], ""}
+               {
+              :ok,
+              [
+                {
+                  :bin_heredoc,
+                  {{1, 7}, {7, 10}, nil},
+                  6,
+                  [
+                    "",
+                    {
+                      {2, 7, nil},
+                      {2, 33, nil},
+                      [
+                        {:paren_identifier, {{2, 9}, {2, 16}, ~c"inspect"}, :inspect},
+                        {:"(", {{2, 16}, {2, 17}, nil}},
+                        {:paren_identifier, {{2, 17}, {2, 24}, ~c"unquote"}, :unquote},
+                        {:"(", {{2, 24}, {2, 25}, nil}},
+                        {:identifier, {{2, 25}, {2, 31}, ~c"module"}, :module},
+                        {:")", {{2, 31}, {2, 32}, nil}},
+                        {:")", {{2, 32}, {2, 33}, nil}}
+                      ]
+                    },
+                    " does not implement the Access behaviour\n\nYou can use the \"struct.field\" syntax to access struct fields. You can also use Access.key!/1 to access struct fields dynamically inside get_in/put_in/update_in"
+                  ]
+                }
+              ],
+              ""
+            }
     end
   end
 
@@ -4290,6 +4308,7 @@ defmodule ToxicTest do
         |> Path.wildcard()
 
       for file <- files do
+        IO.puts(file)
         source = file |> File.read!()
         # lines = String.split(source, "\n")
         assert {:ok, _, _} = tokenize(source)
