@@ -63,17 +63,23 @@ defmodule Toxic.Driver do
   def next(
         [?} | rest],
         %__MODULE__{
-          contexts: [:normal, {:interp, kind, interpolation, delim} | contexts_rest],
-          deferrals: deferrals
+          contexts: [
+            :normal,
+            {:interp, kind, interpolation, delim, parent_terminators} | contexts_rest
+          ],
+          deferrals: deferrals,
+          scope: scope(terminators: terminators)
         } =
           state
-      ) do
+      )
+      when terminators == [] or elem(hd(terminators), 0) != :"{" do
+    # ) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
 
     new_state = %{
       state
       | column: state.column + 1,
-        contexts: [{:interp, kind, interpolation, delim} | contexts_rest],
+        contexts: [{:interp, kind, interpolation, delim, parent_terminators} | contexts_rest],
         output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
         deferrals: []
     }
@@ -100,7 +106,9 @@ defmodule Toxic.Driver do
   def next(
         string,
         %__MODULE__{
-          contexts: [{:interp, kind, interpolation_allowed?, delim} | contexts_rest] = contexts
+          contexts:
+            [{:interp, kind, interpolation_allowed?, delim, parent_terminators} | contexts_rest] =
+              contexts
         } =
           state
       ) do
@@ -111,10 +119,9 @@ defmodule Toxic.Driver do
            interpolation_allowed?,
            string,
            delim
-    ) do
+         ) do
       {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
        binary_part, rest, line, column, scope} ->
-
         {binary_part, line} =
           case state.recent_token do
             {kind, _, _} when kind in [:bin_heredoc_start, :list_heredoc_start] ->
@@ -176,7 +183,7 @@ defmodule Toxic.Driver do
           state
           | line: line,
             column: column + modifiers_length,
-            scope: scope,
+            scope: scope(scope, terminators: parent_terminators),
             contexts: contexts_rest,
             output: output
         })
@@ -199,7 +206,7 @@ defmodule Toxic.Driver do
           state
           | line: line,
             column: column + modifiers_length,
-            scope: scope,
+            scope: scope(scope, terminators: parent_terminators),
             contexts: contexts_rest,
             output: output
         })
@@ -217,7 +224,7 @@ defmodule Toxic.Driver do
           state
           | line: line,
             column: column,
-            scope: scope,
+            scope: scope(scope, terminators: parent_terminators),
             contexts: contexts_rest
         })
 
@@ -234,7 +241,7 @@ defmodule Toxic.Driver do
             state
             | line: line,
               column: column,
-              scope: scope,
+              scope: scope(scope, terminators: parent_terminators),
               contexts: contexts_rest,
               deferrals: [{end_token_type, meta, delim}]
           })
@@ -243,7 +250,7 @@ defmodule Toxic.Driver do
             state
             | line: line,
               column: column,
-              scope: scope,
+              scope: scope(scope, terminators: parent_terminators),
               contexts: contexts_rest
           })
         end
@@ -262,7 +269,13 @@ defmodule Toxic.Driver do
               end
 
             {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
-             %{state | line: line, column: column + 1, scope: scope, contexts: contexts_rest}}
+             %{
+               state
+               | line: line,
+                 column: column + 1,
+                 scope: scope(scope, terminators: parent_terminators),
+                 contexts: contexts_rest
+             }}
 
           _ ->
             end_token_type =
@@ -277,7 +290,7 @@ defmodule Toxic.Driver do
               state
               | line: line,
                 column: column,
-                scope: scope,
+                scope: scope(scope, terminators: parent_terminators),
                 contexts: contexts_rest
             })
         end
@@ -440,15 +453,17 @@ defmodule Toxic.Driver do
          }}
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
-       line, column, scope} ->
-        contexts = [{:interp, interp_kind, interpolation_allowed?, delimiter} | contexts]
+       line, column, scope = scope(terminators: terminators)} ->
+        contexts = [
+          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators} | contexts
+        ]
 
         {rest,
          %{
            state
            | line: line,
              column: column,
-             scope: scope,
+             scope: scope(scope, terminators: []),
              output: output ++ Enum.reverse([start_token | deferrals]),
              deferrals: [],
              contexts: contexts

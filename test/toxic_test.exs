@@ -2004,33 +2004,33 @@ defmodule ToxicTest do
 
       assert tokenize(text) ==
                {
-              :ok,
-              [
-                {
-                  :bin_heredoc,
-                  {{1, 7}, {7, 10}, nil},
-                  6,
-                  [
-                    "",
-                    {
-                      {2, 7, nil},
-                      {2, 33, nil},
-                      [
-                        {:paren_identifier, {{2, 9}, {2, 16}, ~c"inspect"}, :inspect},
-                        {:"(", {{2, 16}, {2, 17}, nil}},
-                        {:paren_identifier, {{2, 17}, {2, 24}, ~c"unquote"}, :unquote},
-                        {:"(", {{2, 24}, {2, 25}, nil}},
-                        {:identifier, {{2, 25}, {2, 31}, ~c"module"}, :module},
-                        {:")", {{2, 31}, {2, 32}, nil}},
-                        {:")", {{2, 32}, {2, 33}, nil}}
-                      ]
-                    },
-                    " does not implement the Access behaviour\n\nYou can use the \"struct.field\" syntax to access struct fields. You can also use Access.key!/1 to access struct fields dynamically inside get_in/put_in/update_in"
-                  ]
-                }
-              ],
-              ""
-            }
+                 :ok,
+                 [
+                   {
+                     :bin_heredoc,
+                     {{1, 7}, {7, 10}, nil},
+                     6,
+                     [
+                       "",
+                       {
+                         {2, 7, nil},
+                         {2, 33, nil},
+                         [
+                           {:paren_identifier, {{2, 9}, {2, 16}, ~c"inspect"}, :inspect},
+                           {:"(", {{2, 16}, {2, 17}, nil}},
+                           {:paren_identifier, {{2, 17}, {2, 24}, ~c"unquote"}, :unquote},
+                           {:"(", {{2, 24}, {2, 25}, nil}},
+                           {:identifier, {{2, 25}, {2, 31}, ~c"module"}, :module},
+                           {:")", {{2, 31}, {2, 32}, nil}},
+                           {:")", {{2, 32}, {2, 33}, nil}}
+                         ]
+                       },
+                       " does not implement the Access behaviour\n\nYou can use the \"struct.field\" syntax to access struct fields. You can also use Access.key!/1 to access struct fields dynamically inside get_in/put_in/update_in"
+                     ]
+                   }
+                 ],
+                 ""
+               }
     end
   end
 
@@ -4275,6 +4275,24 @@ defmodule ToxicTest do
       Receives a list of tuples and returns `true` if there is
       a tuple where the element at `position` in the tuple matches
       \"\"\"
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "terminators in interpolation" do
+      code = """
+      defp do_at() do
+        "\#{{}}"
+      end
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "interpolation in terminator" do
+      code = """
+      {"\#{line_number} | \#{indentation}\#{expr}\n \#{number_padding}| \#{arrow}", line_number + 1}
       """
 
       assert {:ok, _, _} = tokenize(code)

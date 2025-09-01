@@ -9,6 +9,15 @@ defmodule Toxic.Tokenizer do
     :eof
   end
 
+  # VC merge conflict
+
+  def tokenize_single([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = _original, _line, 1, _scope, _tokens) do
+    {:error, :vc_marker}
+    # FirstLine = lists:takewhile(fun(C) -> C =/= $\n andalso C =/= $\r end, Original),
+    # Reason = {?LOC(Line, 1), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
+    # error(Reason, Original, Scope, Tokens);
+  end
+
   # Base integers
 
   def tokenize_single([?0, ?x, h | t], line, column, scope, _tokens) when is_hex(h) do
