@@ -2005,25 +2005,40 @@ prepend_warning(Line, Column, Msg, #toxic_tokenizer{warnings=Warnings} = Scope) 
 
 %% Heredoc indentation stripping helpers
 
+%% Strip indentation across parts while keeping track of line starts
 strip_heredoc_indentation(Parts, Indent) ->
-  Fun = fun(Part) -> strip_heredoc_part_indent(Part, Indent) end,
-  lists:map(Fun, Parts).
+  {_AtLineStart, _SpacesLeft, OutRev} = strip_heredoc_indentation(Parts, Indent, true, Indent, []),
+  lists:reverse(OutRev).
 
-strip_heredoc_part_indent(Part, Indent) when is_binary(Part) ->
-  % First trim indentation from the beginning of the content
-  CharList = binary_to_list(Part),
-  {TrimmedStart, _} = trim_space_heredoc(CharList, Indent),
-  strip_heredoc_part_indent(TrimmedStart, [], Indent);
-strip_heredoc_part_indent(Part, _Indent) ->
-  Part.
+%% Walk the list of parts, maintaining whether we are at the start of a line
+strip_heredoc_indentation([Part | Rest], Indent, AtLineStart, SpacesLeft, Acc) when is_binary(Part) ->
+  {NewBin, NewAtLineStart, NewSpacesLeft} = strip_bin_indent(Part, Indent, AtLineStart, SpacesLeft),
+  strip_heredoc_indentation(Rest, Indent, NewAtLineStart, NewSpacesLeft, [NewBin | Acc]);
+strip_heredoc_indentation([{_SM, _EM, _Inner} = Interp | Rest], Indent, AtLineStart, _SpacesLeft, Acc) ->
+  %% Interpolation counts as content on this line; do not trim spaces after it
+  NewAtLineStart = case AtLineStart of true -> false; false -> false end,
+  strip_heredoc_indentation(Rest, Indent, NewAtLineStart, 0, [Interp | Acc]);
+strip_heredoc_indentation([Part | Rest], Indent, AtLineStart, SpacesLeft, Acc) ->
+  %% Any other part (shouldn't happen for heredocs) - keep as-is
+  strip_heredoc_indentation(Rest, Indent, AtLineStart, SpacesLeft, [Part | Acc]);
+strip_heredoc_indentation([], _Indent, AtLineStart, SpacesLeft, Acc) ->
+  {AtLineStart, SpacesLeft, Acc}.
 
-strip_heredoc_part_indent([$\n | Rest], Acc, Indent) ->
-  {Trimmed, _ShouldWarn} = trim_space_heredoc(Rest, Indent),
-  strip_heredoc_part_indent(Trimmed, [$\n | Acc], Indent);
-strip_heredoc_part_indent([Head | Rest], Acc, Indent) ->
-  strip_heredoc_part_indent(Rest, [Head | Acc], Indent);
-strip_heredoc_part_indent([], Acc, _Indent) ->
-  list_to_binary(lists:reverse(Acc)).
+%% Process a binary fragment with indentation trimming aware of newlines
+strip_bin_indent(Bin, Indent, AtLineStart, SpacesLeft) when is_binary(Bin) ->
+  strip_bin_indent(binary_to_list(Bin), Indent, AtLineStart, SpacesLeft, []).
+
+strip_bin_indent([$\n | Rest], Indent, _AtLineStart, _SpacesLeft, Acc) ->
+  %% Newline resets indentation trimming for next characters
+  strip_bin_indent(Rest, Indent, true, Indent, [$\n | Acc]);
+strip_bin_indent([H | Rest], Indent, true, SpacesLeft, Acc) when SpacesLeft > 0, ?is_horizontal_space(H) ->
+  %% Trim up to Indent horizontal spaces at start of line
+  strip_bin_indent(Rest, Indent, true, SpacesLeft - 1, Acc);
+strip_bin_indent([H | Rest], Indent, AtLineStart, SpacesLeft, Acc) ->
+  %% Regular character - keep and mark that we're no longer at line start
+  strip_bin_indent(Rest, Indent, false, SpacesLeft, [H | Acc]);
+strip_bin_indent([], _Indent, AtLineStart, SpacesLeft, Acc) ->
+  {list_to_binary(lists:reverse(Acc)), AtLineStart, SpacesLeft}.
 
 trim_space_heredoc(Rest, 0) -> {Rest, false};
 trim_space_heredoc([$\r, $\n | _] = Rest, _) -> {Rest, false};
@@ -2100,19 +2115,11 @@ fix_indentation_over_stripping([Part | Rest], Acc) ->
   fix_indentation_over_stripping(Rest, [Part | Acc]).
 
 %% Check if a binary part should have its leading space restored
-should_restore_leading_space(<<>>, Acc) ->
-  false;
-should_restore_leading_space(Part, Acc) ->
-  % If the part doesn't start with newline and follows an interpolation,
-  % it likely had its content space incorrectly stripped as indentation
-  case {binary:at(Part, 0), Acc} of
-    {Char, [{{_, Column, _}, _, _} | _]} when Column > 1 andalso Char =/= $\n ->
-      % Previous part was an interpolation not at column 1, and this part doesn't start with newline
-      % This means this part continues from the middle of a line, so leading spaces are content
-      true;
-    _ ->
-      false
-  end.
+%% Note: Do not restore spaces for binary parts that are a line continuation
+%% after an interpolation. Indentation stripping only applies at line starts,
+%% so adding a space here would be incorrect and changes source semantics.
+should_restore_leading_space(_Part, _Acc) ->
+  false.
 
 %% Restore one leading space to a binary part
 restore_leading_space(Part) ->

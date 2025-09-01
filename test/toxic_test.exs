@@ -1981,11 +1981,35 @@ defmodule ToxicTest do
       assert tokenize(text) ==
                {:ok,
                 [
-                  {:bin_heredoc, {{1, 7}, {7, 4}, nil}, 6,
+                  {:bin_heredoc, {{1, 7}, {7, 10}, nil}, 6,
                    [
                      "<%= ",
                      {{2, 11, nil}, {2, 23, nil},
-                      [{:identifier, {2, 13, ~c"__MODULE__"}, :__MODULE__}]},
+                      [{:identifier, {{2, 13}, {2, 23}, ~c"__MODULE__"}, :__MODULE__}]},
+                     ".switching_map [1, 2, 3], fn x -> %>\nA <%= x %>\n<% end, fn x -> %>\nB <%= x %>\n<% end %>\n"
+                   ]}
+                ], ""}
+    end
+
+    test "indent interpolation escaped newline" do
+      text = '''
+            """
+            \#{inspect(unquote(module))} does not implement the Access behaviour
+
+            You can use the "struct.field" syntax to access struct fields. \\
+            You can also use Access.key!/1 to access struct fields dynamically \\
+            inside get_in/put_in/update_in\\
+            """\
+      '''
+
+      assert tokenize(text) ==
+               {:ok,
+                [
+                  {:bin_heredoc, {{1, 7}, {7, 10}, nil}, 6,
+                   [
+                     "<%= ",
+                     {{2, 11, nil}, {2, 23, nil},
+                      [{:identifier, {{2, 13}, {2, 23}, ~c"__MODULE__"}, :__MODULE__}]},
                      ".switching_map [1, 2, 3], fn x -> %>\nA <%= x %>\n<% end, fn x -> %>\nB <%= x %>\n<% end %>\n"
                    ]}
                 ], ""}
