@@ -3643,6 +3643,25 @@ defmodule ToxicTest do
                 ], ""}
     end
 
+    test "with unicode" do
+      assert tokenize("~x/héll\#{foo}ò/") ==
+               {
+              :ok,
+              [
+                {
+                  :sigil,
+                  {{1, 1}, {1, 16}, nil},
+                  :sigil_x,
+                  ["héll", {{1, 8, nil}, {1, 13, nil}, [{:identifier, {{1, 10}, {1, 13}, ~c"foo"}, :foo}]}, "ò"],
+                  [],
+                  nil,
+                  "/"
+                }
+              ],
+              ""
+            }
+    end
+
     test "with interpolation lowercase" do
       assert tokenize("~x/a\#{123}sd/") == {
                :ok,

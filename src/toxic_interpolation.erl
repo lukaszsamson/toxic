@@ -32,7 +32,7 @@ extract_stream_next([], Buffer, Line, Column, StartLine, StartColumn, Scope, _In
   % EOF reached - emit final fragment if any, then done
   case Buffer of
     [] -> {done, make_meta_range(Line, Column, Line, Column), [], [], Line, Column, Scope};
-    _  -> {fragment, make_meta_range(StartLine, StartColumn, Line, Column), list_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
+    _  -> {fragment, make_meta_range(StartLine, StartColumn, Line, Column), toxic_utils:characters_to_binary(lists:reverse(Buffer)), [], Line, Column, Scope}
   end;
 
 extract_stream_next([H,H,H | Rest], [], Line, Column, _StartLine, _StartColumn, Scope, _Interpol, [H,H,H]) ->
@@ -68,7 +68,7 @@ extract_stream_next([$#, ${ | Rest], Buffer, Line, Column, StartLine, StartColum
     [] -> {begin_interpolation, make_meta_range(Line, Column, Line, Column + 2), string, Rest, Line, Column + 2, Scope};
     _  -> 
       % Calculate proper end position based on fragment content and use it for current position
-      Content = list_to_binary(lists:reverse(Buffer)),
+      Content = toxic_utils:characters_to_binary(lists:reverse(Buffer)),
       % {EndLine, EndColumn} = calculate_end_position(StartLine, StartColumn, Content),
       {fragment, make_meta_range(StartLine, StartColumn, Line, Column), Content, [$#, ${ | Rest], Line, Column, Scope}
   end;
