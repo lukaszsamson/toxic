@@ -1935,6 +1935,19 @@ defmodule ToxicTest do
       assert tokenize("\"\"\" \t\nfoo\n\"\"\"") ==
                {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}], ""}
     end
+
+    test "indent" do
+      text = '''
+          """
+          expected closing '%>' for EEx expression
+            |
+          1 | foo <% :bar
+            |     ^\\
+          """
+      '''
+      assert tokenize(text) ==
+               {:ok, [{:bin_heredoc, {1, 1, nil}, 4, ["expected closing '%>' for EEx expression\n  |\n1 | foo <% :bar\n  |     ^"]}], ""}
+    end
   end
 
   describe "charlist heredocs" do
@@ -3646,20 +3659,25 @@ defmodule ToxicTest do
     test "with unicode" do
       assert tokenize("~x/héll\#{foo}ò/") ==
                {
-              :ok,
-              [
-                {
-                  :sigil,
-                  {{1, 1}, {1, 16}, nil},
-                  :sigil_x,
-                  ["héll", {{1, 8, nil}, {1, 13, nil}, [{:identifier, {{1, 10}, {1, 13}, ~c"foo"}, :foo}]}, "ò"],
-                  [],
-                  nil,
-                  "/"
-                }
-              ],
-              ""
-            }
+                 :ok,
+                 [
+                   {
+                     :sigil,
+                     {{1, 1}, {1, 16}, nil},
+                     :sigil_x,
+                     [
+                       "héll",
+                       {{1, 8, nil}, {1, 13, nil},
+                        [{:identifier, {{1, 10}, {1, 13}, ~c"foo"}, :foo}]},
+                       "ò"
+                     ],
+                     [],
+                     nil,
+                     "/"
+                   }
+                 ],
+                 ""
+               }
     end
 
     test "with interpolation lowercase" do
