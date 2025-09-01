@@ -320,6 +320,7 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, {Delim, {_EolLine, _EolCol
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -332,6 +333,7 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -344,6 +346,7 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_st
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -356,6 +359,7 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{bin_stri
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -368,6 +372,7 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, {Delim, {_EolLine, _EolCol
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -380,6 +385,7 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, {Delim, {_EolLine, _EolCol}}
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -392,6 +398,7 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{list_s
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -404,6 +411,7 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_str
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
+    [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -416,6 +424,7 @@ linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, Me
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
+    [] -> {atom_quoted, CM, ''};
     _ -> {atom_unsafe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -428,6 +437,7 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
   end,
   Tok = case Parts of
     [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
+    [] -> {atom_quoted, CM, ''};
     _ -> {atom_safe, CM, Parts}
   end,
   linear_to_legacy(T, [Tok | Out], Stack);
@@ -453,9 +463,9 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       % Multiple parts - find the last string_fragment and concatenate content
       StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
       case StringFragments of
-        [] ->
-          % No string fragments - fallback
-          {'UNKNOWN', {1, 7}};
+        % [] ->
+        %   % No string fragments - fallback
+        %   {'UNKNOWN', {1, 7}};
         _ ->
           % Extract end position from last string fragment and concatenate all content
           {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
@@ -483,9 +493,8 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       {binary_to_atom(Content, utf8), {1, 7}};
     [Content] when is_list(Content) ->
       {list_to_atom(Content), {1, 7}};
-    _ ->
-      % Fallback for unexpected content structure
-      {'UNKNOWN', {1, 7}}
+    [] ->
+      {'', {1, 3}}
   end,
   % Calculate closing quote position - content end + 1 column for closing quote
   % The string fragment ends before the closing quote, so we need to add 1 column
@@ -515,8 +524,8 @@ linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quote
       ContentEndPos = case FragMeta of {{_, _}, {FEL, FEC}, _} -> {FEL, FEC}; _ -> {1, 7} end,
       {AtomVal, ContentEndPos};
     [Content] when is_binary(Content) -> {binary_to_atom(Content, utf8), {1, 7}};
-    [Content] when is_list(Content) -> {list_to_atom(Content), {1, 7}};
-    _ -> {'UNKNOWN', {1, 7}}
+    [Content] when is_list(Content) -> {list_to_atom(Content), {1, 7}}
+    % _ -> {'UNKNOWN', {1, 7}}
   end,
   ClosingQuotePos = case ContentEnd of {Line, Column} -> {Line, Column + 1}; Other -> Other end,
   IdentifierMeta = case StartMeta of {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim}; _ -> {{1, 2}, ClosingQuotePos, Delim} end,
@@ -537,8 +546,8 @@ linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quote
         {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
         _ -> {1, 7}
       end,
-      {AtomVal, ContentEndPos};
-    _ -> {'UNKNOWN', {1,7}}
+      {AtomVal, ContentEndPos}
+    % _ -> {'UNKNOWN', {1,7}}
   end,
   ClosingQuotePos = case ContentEnd of
     {Line, Column} -> {Line, Column + 1};
@@ -572,9 +581,9 @@ linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{qu
       % Multiple parts - find the last string_fragment and concatenate content
       StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
       case StringFragments of
-        [] ->
-          % No string fragments - fallback
-          {'UNKNOWN', {1, 7}};
+        % [] ->
+        %   % No string fragments - fallback
+        %   {'UNKNOWN', {1, 7}};
         _ ->
           % Extract end position from last string fragment and concatenate all content
           {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
@@ -601,10 +610,10 @@ linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{qu
     [Content] when is_binary(Content) ->
       {binary_to_atom(Content, utf8), {1, 7}};
     [Content] when is_list(Content) ->
-      {list_to_atom(Content), {1, 7}};
-    _ ->
-      % Fallback for unexpected content structure
-      {'UNKNOWN', {1, 7}}
+      {list_to_atom(Content), {1, 7}}
+    % _ ->
+    %   % Fallback for unexpected content structure
+    %   {'UNKNOWN', {1, 7}}
   end,
   % Calculate closing quote position - content end + 1 column for closing quote
   % The string fragment ends before the closing quote, so we need to add 1 column
@@ -646,9 +655,9 @@ linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{
       % Multiple parts - find the last string_fragment and concatenate content
       StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
       case StringFragments of
-        [] ->
-          % No string fragments - fallback
-          {'UNKNOWN', {1, 7}};
+        % [] ->
+        %   % No string fragments - fallback
+        %   {'UNKNOWN', {1, 7}};
         _ ->
           % Extract end position from last string fragment and concatenate all content
           {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
@@ -675,10 +684,10 @@ linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{
     [Content] when is_binary(Content) ->
       {binary_to_atom(Content, utf8), {1, 7}};
     [Content] when is_list(Content) ->
-      {list_to_atom(Content), {1, 7}};
-    _ ->
-      % Fallback for unexpected content structure
-      {'UNKNOWN', {1, 7}}
+      {list_to_atom(Content), {1, 7}}
+    % _ ->
+    %   % Fallback for unexpected content structure
+    %   {'UNKNOWN', {1, 7}}
   end,
   % Calculate closing quote position - content end + 1 column for closing quote
   % The string fragment ends before the closing quote, so we need to add 1 column

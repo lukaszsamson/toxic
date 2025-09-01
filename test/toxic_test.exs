@@ -2221,6 +2221,11 @@ defmodule ToxicTest do
   end
 
   describe "non operator atoms" do
+    test "quoted empty" do
+      assert tokenize(":\"\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 4}, 34}, :""}], ""}
+      assert tokenize(":''") == {:ok, [{:atom_quoted, {{1, 1}, {1, 4}, 39}, :""}], ""}
+    end
+
     test "quoted" do
       assert tokenize(":\"a\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 34}, :a}], ""}
       assert tokenize(":'a'") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 39}, :a}], ""}
@@ -2710,6 +2715,22 @@ defmodule ToxicTest do
                 ], ""}
     end
 
+    test "empty kw_identifier" do
+      assert tokenize("\"\": 1") ==
+               {:ok,
+                [
+                  {:kw_identifier, {{1, 1}, {1, 4}, 34}, :""},
+                  {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
+                ], ""}
+
+                assert tokenize("'': 1") ==
+               {:ok,
+                [
+                  {:kw_identifier, {{1, 1}, {1, 4}, 39}, :""},
+                  {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
+                ], ""}
+    end
+
     test "double quoted kw_identifier" do
       assert tokenize("\"foo\": 1") ==
                {:ok,
@@ -3157,6 +3178,13 @@ defmodule ToxicTest do
     test "dot quote single" do
       assert tokenize(".'foo'") ==
                {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 39}, :foo}], ""}
+    end
+
+    test "dot quote empty" do
+      assert tokenize(".\"\"") ==
+               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 34}, :""}], ""}
+      assert tokenize(".''") ==
+               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 39}, :""}], ""}
     end
 
     test "dot quote newline" do
