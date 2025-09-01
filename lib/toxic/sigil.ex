@@ -3,7 +3,7 @@ defmodule Toxic.Sigil do
   import Toxic.Token
 
   def tokenize_sigil([?~ | t], line, column, scope, tokens) do
-    case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) |> dbg do
+    case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) do
       {:ok, name, rest, new_line, new_column, new_scope, new_tokens} ->
         tokenize_sigil_contents(rest, name, new_line, new_column, new_scope, new_tokens)
 

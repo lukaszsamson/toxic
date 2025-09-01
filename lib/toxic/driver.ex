@@ -25,7 +25,7 @@ defmodule Toxic.Driver do
   end
 
   def next_with_validation(string, state) do
-    result = next(string, state) |> dbg
+    result = next(string, state)
     state = result |> Tuple.to_list() |> List.last()
     ensure_state_valid(state)
     result
@@ -92,7 +92,6 @@ defmodule Toxic.Driver do
         state.scope,
         carry_with_recent
       )
-      |> dbg
 
     {rest, state} = handle_tokenize_result(state, result)
     next(rest, state)
@@ -111,9 +110,8 @@ defmodule Toxic.Driver do
            state.scope,
            interpolation_allowed?,
            string,
-           delim |> dbg
-         )
-         |> dbg do
+           delim
+         ) do
       {:fragment, meta, binary_part, rest, line, column, scope} ->
         case kind do
           :sigil ->
@@ -209,9 +207,6 @@ defmodule Toxic.Driver do
             _ -> :quoted_identifier_end
           end
 
-        dbg(rest)
-        dbg({line, column})
-
         if end_token_type == :quoted_identifier_end do
           next(rest, %{
             state
@@ -256,9 +251,6 @@ defmodule Toxic.Driver do
                 _ -> :bin_string_end
               end
 
-            dbg(rest)
-            dbg({line, column})
-
             return_token({end_token_type, meta, delim}, rest, %{
               state
               | line: line,
@@ -300,8 +292,7 @@ defmodule Toxic.Driver do
             handle_tokenize_result(state, {event, rest, line, column, scope})
           end)
 
-        # TODO: figure out
-        {rest, state |> dbg}
+        {rest, state}
 
       {:drop_not, rest, line, column, scope} ->
         {rest, %{state | line: line, column: column, scope: scope, deferrals: tl(deferrals)}}
@@ -332,8 +323,6 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
-        IO.puts("deferring #{inspect(token)}")
-
         {rest,
          %{
            state
@@ -362,8 +351,6 @@ defmodule Toxic.Driver do
          }}
 
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
-        IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
-
         {rest,
          %{
            state
@@ -403,8 +390,6 @@ defmodule Toxic.Driver do
          }}
 
       {{:token_with_eol, {:unary_op, _meta, :not} = token}, rest, line, column, scope} ->
-        IO.puts("deferring #{inspect(token)}: #{inspect([token | deferrals])}")
-
         {rest,
          %{
            state
@@ -430,8 +415,7 @@ defmodule Toxic.Driver do
              scope: scope,
              output: output ++ Enum.reverse(carry_with_recent),
              deferrals: []
-         }
-         |> dbg}
+         }}
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope} ->

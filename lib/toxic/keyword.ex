@@ -4,22 +4,12 @@ defmodule Toxic.Keyword do
   import Toxic.Terminator
 
   def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, tokens) do
-    case tokenize_keyword_terminator(line, column, atom, length, tokens) |> dbg do
-      #     {ok, [Check | T]} ->
-      # handle_terminator(Rest, Line, Column + Length, Scope, Check, T);
+    case tokenize_keyword_terminator(line, column, atom, length, tokens) do
       {:ok, list} ->
-        # case list do
-        #   [event, {kind, check}] ->
-        #     {_, rest, line, column, scope} = handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
-        #     {list, rest, line, column, scope}
-        #   [{kind, check}] ->
-        #     {_, rest, line, column, scope} = handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
-        #     {list, rest, line, column, scope}
-        # end
         {_, check} = List.last(list)
 
         {_, rest, line, column, scope} =
-          handle_terminator(rest, line, column + length, scope, check, tokens) |> dbg
+          handle_terminator(rest, line, column + length, scope, check, tokens)
 
         {list, rest, line, column, scope}
 

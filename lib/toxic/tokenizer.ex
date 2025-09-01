@@ -621,13 +621,12 @@ defmodule Toxic.Tokenizer do
         tokens
       ) do
     case Toxic.Identifier.tokenize_identifier(
-           string |> dbg,
+           string,
            line,
            column,
            original_scope,
-           not previous_was_dot?(tokens |> dbg) |> dbg
-         )
-         |> dbg do
+           not previous_was_dot?(tokens)
+         ) do
       {kind, unencoded, atom, rest, length, ascii, special} ->
         at? = ?@ in special
         scope = track_ascii(ascii, original_scope)
@@ -791,7 +790,6 @@ defmodule Toxic.Tokenizer do
   #   tokenize([$(], line, column+1, scope, [{paren_identifier, Info, Identifier} | tokens]);
 
   defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) do
-    dbg()
     {nil, string, line, column, scope}
   end
 end
