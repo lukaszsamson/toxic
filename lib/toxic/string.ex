@@ -14,7 +14,8 @@ defmodule Toxic.String do
 
         start_token = {start_type, meta(line, column, line, column + 3, nil), [h, h, h]}
 
-        {{:switch_to_interp, start_token, kind, true, [h, h, h]}, headerless, line + 1, 1, scope}
+        {{:switch_to_interp, start_token, kind, true, [h, h, h]}, [?\n | headerless], line + 1, 1,
+         scope}
 
       :error ->
         {:error, :invalid_char_after_heredoc_open}

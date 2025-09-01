@@ -2100,6 +2100,8 @@ fix_indentation_over_stripping([Part | Rest], Acc) ->
   fix_indentation_over_stripping(Rest, [Part | Acc]).
 
 %% Check if a binary part should have its leading space restored
+should_restore_leading_space(<<>>, Acc) ->
+  false;
 should_restore_leading_space(Part, Acc) ->
   % If the part doesn't start with newline and follows an interpolation,
   % it likely had its content space incorrectly stripped as indentation

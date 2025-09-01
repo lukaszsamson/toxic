@@ -92,7 +92,7 @@ defmodule Toxic.Sigil do
         # Interp = {sigil_info, sigil_atom, ?is_downcase(S), <<H,H,H>>}
         # {switch_to_interp, start_token, Headerless, line + 1, 1, scope, sigil, [H, H, H], Interp}
 
-        {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, headerless,
+        {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, [?\n | headerless],
          line + 1, 1, scope}
 
       :error ->

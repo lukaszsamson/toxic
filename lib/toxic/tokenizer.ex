@@ -591,7 +591,7 @@ defmodule Toxic.Tokenizer do
 
   def tokenize_single([?%, ?{ | t], line, column, scope, tokens) do
     # TODO: column + 1? elixir bug?
-    token = {:"{", meta(line, column + 1, 1, nil)}
+    token = {:"{", meta(line, column, 1, nil)}
     # TODO: how to handle it
     {_, rest, line, column, scope} =
       Toxic.Terminator.handle_terminator(t, line, column + 2, scope, token, [

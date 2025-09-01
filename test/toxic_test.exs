@@ -1205,6 +1205,7 @@ defmodule ToxicTest do
     test "unicode bin strings" do
       assert tokenize("\"ą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]}], ""}
       assert tokenize("\"ąą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 5}, nil}, ["ąą"]}], ""}
+      assert tokenize("\"កឹasd\"") == {:ok, [{:bin_string, {{1, 1}, {1, 7}, nil}, ["កឹasd"]}], ""}
     end
 
     test "with LF newlines" do
@@ -1252,6 +1253,11 @@ defmodule ToxicTest do
                {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\"bar"]}], ""}
     end
 
+    test "with escape sequence" do
+      assert tokenize("\"foo\\abar\"") ==
+               {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\abar"]}], ""}
+    end
+
     test "tokens after bin strings same line" do
       assert tokenize("\"foo\" 0x123") ==
                {:ok,
@@ -1286,6 +1292,13 @@ defmodule ToxicTest do
                 [
                   {:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]},
                   {:int, {{1, 5}, {1, 10}, 291}, ~c"0x123"}
+                ], ""}
+
+      assert tokenize("\"កឹasd\" 0x123") ==
+               {:ok,
+                [
+                  {:bin_string, {{1, 1}, {1, 7}, nil}, ["កឹasd"]},
+                  {:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}
                 ], ""}
     end
 
@@ -1943,10 +1956,39 @@ defmodule ToxicTest do
             |
           1 | foo <% :bar
             |     ^\\
-          """
+          """\
       '''
+
       assert tokenize(text) ==
-               {:ok, [{:bin_heredoc, {1, 1, nil}, 4, ["expected closing '%>' for EEx expression\n  |\n1 | foo <% :bar\n  |     ^"]}], ""}
+               {:ok,
+                [
+                  {:bin_heredoc, {{1, 5}, {6, 8}, nil}, 4,
+                   ["expected closing '%>' for EEx expression\n  |\n1 | foo <% :bar\n  |     ^"]}
+                ], ""}
+    end
+
+    test "indent interpolation" do
+      text = '''
+            """
+            <%= \#{__MODULE__}.switching_map [1, 2, 3], fn x -> %>
+            A <%= x %>
+            <% end, fn x -> %>
+            B <%= x %>
+            <% end %>
+            """\
+      '''
+
+      assert tokenize(text) ==
+               {:ok,
+                [
+                  {:bin_heredoc, {{1, 7}, {7, 4}, nil}, 6,
+                   [
+                     "<%= ",
+                     {{2, 11, nil}, {2, 23, nil},
+                      [{:identifier, {2, 13, ~c"__MODULE__"}, :__MODULE__}]},
+                     ".switching_map [1, 2, 3], fn x -> %>\nA <%= x %>\n<% end, fn x -> %>\nB <%= x %>\n<% end %>\n"
+                   ]}
+                ], ""}
     end
   end
 
@@ -3420,6 +3462,38 @@ defmodule ToxicTest do
                 ], ""}
     end
 
+    test "heredoc empty" do
+      assert tokenize("~x\"\"\"\n\"\"\"") ==
+               {:ok,
+                [
+                  {
+                    :sigil,
+                    {{1, 1}, {2, 4}, nil},
+                    :sigil_x,
+                    [""],
+                    [],
+                    0,
+                    "\"\"\""
+                  }
+                ], ""}
+    end
+
+    test "heredoc empty indent" do
+      assert tokenize("~x\"\"\"\n  \"\"\"") ==
+               {:ok,
+                [
+                  {
+                    :sigil,
+                    {{1, 1}, {2, 6}, nil},
+                    :sigil_x,
+                    [""],
+                    [],
+                    2,
+                    "\"\"\""
+                  }
+                ], ""}
+    end
+
     test "heredoc" do
       assert tokenize("~x\"\"\"\nasd\n\"\"\"") ==
                {:ok,
@@ -4165,15 +4239,15 @@ defmodule ToxicTest do
     end
 
     for module <- [
-          # Atom,
-          # Tuple,
-          # List,
-          # Map,
-          # Keyword,
-          # Bitwise,
-          # String,
-          # Integer,
-          # Float,
+          Atom,
+          Tuple,
+          List,
+          Map,
+          Keyword,
+          Bitwise,
+          String,
+          Integer,
+          Float
         ] do
       @module module
       test "elixir src #{@module}" do
@@ -4183,14 +4257,20 @@ defmodule ToxicTest do
       end
     end
 
-    # test "elixir src" do
-    #   files = Enum.module_info()[:compile][:source] |> Path.join("../../..") |> Path.expand() |> Path.join("**/*.ex*") |> Path.wildcard
-    #   for file <- files do
-    #     source = file |> File.read!
-    #     # lines = String.split(source, "\n")
-    #     assert {:ok, _, _} = tokenize(source)
-    #   end
-    # end
+    test "elixir src" do
+      files =
+        Enum.module_info()[:compile][:source]
+        |> Path.join("../../..")
+        |> Path.expand()
+        |> Path.join("**/*.ex*")
+        |> Path.wildcard()
+
+      for file <- files do
+        source = file |> File.read!()
+        # lines = String.split(source, "\n")
+        assert {:ok, _, _} = tokenize(source)
+      end
+    end
   end
 
   # Ported from elixir/lib/elixir/test/erlang/tokenizer_test.erl

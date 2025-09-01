@@ -104,7 +104,7 @@ defmodule Toxic.Driver do
         } =
           state
       ) do
-    case :toxic_interpolation.extract_stream_event(
+    case Toxic.Interpolation.tokenize_single(
            state.line,
            state.column,
            state.scope,
@@ -112,7 +112,24 @@ defmodule Toxic.Driver do
            string,
            delim
          ) do
-      {:fragment, meta, binary_part, rest, line, column, scope} ->
+      {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
+       binary_part, rest, line, column, scope} ->
+        dbg(meta)
+
+        {binary_part, line} =
+          case state.recent_token do
+            {kind, _, _} when kind in [:bin_heredoc_start, :list_heredoc_start] ->
+              "\n" <> binary_part_no_newline = binary_part
+              {binary_part_no_newline, line - 1}
+
+            {:sigil_start, _, _, delim} when delim in ["\"\"\"", "'''"] ->
+              "\n" <> binary_part_no_newline = binary_part
+              {binary_part_no_newline, line - 1}
+
+            _ ->
+              {binary_part, line}
+          end
+
         case kind do
           :sigil ->
             return_token({:string_fragment, meta, binary_part}, rest, %{
@@ -126,12 +143,17 @@ defmodule Toxic.Driver do
             # TODO: handle unescape error
             case :toxic_tokenizer.unescape_tokens([binary_part], line, column, scope) do
               {:ok, [unescaped]} ->
-                return_token({:string_fragment, meta, unescaped}, rest, %{
-                  state
-                  | line: line,
-                    column: column,
-                    scope: scope
-                })
+                return_token(
+                  {:string_fragment, meta(start_line, start_column, line, end_column, extra),
+                   unescaped},
+                  rest,
+                  %{
+                    state
+                    | line: line,
+                      column: column,
+                      scope: scope
+                  }
+                )
             end
         end
 
