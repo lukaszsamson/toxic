@@ -3237,6 +3237,26 @@ defmodule ToxicTest do
                 ], ""}
     end
 
+    test "dot quote paren empty" do
+      assert tokenize(".\"\"()") ==
+               {:ok,
+                [
+                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:paren_identifier, {{1, 2}, {1, 4}, 34}, :""},
+                  {:"(", {{1, 4}, {1, 5}, nil}},
+                  {:")", {{1, 5}, {1, 6}, nil}}
+                ], ""}
+
+                assert tokenize(".''()") ==
+               {:ok,
+                [
+                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:paren_identifier, {{1, 2}, {1, 4}, 39}, :""},
+                  {:"(", {{1, 4}, {1, 5}, nil}},
+                  {:")", {{1, 5}, {1, 6}, nil}}
+                ], ""}
+    end
+
     test "dot quote bracket" do
       assert tokenize(".\"foo\"[]") ==
                {:ok,
@@ -3254,6 +3274,26 @@ defmodule ToxicTest do
                   {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
                   {:"[", {{1, 8}, {1, 9}, nil}},
                   {:"]", {{1, 9}, {1, 10}, nil}}
+                ], ""}
+    end
+
+    test "dot quote bracket empty" do
+      assert tokenize(".\"\"[]") ==
+               {:ok,
+                [
+                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:bracket_identifier, {{1, 2}, {1, 4}, 34}, :""},
+                  {:"[", {{1, 4}, {1, 5}, nil}},
+                  {:"]", {{1, 5}, {1, 6}, nil}}
+                ], ""}
+
+                assert tokenize(".''[]") ==
+               {:ok,
+                [
+                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:bracket_identifier, {{1, 2}, {1, 4}, 39}, :""},
+                  {:"[", {{1, 4}, {1, 5}, nil}},
+                  {:"]", {{1, 5}, {1, 6}, nil}}
                 ], ""}
     end
   end
@@ -4074,6 +4114,28 @@ defmodule ToxicTest do
                 ], ""}
     end
 
+    test "quoted empty" do
+      assert tokenize("K.'' +1") ==
+               {:ok,
+                [
+                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:op_identifier, {{1, 3}, {1, 5}, ?'}, :""},
+                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+                ], ""}
+
+                assert tokenize("K.\"\" +1") ==
+               {:ok,
+                [
+                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:op_identifier, {{1, 3}, {1, 5}, ?"}, :""},
+                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
+                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
+                ], ""}
+    end
+
     test "space" do
       assert tokenize("foo  +1") ==
                {:ok,
@@ -4205,6 +4267,34 @@ defmodule ToxicTest do
                   {:do_identifier, {{1, 3}, {1, 9}, 39}, :"1foo"},
                   {:do, {{1, 10}, {1, 12}, nil}},
                   {:eol, {{1, 12}, {2, 1}, 1}},
+                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+                  {:eol, {{2, 4}, {3, 1}, 1}},
+                  {:end, {{3, 1}, {3, 4}, nil}}
+                ], ""}
+    end
+
+    test "quoted empty" do
+      assert tokenize("K.'' do\n:ok\nend") ==
+               {:ok,
+                [
+                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:do_identifier, {{1, 3}, {1, 5}, 39}, :""},
+                  {:do, {{1, 6}, {1, 8}, nil}},
+                  {:eol, {{1, 8}, {2, 1}, 1}},
+                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
+                  {:eol, {{2, 4}, {3, 1}, 1}},
+                  {:end, {{3, 1}, {3, 4}, nil}}
+                ], ""}
+
+                assert tokenize("K.\"\" do\n:ok\nend") ==
+               {:ok,
+                [
+                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
+                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:do_identifier, {{1, 3}, {1, 5}, 34}, :""},
+                  {:do, {{1, 6}, {1, 8}, nil}},
+                  {:eol, {{1, 8}, {2, 1}, 1}},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
                   {:eol, {{2, 4}, {3, 1}, 1}},
                   {:end, {{3, 1}, {3, 4}, nil}}
@@ -4352,6 +4442,21 @@ defmodule ToxicTest do
         |> Path.expand()
         |> Path.join("**/*.ex*")
         |> Path.wildcard()
+
+      for file <- files do
+        IO.puts(file)
+        source = file |> File.read!()
+        # lines = String.split(source, "\n")
+        assert {:ok, _, _} = tokenize(source)
+      end
+    end
+
+    test "elixir src 1" do
+      files = [
+        # __DIR__ <> "/simple.ex"
+        "/Users/lukaszsamson/elixir/lib/eex/lib/eex/compiler.ex"
+        # "/Users/lukaszsamson/elixir/lib/elixir/lib/kernel.ex"
+      ]
 
       for file <- files do
         IO.puts(file)
