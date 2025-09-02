@@ -386,7 +386,13 @@ linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, Me
     [] -> {atom_quoted, CM, ''};
     _ -> {atom_unsafe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      % If inside interpolation, add the atom token to interpolation frame
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   CM0 = combine_range_meta(MetaStart, MetaEnd),
@@ -399,7 +405,13 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
     [] -> {atom_quoted, CM, ''};
     _ -> {atom_safe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      % If inside interpolation, add the atom token to interpolation frame
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 
 %% Close quoted identifier and emit identifier token
 linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
