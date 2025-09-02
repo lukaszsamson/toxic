@@ -334,7 +334,12 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_st
     [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   CM0 = combine_range_meta(MetaStart, MetaEnd),
@@ -347,7 +352,12 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{bin_stri
     [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   CM0 = combine_range_meta(MetaStart, MetaEnd),
@@ -360,7 +370,12 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{list_s
     [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_unsafe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   CM0 = combine_range_meta(MetaStart, MetaEnd),
@@ -373,7 +388,12 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_str
     [] -> {kw_identifier, CM, ''};
     _ -> {kw_identifier_safe, CM, Parts}
   end,
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   CM0 = combine_range_meta(MetaStart, MetaEnd),
