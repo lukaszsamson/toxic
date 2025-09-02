@@ -504,7 +504,12 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       {{1, 2}, ClosingQuotePos, Delim}
   end,
   IdentTok = {identifier, IdentifierMeta, Atom},
-  linear_to_legacy(T, [IdentTok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [IdentTok | Out], Stack)
+  end;
 
 %% Close quoted identifier followed by do and emit do_identifier + do
 linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
@@ -522,7 +527,12 @@ linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quote
   IdentifierMeta = case StartMeta of {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim}; _ -> {{1, 2}, ClosingQuotePos, Delim} end,
   DoIdTok = {do_identifier, IdentifierMeta, Atom},
   %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
-  linear_to_legacy(T, [DoIdTok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [DoIdTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [DoIdTok | Out], Stack)
+  end;
 
 %% Close quoted identifier where next token is dual_op start -> op_identifier
 linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
@@ -549,7 +559,12 @@ linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quote
     _ -> {{1,2}, ClosingQuotePos, Delim}
   end,
   IdentTok = {op_identifier, IdentifierMeta, Atom},
-  linear_to_legacy(T, [IdentTok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [IdentTok | Out], Stack)
+  end;
 
 %% Close quoted paren identifier and emit paren_identifier token
 linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
@@ -622,7 +637,12 @@ linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{qu
       {{1, 2}, ClosingQuotePos, Delim}
   end,
   IdentTok = {paren_identifier, IdentifierMeta, Atom},
-  linear_to_legacy(T, [IdentTok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [IdentTok | Out], Stack)
+  end;
 
 %% Close quoted bracket identifier and emit bracket_identifier token
 linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
@@ -695,7 +715,12 @@ linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{
       {{1, 2}, ClosingQuotePos, Delim}
   end,
   IdentTok = {bracket_identifier, IdentifierMeta, Atom},
-  linear_to_legacy(T, [IdentTok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [IdentTok | Out], Stack)
+  end;
 
 %% Pass-through for non-linear tokens
 linear_to_legacy([Tok | T], Out, Stack) ->
