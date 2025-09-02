@@ -249,11 +249,23 @@ linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Me
       CM0 = combine_range_meta(Meta, EndMeta),
       CM = combine_range_meta(CM0, M),
       Tok = {sigil, CM, SigilAtom, Parts1, Modifiers, Indent, Delim},
-      linear_to_legacy(T, [Tok | Out], Stack);
+      case Stack of
+        [{interpol, InterpMeta, InnerRev} | StackRest] ->
+          % If inside interpolation, add sigil token to interpolation frame
+          linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+        _ ->
+          linear_to_legacy(T, [Tok | Out], Stack)
+      end;
     _ ->
       CM = combine_range_meta(Meta, EndMeta),
       Tok = {sigil, CM, SigilAtom, Parts1, [], Indent, Delim},
-      linear_to_legacy(Rest, [Tok | Out], Stack)
+      case Stack of
+        [{interpol, InterpMeta, InnerRev} | StackRest] ->
+          % If inside interpolation, add sigil token to interpolation frame
+          linear_to_legacy(Rest, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+        _ ->
+          linear_to_legacy(Rest, [Tok | Out], Stack)
+      end
   end;
 
 linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
