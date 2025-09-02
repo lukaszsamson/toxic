@@ -8,14 +8,13 @@ defmodule ToxicTest do
 
     # Use the new streaming API
     stream = Toxic.TokenStream.new(string, 1, 1, [{:linearize, linearize}])
-    {toxic_tokens_with_ranges, final_stream} = collect_all_tokens(stream, [])
+    {toxic_tokens_with_ranges_orig, final_stream} = collect_all_tokens(stream, [])
 
     toxic_tokens_with_ranges =
       if not linearize do
-        dbg(toxic_tokens_with_ranges, limit: :infinity)
-        :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges |> Enum.reverse())
+        :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges_orig |> Enum.reverse())
       else
-        toxic_tokens_with_ranges
+        toxic_tokens_with_ranges_orig
       end
 
     if Keyword.get(opts, :must_match_elixir, true) do
@@ -31,6 +30,8 @@ defmodule ToxicTest do
         # Find first differing token
         {toxic_diff, elixir_diff, index} =
           find_first_difference(toxic_tokens, elixir_tokens_reversed, 0)
+
+        dbg(toxic_tokens_with_ranges, limit: :infinity)
 
         IO.puts("\n=== FIRST DIFFERING TOKEN (index #{index}) ===")
         IO.puts("TOXIC:  #{inspect(toxic_diff)}")
@@ -2723,7 +2724,7 @@ defmodule ToxicTest do
                   {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
                 ], ""}
 
-                assert tokenize("'': 1") ==
+      assert tokenize("'': 1") ==
                {:ok,
                 [
                   {:kw_identifier, {{1, 1}, {1, 4}, 39}, :""},
@@ -3183,6 +3184,7 @@ defmodule ToxicTest do
     test "dot quote empty" do
       assert tokenize(".\"\"") ==
                {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 34}, :""}], ""}
+
       assert tokenize(".''") ==
                {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 39}, :""}], ""}
     end
@@ -3247,7 +3249,7 @@ defmodule ToxicTest do
                   {:")", {{1, 5}, {1, 6}, nil}}
                 ], ""}
 
-                assert tokenize(".''()") ==
+      assert tokenize(".''()") ==
                {:ok,
                 [
                   {:., {{1, 1}, {1, 2}, nil}},
@@ -3287,7 +3289,7 @@ defmodule ToxicTest do
                   {:"]", {{1, 5}, {1, 6}, nil}}
                 ], ""}
 
-                assert tokenize(".''[]") ==
+      assert tokenize(".''[]") ==
                {:ok,
                 [
                   {:., {{1, 1}, {1, 2}, nil}},
@@ -4125,7 +4127,7 @@ defmodule ToxicTest do
                   {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
                 ], ""}
 
-                assert tokenize("K.\"\" +1") ==
+      assert tokenize("K.\"\" +1") ==
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
@@ -4287,7 +4289,7 @@ defmodule ToxicTest do
                   {:end, {{3, 1}, {3, 4}, nil}}
                 ], ""}
 
-                assert tokenize("K.\"\" do\n:ok\nend") ==
+      assert tokenize("K.\"\" do\n:ok\nend") ==
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
@@ -4416,6 +4418,390 @@ defmodule ToxicTest do
       assert {:ok, _, _} = tokenize(code)
     end
 
+    test "sigil inside interpolation" do
+      code = """
+      :"foo\#{~s/\\n/}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{~s/\\n/}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{~s/\\n/}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{~s/\\n/}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{~s/\\n/}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{~s/\\n/}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{~s/\\n/}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "quoted atom inside interpolation" do
+      code = """
+      :"foo\#{:"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{:"a"}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{:"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{:"a"}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{:"a"}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{:"a"}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{:"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "quoted kw_identifier inside interpolation" do
+      code = """
+      :"foo\#{"a": 1}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{"a": 1}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{"a": 1}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{"a": 1}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{"a": 1}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{"a": 1}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{"a": 1}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "bin_string inside interpolation" do
+      code = """
+      :"foo\#{"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{"a"}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{"a"}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{"a"}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{"a"}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{"a"}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "charlist_string inside interpolation" do
+      code = """
+      :"foo\#{'a'}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{'a'}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{'a'}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{'a'}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{'a'}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{'a'}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{'a'}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "bin_heredoc inside interpolation" do
+      code = """
+      :"foo\#{\"""\na\n\"""}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{\"""\na\n\"""}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{\"""\na\n\"""}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{\"""\na\n\"""}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{\"""\na\n\"""}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{\"""\na\n\"""}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{\"""\na\n\"""}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "charlist_heredoc inside interpolation" do
+      code = """
+      :"foo\#{'''\na\n'''}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{'''\na\n'''}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{'''\na\n'''}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{'''\na\n'''}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{'''\na\n'''}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{'''\na\n'''}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{'''\na\n'''}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
+    test "quoted identifier inside interpolation" do
+      code = """
+      :"foo\#{K.'a'}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{K.'a'()}bar": 1\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      "foo\#{K.'a'[]}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      'foo\#{K.'a' +1}bar'\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      \"""
+      foo\#{K.'a' do\n:ok\nend}bar
+      \"""\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      '''
+      foo\#{K.'a'}bar
+      '''\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      ~c"foo\#{K.'a'}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+    end
+
     for module <- [
           Atom,
           Tuple,
@@ -4451,20 +4837,20 @@ defmodule ToxicTest do
       end
     end
 
-    test "elixir src 1" do
-      files = [
-        # __DIR__ <> "/simple.ex"
-        "/Users/lukaszsamson/elixir/lib/eex/lib/eex/compiler.ex"
-        # "/Users/lukaszsamson/elixir/lib/elixir/lib/kernel.ex"
-      ]
+    #   test "elixir src 1" do
+    #     files = [
+    #       # __DIR__ <> "/simple.ex"
+    #       "/Users/lukaszsamson/elixir/lib/eex/lib/eex/compiler.ex"
+    #       # "/Users/lukaszsamson/elixir/lib/elixir/lib/kernel.ex"
+    #     ]
 
-      for file <- files do
-        IO.puts(file)
-        source = file |> File.read!()
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
-      end
-    end
+    #     for file <- files do
+    #       IO.puts(file)
+    #       source = file |> File.read!()
+    #       # lines = String.split(source, "\n")
+    #       assert {:ok, _, _} = tokenize(source)
+    #     end
+    #   end
   end
 
   # Ported from elixir/lib/elixir/test/erlang/tokenizer_test.erl

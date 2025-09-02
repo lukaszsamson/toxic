@@ -308,7 +308,14 @@ linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_h
       add_missing_empty_fragments(Final, Indent)
   end,
   Tok = {bin_heredoc, CM, Indent, Parts},
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      % Nested inside interpolation - add to interpolation frame
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      % Top-level - add to output
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
@@ -319,7 +326,14 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
       add_missing_empty_fragments(Final)
   end,
   Tok = {list_heredoc, CM, Indent, Parts},
-  linear_to_legacy(T, [Tok | Out], Stack);
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      % Nested inside interpolation - add to interpolation frame
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
+    _ ->
+      % Top-level - add to output
+      linear_to_legacy(T, [Tok | Out], Stack)
+  end;
 %% Keep EOL tokens in collapsed ranges
 
 linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
