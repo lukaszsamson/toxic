@@ -69,7 +69,7 @@ defmodule Toxic.Dot do
     #   false ->
     #     Basescope
     # end,
-    # TODO: emit 2 events?
+
     dot_token = {:., dot_info}
     start_tok = {:quoted_identifier_start, meta(line, column, line, 1, nil), h}
 

@@ -48,7 +48,7 @@ defmodule Toxic.TokenStream do
   # Default options
   @default_opts [
     unescape: true,
-    max_batch: 25600,
+    max_batch: 256,
     eol_mode: :emit,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer]
@@ -212,8 +212,6 @@ defmodule Toxic.TokenStream do
 
   def peek_n(%__MODULE__{} = stream, n) do
     working_stream = ensure_buffer_size(stream, n)
-
-    # TODO: make sure this works correctly: if unable to fill n, stream should not be marked as EOFed
 
     push_tokens = Enum.take(working_stream.push, n)
     needed = n - length(push_tokens)

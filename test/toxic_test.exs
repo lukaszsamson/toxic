@@ -465,7 +465,6 @@ defmodule ToxicTest do
     end
 
     test ">> after eol" do
-      # TODO: eol with only position???
       assert tokenize("<<\n>>") ==
                {:ok,
                 [
