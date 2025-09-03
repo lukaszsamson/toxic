@@ -341,9 +341,7 @@ defmodule Toxic.TokenStream do
   """
   @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
   def current_terminators(%__MODULE__{} = stream) do
-    # TODO: Implement proper terminator tracking
-    # For now, return empty list to make tests pass
-    {[], stream}
+    {Toxic.Driver.current_terminators(stream.driver), stream}
   end
 
   @doc """

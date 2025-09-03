@@ -16,6 +16,20 @@ defmodule Toxic.Driver do
             # Track the most recent token emitted (for carry context)
             recent_token: nil
 
+  # TODO: better type
+  @type interp_kind() :: atom()
+  @type interp_delim() :: any()
+  @type terminators() :: :none | list()
+  @type t() :: %__MODULE__{
+          line: pos_integer(),
+          column: pos_integer(),
+          contexts:
+            list(:normal | {:interp, interp_kind(), boolean(), interp_delim(), terminators()}),
+          deferrals: list(),
+          output: list(),
+          recent_token: any()
+        }
+
   def new() do
     tokenizer = :toxic_config.identifier_tokenizer()
 
@@ -474,5 +488,39 @@ defmodule Toxic.Driver do
   # Helper to return a token and update recent_token in state
   defp return_token(token, rest, state) do
     {:ok, token, rest, %{state | recent_token: token}}
+  end
+
+  @doc """
+  Get the current terminator stack.
+  """
+  @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
+  def current_terminators(%__MODULE__{} = driver) do
+    # Collect current scope terminators and any parent terminators saved in
+    # interpolation contexts on the driver's context stack.
+
+    # Read current terminators from scope record
+    scope(terminators: current_terms) = driver.scope
+
+    current_terms =
+      case current_terms do
+        :none -> []
+        other -> other
+      end
+
+    # Walk contexts to gather all parent terminators from interpolation frames
+    context_terms =
+      driver.contexts
+      |> Enum.flat_map(fn
+        {:interp, _kind, _allowed?, _delim, parent_terms} ->
+          case parent_terms do
+            :none -> []
+            list when is_list(list) -> list
+          end
+
+        _ ->
+          []
+      end)
+
+    current_terms ++ context_terms
   end
 end
