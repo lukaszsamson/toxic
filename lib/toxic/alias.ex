@@ -9,7 +9,7 @@ defmodule Toxic.Alias do
       # Reason = {?LOC(Line, Column), invalid_character_error("alias (only ASCII characters, without punctuation, are allowed)", Invalid), Unencoded},
       # error(Reason, Unencoded ++ Rest, Scope, Tokens);
     else
-      aliases_token = {:alias, meta(line, column, length, unencoded), atom}
+      aliases_token = alias_token(meta(line, column, length, unencoded), atom)
       emit(aliases_token, rest, line, column + length, scope)
     end
   end

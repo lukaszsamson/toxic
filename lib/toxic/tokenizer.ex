@@ -239,64 +239,36 @@ defmodule Toxic.Tokenizer do
   end
 
   # Three token operators
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when unary_op3(t1, t2, t3) do
-    handle_unary_op(rest, line, column, :unary_op, 3, List.to_atom([t1, t2, t3]), scope, tokens)
-  end
+  @three_token_ops ~w(unary_op3 ellipsis_op3 comp_op3 and_op3 or_op3 xor_op3 concat_op3 arrow_op3)a
+  @unary_three_token_ops ~w(unary_op3 ellipsis_op3)a
 
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when ellipsis_op3(t1, t2, t3) do
-    handle_unary_op(
-      rest,
-      line,
-      column,
-      :ellipsis_op,
-      3,
-      List.to_atom([t1, t2, t3]),
-      scope,
-      tokens
-    )
-  end
+  for token <- @three_token_ops do
+    token_name = token |> to_string() |> String.replace_suffix("3", "") |> String.to_atom()
 
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when comp_op3(t1, t2, t3) do
-    handle_op(rest, line, column, :comp_op, 3, List.to_atom([t1, t2, t3]), scope, tokens)
-  end
+    call =
+      if token in @unary_three_token_ops do
+        :handle_unary_op
+      else
+        :handle_op
+      end
 
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when and_op3(t1, t2, t3) do
     # TODO: warn
-    new_scope = scope
+    # and_op3 or_op3 xor_op3 concat_op3
     # new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope),
-    handle_op(rest, line, column, :and_op, 3, List.to_atom([t1, t2, t3]), new_scope, tokens)
-  end
 
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens) when or_op3(t1, t2, t3) do
-    # TODO: warn
-    new_scope = scope
-    # new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope),
-    handle_op(rest, line, column, :or_op, 3, List.to_atom([t1, t2, t3]), new_scope, tokens)
-  end
-
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when xor_op3(t1, t2, t3) do
-    # TODO: warn
-    new_scope = scope
-    # new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope),
-    handle_op(rest, line, column, :xor_op, 3, List.to_atom([t1, t2, t3]), new_scope, tokens)
-  end
-
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when concat_op3(t1, t2, t3) do
-    # TODO: warn
-    new_scope = scope
-    # new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope),
-    handle_op(rest, line, column, :concat_op, 3, List.to_atom([t1, t2, t3]), new_scope, tokens)
-  end
-
-  def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
-      when arrow_op3(t1, t2, t3) do
-    handle_op(rest, line, column, :arrow_op, 3, List.to_atom([t1, t2, t3]), scope, tokens)
+    def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
+        when unquote(token)(t1, t2, t3) do
+      unquote(call)(
+        rest,
+        line,
+        column,
+        unquote(token_name),
+        3,
+        List.to_atom([t1, t2, t3]),
+        scope,
+        tokens
+      )
+    end
   end
 
   # Containers + punctuation tokens
@@ -342,48 +314,15 @@ defmodule Toxic.Tokenizer do
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when power_op(t1, t2) do
-    handle_op(rest, line, column, :power_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
+  @two_token_ops ~w(power_op range_op concat_op arrow_op comp_op2 rel_op2 and_op or_op in_match_op type_op stab_op)a
 
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when range_op(t1, t2) do
-    handle_op(rest, line, column, :range_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
+  for token <- @two_token_ops do
+    token_name = token |> to_string() |> String.replace_suffix("2", "") |> String.to_atom()
 
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when concat_op(t1, t2) do
-    handle_op(rest, line, column, :concat_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when arrow_op(t1, t2) do
-    handle_op(rest, line, column, :arrow_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when comp_op2(t1, t2) do
-    handle_op(rest, line, column, :comp_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when rel_op2(t1, t2) do
-    handle_op(rest, line, column, :rel_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when and_op(t1, t2) do
-    handle_op(rest, line, column, :and_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when or_op(t1, t2) do
-    handle_op(rest, line, column, :or_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when in_match_op(t1, t2) do
-    handle_op(rest, line, column, :in_match_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when type_op(t1, t2) do
-    handle_op(rest, line, column, :type_op, 2, List.to_atom([t1, t2]), scope, tokens)
-  end
-
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when stab_op(t1, t2) do
-    handle_op(rest, line, column, :stab_op, 2, List.to_atom([t1, t2]), scope, tokens)
+    def tokenize_single([t1, t2 | rest], line, column, scope, tokens)
+        when unquote(token)(t1, t2) do
+      handle_op(rest, line, column, unquote(token_name), 2, List.to_atom([t1, t2]), scope, tokens)
+    end
   end
 
   # Single Token Operators
@@ -408,32 +347,20 @@ defmodule Toxic.Tokenizer do
     emit(token, rest, line, column + 1, scope)
   end
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when at_op(t) do
-    handle_unary_op(rest, line, column, :at_op, 1, List.to_atom([t]), scope, tokens)
-  end
+  @single_token_ops ~w(at_op unary_op rel_op dual_op mult_op match_op pipe_op)a
+  @unary_single_token_ops ~w(at_op unary_op dual_op)a
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when unary_op(t) do
-    handle_unary_op(rest, line, column, :unary_op, 1, List.to_atom([t]), scope, tokens)
-  end
+  for token <- @single_token_ops do
+    call =
+      if token in @unary_single_token_ops do
+        :handle_unary_op
+      else
+        :handle_op
+      end
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when rel_op(t) do
-    handle_op(rest, line, column, :rel_op, 1, List.to_atom([t]), scope, tokens)
-  end
-
-  def tokenize_single([t | rest], line, column, scope, tokens) when dual_op(t) do
-    handle_unary_op(rest, line, column, :dual_op, 1, List.to_atom([t]), scope, tokens)
-  end
-
-  def tokenize_single([t | rest], line, column, scope, tokens) when mult_op(t) do
-    handle_op(rest, line, column, :mult_op, 1, List.to_atom([t]), scope, tokens)
-  end
-
-  def tokenize_single([t | rest], line, column, scope, tokens) when match_op(t) do
-    handle_op(rest, line, column, :match_op, 1, List.to_atom([t]), scope, tokens)
-  end
-
-  def tokenize_single([t | rest], line, column, scope, tokens) when pipe_op(t) do
-    handle_op(rest, line, column, :pipe_op, 1, List.to_atom([t]), scope, tokens)
+    def tokenize_single([t | rest], line, column, scope, tokens) when unquote(token)(t) do
+      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, tokens)
+    end
   end
 
   # Non-operator Atoms
@@ -738,18 +665,7 @@ defmodule Toxic.Tokenizer do
     end
   end
 
-  defp eol(_line, _column, [{:",", _meta} | _tokens]) do
-    # {:',', {line, column, Count + 1}}
-    :increase_eol
-  end
-
-  defp eol(_line, _column, [{:";", _meta} | _tokens]) do
-    # {:';', {line, column, Count + 1}}
-    :increase_eol
-  end
-
-  defp eol(_line, _column, [{:eol, _meta} | _tokens]) do
-    # {:eol, {line, column, Count + 1}}
+  defp eol(_line, _column, [{token, _meta} | _tokens]) when token in ~w(, ; eol)a do
     :increase_eol
   end
 

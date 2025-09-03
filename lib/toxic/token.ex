@@ -12,33 +12,27 @@ defmodule Toxic.Token do
     end
   end
 
-  defmacro int(meta, original_representation) do
-    quote do
-      {:int, unquote(meta), unquote(original_representation)}
+  @tokens_3 ~w(int flt char atom kw_identifier)a
+
+  for token <- @tokens_3 do
+    defmacro unquote(token)(meta, original_representation) do
+      tok = unquote(token)
+
+      quote do
+        {unquote(tok), unquote(meta), unquote(original_representation)}
+      end
     end
   end
 
-  defmacro flt(meta, original_representation) do
+  defmacro alias_token(meta, original_representation) do
     quote do
-      {:flt, unquote(meta), unquote(original_representation)}
+      {:alias, unquote(meta), unquote(original_representation)}
     end
   end
 
-  defmacro char(meta, original_representation) do
+  defmacro dot_token(meta) do
     quote do
-      {:char, unquote(meta), unquote(original_representation)}
-    end
-  end
-
-  defmacro atom(meta, original_representation) do
-    quote do
-      {:atom, unquote(meta), unquote(original_representation)}
-    end
-  end
-
-  defmacro kw_identifier(meta, original_representation) do
-    quote do
-      {:kw_identifier, unquote(meta), unquote(original_representation)}
+      {:., unquote(meta)}
     end
   end
 end

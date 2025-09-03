@@ -70,7 +70,7 @@ defmodule Toxic.Dot do
     #     Basescope
     # end,
 
-    dot_token = {:., dot_info}
+    dot_token = dot_token(dot_info)
     start_tok = {:quoted_identifier_start, meta(line, column, line, 1, nil), h}
 
     multiple(
@@ -83,7 +83,7 @@ defmodule Toxic.Dot do
   end
 
   defp handle_dot([?. | rest], line, column, dot_info, scope, _tokens) do
-    token = {:., dot_info}
+    token = dot_token(dot_info)
     emit_with_eol(token, rest, line, column, scope)
   end
 
@@ -98,7 +98,7 @@ defmodule Toxic.Dot do
         rest
       )
 
-    dot_token = {:., dot_info}
+    dot_token = dot_token(dot_info)
 
     multiple(
       [{:token_with_eol, dot_token}, {:token, op_token}],

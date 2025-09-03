@@ -89,9 +89,6 @@ defmodule Toxic.Sigil do
         start_token =
           {:sigil_start, meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
 
-        # Interp = {sigil_info, sigil_atom, ?is_downcase(S), <<H,H,H>>}
-        # {switch_to_interp, start_token, Headerless, line + 1, 1, scope, sigil, [H, H, H], Interp}
-
         {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, [?\n | headerless],
          line + 1, 1, scope}
 
@@ -116,11 +113,6 @@ defmodule Toxic.Sigil do
 
     start_token =
       {:sigil_start, meta(line, start_column, line, column + 1, nil), sigil_atom, <<h>>}
-
-    # interp = {:sigil_info, sigil_atom, is_downcase(s), <<h>>}
-
-    # {:switch_to_interp, start_token, t, line, column + 1, scope, :sigil, sigil_terminator(h),
-    #  interp}
 
     {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, t, line,
      column + 1, scope}
