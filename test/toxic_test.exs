@@ -7,7 +7,7 @@ defmodule ToxicTest do
     linearize = Keyword.get(opts, :linearize, false)
 
     # Use the new streaming API
-    stream = Toxic.TokenStream.new(string, 1, 1, [{:linearize, linearize}])
+    stream = Toxic.TokenStream.new(string, 1, 1, [])
     {toxic_tokens_with_ranges_orig, final_stream} = collect_all_tokens(stream, [])
 
     toxic_tokens_with_ranges =
