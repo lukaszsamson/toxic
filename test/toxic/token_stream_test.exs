@@ -266,6 +266,7 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new("")
 
       fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+
       stream =
         stream
         |> TokenStream.pushback(fake_token1)
@@ -757,14 +758,16 @@ defmodule Toxic.TokenStreamTest do
       content = File.read!(path)
 
       # tokenize with big batch size
-      stream = TokenStream.new(content, 1, 1, max_batch: 256000, eol_mode: :embed)
+      stream = TokenStream.new(content, 1, 1, max_batch: 256_000, eol_mode: :embed)
 
       # Consume all tokens
       {big_batch_total, _stream} = consume_all(stream)
 
       for max_batch <- [
-        # 1, 2, 3, 5, 10, 100, 1000,
-      10000, 20613] do
+            # 1, 2, 3, 5, 10, 100, 1000,
+            10000,
+            20613
+          ] do
         # tokenize with small batch size
         stream = TokenStream.new(content, 1, 1, max_batch: max_batch, eol_mode: :embed)
 
@@ -799,16 +802,14 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "defaults" do
-    test "default eol_mode is :embed (no eol tokens)" do
+    test "default eol_mode is :emit" do
       stream = TokenStream.new("1\n2")
 
       {:ok, token1, stream} = TokenStream.next(stream)
       assert {:int, _, ~c"1"} = token1
 
-      {:ok, token2, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"2"} = token2
-
-      assert {:eof, _} = TokenStream.next(stream)
+      {:ok, token2, _stream} = TokenStream.next(stream)
+      assert {:eol, _} = token2
     end
   end
 

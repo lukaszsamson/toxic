@@ -49,7 +49,7 @@ defmodule Toxic.TokenStream do
   @default_opts [
     unescape: true,
     max_batch: 25600,
-    eol_mode: :embed,
+    eol_mode: :emit,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer]
   ]
@@ -60,7 +60,7 @@ defmodule Toxic.TokenStream do
   ## Options
   - `:unescape` - Whether to unescape string contents (default: true)
   - `:max_batch` - Maximum tokens to fetch in one batch (default: 256)
-  - `:eol_mode` - How to handle EOL tokens: `:embed` or `:emit` (default: :embed)
+  - `:eol_mode` - How to handle EOL tokens: `:embed` or `:emit` (default: :emit)
   - `:error_mode` - Error handling: `:tolerant` or `:strict` (default: :tolerant)
   - `:error_sync` - Sync points for error recovery (default: [:semicolon, :newline, :closer])
   """
