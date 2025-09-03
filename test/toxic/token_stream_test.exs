@@ -361,8 +361,8 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new("'foo")
 
       # Consume tokens
-      {:ok, _paren, stream} = TokenStream.next(stream)
-      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _sigil_start, stream} = TokenStream.next(stream)
+      {:ok, _fragment, stream} = TokenStream.next(stream)
 
       {closer, _stream} = TokenStream.peek_missing_terminator(stream)
 
@@ -409,8 +409,8 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new(":'foo")
 
       # Consume tokens
-      {:ok, _paren, stream} = TokenStream.next(stream)
-      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _atom_start, stream} = TokenStream.next(stream)
+      {:ok, _fragment, stream} = TokenStream.next(stream)
 
       {closer, _stream} = TokenStream.peek_missing_terminator(stream)
 
@@ -433,27 +433,41 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new("K.'foo")
 
       # Consume tokens
-      {:ok, _paren, stream} = TokenStream.next(stream)
-      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _identifier, stream} = TokenStream.next(stream)
+      {:ok, _dot, stream} = TokenStream.next(stream)
+      {:ok, _quoted_start, stream} = TokenStream.next(stream)
+      {:ok, _fragment, stream} = TokenStream.next(stream)
 
       {closer, _stream} = TokenStream.peek_missing_terminator(stream)
 
       assert closer == :"'"
     end
 
+    @sigil_terminators [
+      {:/, :/},
+      {:<, :>},
+      {:"\"", :"\""},
+      {:"'", :"'"},
+      {:"[", :"]"},
+      {:"(", :")"},
+      {:"{", :"}"},
+      {:|, :|}
+    ]
     test "suggests closing delimiter in sigil" do
-      stream = TokenStream.new("~x/foo")
+      for {opening_terminator, closing_terminator} <- @sigil_terminators do
+        stream = TokenStream.new("~x#{opening_terminator}foo")
 
-      # Consume tokens
-      {:ok, _paren, stream} = TokenStream.next(stream)
-      {:ok, _one, stream} = TokenStream.next(stream)
+        # Consume tokens
+        {:ok, _paren, stream} = TokenStream.next(stream)
+        {:ok, _one, stream} = TokenStream.next(stream)
 
-      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+        {closer, _stream} = TokenStream.peek_missing_terminator(stream)
 
-      assert closer == :"/"
+        assert closer == closing_terminator
+      end
     end
 
-    test "suggests closing delimiter in heredoc sigil" do
+    test "suggests closing delimiter in bin_heredoc sigil" do
       stream = TokenStream.new("~x\"\"\"\nfoo")
 
       # Consume tokens
@@ -463,6 +477,18 @@ defmodule Toxic.TokenStreamTest do
       {closer, _stream} = TokenStream.peek_missing_terminator(stream)
 
       assert closer == :"\"\"\""
+    end
+
+    test "suggests closing delimiter in list_heredoc sigil" do
+      stream = TokenStream.new("~x'''\nfoo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"'''"
     end
 
     test "suggests closing delimiter in bin_string interpolation" do

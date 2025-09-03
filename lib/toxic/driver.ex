@@ -497,7 +497,8 @@ defmodule Toxic.Driver do
   @spec current_terminators(t()) :: [{atom(), term(), non_neg_integer()}]
   def current_terminators(%__MODULE__{} = driver) do
     # Collect current scope terminators and any parent terminators saved in
-    # interpolation contexts on the driver's context stack.
+    # interpolation contexts on the driver's context stack, plus delimiters
+    # from string/heredoc/atom/sigil constructs.
 
     # Read current terminators from scope record
     scope(terminators: current_terms) = driver.scope
@@ -509,16 +510,33 @@ defmodule Toxic.Driver do
       end
 
     # Walk contexts to gather all parent terminators from interpolation frames
+    # and add delimiter terminators from string-like constructs
+    context_length = length(driver.contexts)
+
     context_terms =
       driver.contexts
+      |> Enum.with_index()
       |> Enum.flat_map(fn
-        {:interp, _kind, _allowed?, _delim, parent_terms} ->
-          case parent_terms do
-            :none -> []
-            list when is_list(list) -> list
-          end
+        {:normal, index} when index < context_length - 1 ->
+          # This is a :normal context inside an interpolation (not the root :normal)
+          # Add the interpolation brace terminator
+          [{:"{", nil, 0}]
 
-        _ ->
+        {{:interp, _kind, _allowed?, delim, parent_terms}, _index} ->
+          # Get parent terminators
+          parent_terms =
+            case parent_terms do
+              :none -> []
+              list when is_list(list) -> list
+            end
+
+          # Add delimiter terminator
+          delimiter_terminator = [{List.to_atom(List.wrap(delim)), nil, 0}]
+
+          parent_terms ++ delimiter_terminator
+
+        {:normal, _index} ->
+          # Root :normal context does not have interpolation brace terminator
           []
       end)
 
@@ -544,4 +562,9 @@ defmodule Toxic.Driver do
   defp closing_for(:"["), do: :"]"
   defp closing_for(:"{"), do: :"}"
   defp closing_for(:"<<"), do: :">>"
+
+  # Handle string-like delimiters - the delimiter is already converted to atom in current_terminators
+  defp closing_for(delimiter) when is_atom(delimiter) do
+    delimiter
+  end
 end
