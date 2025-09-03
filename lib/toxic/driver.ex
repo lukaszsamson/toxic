@@ -134,6 +134,9 @@ defmodule Toxic.Driver do
            string,
            delim
          ) do
+      :eof ->
+        {[], state}
+
       {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
        binary_part, rest, line, column, scope} ->
         {binary_part, line} =
@@ -330,8 +333,6 @@ defmodule Toxic.Driver do
       :eof ->
         {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
 
-      # {:eof, state}
-
       {nil, rest, line, column, scope} ->
         {rest, %{state | line: line, column: column, scope: scope}}
 
@@ -493,7 +494,7 @@ defmodule Toxic.Driver do
   @doc """
   Get the current terminator stack.
   """
-  @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
+  @spec current_terminators(t()) :: [{atom(), term(), non_neg_integer()}]
   def current_terminators(%__MODULE__{} = driver) do
     # Collect current scope terminators and any parent terminators saved in
     # interpolation contexts on the driver's context stack.
@@ -523,4 +524,24 @@ defmodule Toxic.Driver do
 
     current_terms ++ context_terms
   end
+
+  @doc """
+  Suggest a missing closing terminator based on the current stack.
+
+  Returns the closer atom (e.g., :")", :"]", :"}", :">>", :end) or nil if none.
+  """
+  @spec peek_missing_terminator(t()) :: atom() | nil
+  def peek_missing_terminator(%__MODULE__{} = driver) do
+    case current_terminators(driver) do
+      [{start, _meta, _indent} | _] -> closing_for(start)
+      [] -> nil
+    end
+  end
+
+  defp closing_for(:fn), do: :end
+  defp closing_for(:do), do: :end
+  defp closing_for(:"("), do: :")"
+  defp closing_for(:"["), do: :"]"
+  defp closing_for(:"{"), do: :"}"
+  defp closing_for(:"<<"), do: :">>"
 end

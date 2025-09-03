@@ -349,9 +349,7 @@ defmodule Toxic.TokenStream do
   """
   @spec peek_missing_terminator(t()) :: {atom() | nil, t()}
   def peek_missing_terminator(%__MODULE__{} = stream) do
-    # TODO: Implement proper terminator suggestion
-    # For now, return nil to make tests pass
-    {nil, stream}
+    {Toxic.Driver.peek_missing_terminator(stream.driver), stream}
   end
 
   # Private functions

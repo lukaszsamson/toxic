@@ -13,9 +13,18 @@ defmodule Toxic.Interpolation do
   # extract([], _Buffer, _Output, Line, Column, #elixir_tokenizer{cursor_completion=false}, _Interpol, Last) ->
   #   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
 
-  # def tokenize_single([], buffer, output, line, column, scope, _interpol, _last) do
+  # def tokenize_single([], buffer, line, column, start_line, start_column, scope, _interpol, _last) do
   #   finish_extraction([], Buffer, Output, Line, Column, Scope)
   # end
+
+  def tokenize_single([], buffer = [_ | _], line, column, start_line, start_column, scope, _interpol, _last) do
+    {:fragment, meta(start_line, start_column, line, column, nil),
+     :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [], line, column, scope}
+  end
+
+  def tokenize_single([], [], _line, _column, _start_line, _start_column, scope(cursor_completion: false), _interpol, _last) do
+    :eof
+  end
 
   def tokenize_single(
         [last | rest],
@@ -335,9 +344,8 @@ defmodule Toxic.Interpolation do
           last
         )
 
-        # [] ->
-        #   # TODO: when can that happen?
-        #   tokenize_single([], buffer, line, column, start_line, start_column, scope, interpol, last)
+        [] ->
+          tokenize_single([], buffer, line, column, start_line, start_column, scope, interpol, last)
     end
   end
 

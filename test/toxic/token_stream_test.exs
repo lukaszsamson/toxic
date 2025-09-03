@@ -297,21 +297,200 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "peek_missing_terminator/1" do
-    test "suggests closing delimiter" do
-      stream = TokenStream.new("(1 + 2")
+    @simple_cases [
+      {:"(", :")"},
+      {:"{", :"}"},
+      {:"[", :"]"},
+      {:"<<", :">>"}
+    ]
+
+    test "suggests closing delimiter in simple cases" do
+      for {open, close} <- @simple_cases do
+        stream = TokenStream.new("#{open}1 + 2")
+
+        # Consume tokens
+        {:ok, _paren, stream} = TokenStream.next(stream)
+        {:ok, _one, stream} = TokenStream.next(stream)
+        {:ok, _plus, stream} = TokenStream.next(stream)
+        {:ok, _two, stream} = TokenStream.next(stream)
+
+        {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+        assert closer == close
+      end
+    end
+
+    test "suggests closing delimiter in fn" do
+      stream = TokenStream.new("fn x -> ")
 
       # Consume tokens
       {:ok, _paren, stream} = TokenStream.next(stream)
       {:ok, _one, stream} = TokenStream.next(stream)
       {:ok, _plus, stream} = TokenStream.next(stream)
-      {:ok, _two, stream} = TokenStream.next(stream)
 
-      # Would suggest ')' if terminator tracking is implemented
       {closer, _stream} = TokenStream.peek_missing_terminator(stream)
-      # In a full implementation, this would return :')'
-      # TODO: real implementation
-      # For now
-      assert closer == nil
+
+      assert closer == :end
+    end
+
+    test "suggests closing delimiter in do block" do
+      stream = TokenStream.new("try do\n")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :end
+    end
+
+    test "suggests closing delimiter in bin_string" do
+      stream = TokenStream.new("\"foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\""
+    end
+
+    test "suggests closing delimiter in list_string" do
+      stream = TokenStream.new("'foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"'"
+    end
+
+    test "suggests closing delimiter in bin_heredoc" do
+      stream = TokenStream.new("\"\"\"\nfoo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\"\"\""
+    end
+
+    test "suggests closing delimiter in list_heredoc" do
+      stream = TokenStream.new("'''\nfoo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"'''"
+    end
+
+    test "suggests closing delimiter in double quoted atom" do
+      stream = TokenStream.new(":\"foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\""
+    end
+
+    test "suggests closing delimiter in single quoted atom" do
+      stream = TokenStream.new(":'foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"'"
+    end
+
+    test "suggests closing delimiter in double quoted identifier" do
+      stream = TokenStream.new("K.\"foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\""
+    end
+
+    test "suggests closing delimiter in single quoted identifier" do
+      stream = TokenStream.new("K.'foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"'"
+    end
+
+    test "suggests closing delimiter in sigil" do
+      stream = TokenStream.new("~x/foo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"/"
+    end
+
+    test "suggests closing delimiter in heredoc sigil" do
+      stream = TokenStream.new("~x\"\"\"\nfoo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\"\"\""
+    end
+
+    test "suggests closing delimiter in bin_string interpolation" do
+      stream = TokenStream.new("\"foo\#{")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _begin, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"}"
+    end
+
+    test "suggests closing delimiter in bin_string interpolation content" do
+      stream = TokenStream.new("\"foo\#{(1 +")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _begin, stream} = TokenStream.next(stream)
+      {:ok, _one, stream} = TokenStream.next(stream)
+      {:ok, _plus, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :")"
     end
   end
 
