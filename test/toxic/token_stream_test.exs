@@ -49,6 +49,11 @@ defmodule Toxic.TokenStreamTest do
       assert {:eof, _} = TokenStream.next(stream)
     end
 
+    test "handles non empty input with no tokens" do
+      stream = TokenStream.new(" ")
+      assert {:eof, _} = TokenStream.next(stream)
+    end
+
     test "handles string interpolation with linearized tokens" do
       stream = TokenStream.new(~s("foo \#{1 + 2} bar"))
 
@@ -106,6 +111,38 @@ defmodule Toxic.TokenStreamTest do
       assert {:dual_op, {{1, 3}, {1, 4}, _}, :+} = token
     end
 
+    test "peek forcing token fetch resulting in eof signal" do
+      stream = TokenStream.new("1 + 2", 1, 1, max_batch: 3)
+
+      # This will fetch a new batch
+      {:ok, token, stream} = TokenStream.peek(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Next consumes the tokens
+      {:ok, _token, stream} = TokenStream.next(stream)
+      {:ok, _token, stream} = TokenStream.next(stream)
+      {:ok, _token, stream} = TokenStream.next(stream)
+
+      # This will fetch a new batch and return eof
+      assert {:eof, _} = TokenStream.peek(stream)
+    end
+
+    test "peek forcing token fetch returning non full batch" do
+      stream = TokenStream.new("1 + 2", 1, 1, max_batch: 4)
+
+      # This will fetch a new batch
+      {:ok, token, stream} = TokenStream.peek(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Next consumes the tokens
+      {:ok, _token, stream} = TokenStream.next(stream)
+      {:ok, _token, stream} = TokenStream.next(stream)
+      {:ok, _token, stream} = TokenStream.next(stream)
+
+      # This will return eof
+      assert {:eof, _} = TokenStream.peek(stream)
+    end
+
     test "handles EOF" do
       stream = TokenStream.new("")
       assert {:eof, _} = TokenStream.peek(stream)
@@ -137,6 +174,39 @@ defmodule Toxic.TokenStreamTest do
 
       {:ok, tokens, _stream} = TokenStream.peek_n(stream, 5)
       assert length(tokens) == 2
+    end
+
+    test "returns tokens to EOF" do
+      stream = TokenStream.new("1 +")
+
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 2)
+      assert length(tokens) == 2
+    end
+
+    test "forces fetching a correct number of batches" do
+      stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 2)
+
+      # This will fetch 2 times
+      {:ok, tokens, stream} = TokenStream.peek_n(stream, 4)
+      assert length(tokens) == 4
+
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 6)
+      assert length(tokens) == 5
+
+      stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 2)
+
+      # This will fetch 3 times
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 5)
+      assert length(tokens) == 5
+
+      stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 5)
+
+      # This will fetch 1 time
+      {:ok, tokens, stream} = TokenStream.peek_n(stream, 5)
+      assert length(tokens) == 5
+
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 6)
+      assert length(tokens) == 5
     end
 
     test "returns empty list for n <= 0" do
@@ -191,6 +261,19 @@ defmodule Toxic.TokenStreamTest do
       {:ok, t3, _stream} = TokenStream.next(stream)
       assert t3 == token1
     end
+
+    test "pushback and peek" do
+      stream = TokenStream.new("")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      stream =
+        stream
+        |> TokenStream.pushback(fake_token1)
+
+      {:ok, token, _stream} = TokenStream.peek(stream)
+
+      assert token == fake_token1
+    end
   end
 
   describe "checkpoint/1 and rewind_to/2" do
@@ -238,6 +321,7 @@ defmodule Toxic.TokenStreamTest do
 
       # Position should be updated
       {{line, col}, _stream} = TokenStream.position(stream)
+      # TODO: this is invalid - position after a batch not after current token
       assert line == 2
       assert col == 4
     end
@@ -246,6 +330,23 @@ defmodule Toxic.TokenStreamTest do
   describe "to_stream/1" do
     test "converts to Elixir stream" do
       stream = TokenStream.new("1 + 2 * 3")
+
+      tokens =
+        stream
+        |> TokenStream.to_stream()
+        |> Enum.to_list()
+
+      assert [
+               {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
+               {:dual_op, {{1, 3}, {1, 4}, _}, :+},
+               {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
+               {:mult_op, {{1, 7}, {1, 8}, _}, :*},
+               {:int, {{1, 9}, {1, 10}, 3}, ~c"3"}
+             ] = tokens
+    end
+
+    test "converts to Elixir stream with small batch size" do
+      stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 2)
 
       tokens =
         stream
@@ -297,6 +398,7 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "peek_missing_terminator/1" do
+    # TODO: the tests here return terminators after a batch instead of on current token
     @simple_cases [
       {:"(", :")"},
       {:"{", :"}"},
@@ -648,6 +750,29 @@ defmodule Toxic.TokenStreamTest do
       # Now peeking for any positive N should yield EOF
       assert {:eof, _} = TokenStream.peek_n(stream, 1)
       assert {:eof, _} = TokenStream.peek_n(stream, 10)
+    end
+
+    test "max_batch does not affect produced tokens" do
+      path = Enum.module_info()[:compile][:source] |> to_string()
+      content = File.read!(path)
+
+      # tokenize with big batch size
+      stream = TokenStream.new(content, 1, 1, max_batch: 256000, eol_mode: :embed)
+
+      # Consume all tokens
+      {big_batch_total, _stream} = consume_all(stream)
+
+      for max_batch <- [
+        # 1, 2, 3, 5, 10, 100, 1000,
+      10000, 20613] do
+        # tokenize with small batch size
+        stream = TokenStream.new(content, 1, 1, max_batch: max_batch, eol_mode: :embed)
+
+        # Consume all tokens
+        {total, _stream} = consume_all(stream)
+
+        assert big_batch_total == total
+      end
     end
   end
 

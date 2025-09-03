@@ -130,7 +130,9 @@ defmodule Toxic.TokenStream do
       {:empty, _} ->
         stream = refill_buffer(stream)
 
-        if stream.eof do
+        # Only return EOF if we're at EOF and the buffer is still empty.
+        # If the buffer received tokens, proceed to consume them even if EOF is set.
+        if stream.eof and :queue.is_empty(stream.buffer) do
           {:eof, stream}
         else
           do_next(stream)
@@ -189,8 +191,9 @@ defmodule Toxic.TokenStream do
 
       :empty ->
         stream = refill_buffer(stream)
-
-        if stream.eof do
+        # Only return EOF if we're at EOF and the buffer is still empty.
+        # If the buffer received tokens, proceed to peek them even if EOF is set.
+        if stream.eof and :queue.is_empty(stream.buffer) do
           {:eof, stream}
         else
           do_peek(stream)
@@ -425,8 +428,14 @@ defmodule Toxic.TokenStream do
         :queue.in(token, buf)
       end)
 
-    # Only set EOF if driver is at EOF AND we got no new tokens
-    stream_eof = eof and tokens == []
+    # Mark EOF if driver reported EOF or if fewer tokens than requested were returned without error.
+    # This avoids an extra fetch cycle at EOF while preserving tolerant error recovery.
+    stream_eof =
+      cond do
+        eof -> true
+        error == nil and length(tokens) < max_batch -> true
+        true -> stream.eof
+      end
 
     %{
       stream
@@ -484,6 +493,7 @@ defmodule Toxic.TokenStream do
   end
 
   defp extract_slice(source, start_offset, end_offset) when is_binary(source) do
+    # TODO: this should use String.slice to handle unicode
     binary_part(source, start_offset, end_offset - start_offset)
   end
 
