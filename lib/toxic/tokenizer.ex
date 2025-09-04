@@ -411,6 +411,7 @@ defmodule Toxic.Tokenizer do
 
       # unexpected_token(Original, Line, Column, Scope, Tokens);
       :empty ->
+        # TODO: cursor completion
         {nil, [], line, column, scope}
 
       {:unexpected_token, _length} ->
@@ -435,6 +436,7 @@ defmodule Toxic.Tokenizer do
       {[i | rest], number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
         if number == 0 and i in [?x, ?0, ?b] and rest == [] and cursor_completion != false do
           # tokenize([], line, column, scope, tokens)
+          # TODO: cursor completion
           {nil, [], line, column, scope}
         else
           # Msg =
@@ -636,6 +638,7 @@ defmodule Toxic.Tokenizer do
         {:error, :unexpected_token_empty}
 
       :empty ->
+        # TODO: cursor completion
         case string do
           [?~, l] when is_upcase(l) or is_downcase(l) ->
             {nil, [], line, column, original_scope}

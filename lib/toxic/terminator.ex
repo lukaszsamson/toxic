@@ -121,9 +121,11 @@ defmodule Toxic.Terminator do
     # {error, {?LOC(line, column), "unexpected token: ", atom_to_list(End)}}
   end
 
+  # TODO: no test coverage
   def check_terminator(_, _, scope), do: {:ok, scope}
 
   defp terminator(:fn), do: :end
+  # TODO: no test coverage
   defp terminator(:do), do: :end
   defp terminator(:"("), do: :")"
   defp terminator(:"["), do: :"]"

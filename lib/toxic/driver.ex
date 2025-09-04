@@ -31,10 +31,8 @@ defmodule Toxic.Driver do
         }
 
   def new() do
-    tokenizer = :toxic_config.identifier_tokenizer()
-
     %__MODULE__{
-      scope: scope(identifier_tokenizer: tokenizer)
+      scope: scope(identifier_tokenizer: String.Tokenizer)
     }
   end
 
@@ -135,6 +133,7 @@ defmodule Toxic.Driver do
            delim
          ) do
       :eof ->
+        # TODO: no test coverage?
         {[], state}
 
       {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
@@ -155,8 +154,8 @@ defmodule Toxic.Driver do
 
         case kind do
           # Keep sigils and heredocs escaped; collapse stage will handle each correctly
-          k when k in [:sigil, :bin_heredoc, :list_heredoc] ->
-            return_token({:string_fragment, meta, binary_part}, rest, %{
+          k when k in [:sigil, :bin_heredoc, :list_heredoc] or true ->
+            return_token({:string_fragment, meta(start_line, start_column, line, end_column, extra), binary_part}, rest, %{
               state
               | line: line,
                 column: column,
@@ -281,7 +280,9 @@ defmodule Toxic.Driver do
 
             end_token_type =
               case scope do
-                scope(existing_atoms_only: true) -> :kw_identifier_safe_end
+                scope(existing_atoms_only: true) ->
+                  # TODO: no test coverage
+                  :kw_identifier_safe_end
                 _ -> :kw_identifier_unsafe_end
               end
 
@@ -298,7 +299,9 @@ defmodule Toxic.Driver do
             end_token_type =
               case kind do
                 :charlist -> :list_string_end
-                :atom_safe -> :atom_safe_end
+                :atom_safe ->
+                  # TODO: no test coverage
+                  :atom_safe_end
                 :atom_unsafe -> :atom_unsafe_end
                 _ -> :bin_string_end
               end
@@ -331,6 +334,7 @@ defmodule Toxic.Driver do
        ) do
     case result do
       :eof ->
+        # TODO: no test coverage
         {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
 
       {nil, rest, line, column, scope} ->
@@ -452,7 +456,9 @@ defmodule Toxic.Driver do
       {{:token_with_eol, token}, rest, line, column, scope} ->
         carry_with_recent =
           case {token, deferrals} do
-            {{:unary_op, _, _} = left, tokens} -> [left | tokens]
+            {{:unary_op, _, _} = left, tokens} ->
+              # TODO: no test coverage
+              [left | tokens]
             {left, [{:eol, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
