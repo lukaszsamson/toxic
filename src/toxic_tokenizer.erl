@@ -175,8 +175,6 @@ linear_to_legacy([{list_heredoc_start, Meta, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{list_heredoc, Meta, Delim, [], undefined} | Stack]);
 linear_to_legacy([{sigil_start, Meta, SigilAtom, Delim} | T], Out, Stack) ->
   linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [], nil, pending_end} | Stack]);
-linear_to_legacy([{kw_identifier_unsafe_start, Meta, Delim} | T], Out, Stack) ->
-  linear_to_legacy(T, Out, [{kw_identifier_unsafe, Meta, Delim, []} | Stack]);
 
 %% Quoted identifier (from handle_dot) wraps a single identifier token
 linear_to_legacy([{quoted_identifier_start, StartMeta, Delim} | T], Out, Stack) ->
@@ -197,13 +195,7 @@ linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim,
 linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{K, Meta, Delim, Parts, Extra} | Stack]) when K =:= bin_heredoc; K =:= list_heredoc ->
   linear_to_legacy(T, Out, [{K, Meta, Delim, [Bin | Parts], Extra} | Stack]);
 linear_to_legacy([{string_fragment, _FragMeta, Bin} | T], Out, [{sigil, Meta, SigilAtom, Delim, PartsRev, Mods, pending_end} | Stack]) when is_binary(Bin) ->
-  case PartsRev of
-    [PrevBin | Rest] when is_binary(PrevBin) ->
-      Merged = <<PrevBin/binary, Bin/binary>>,
-      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Merged | Rest], Mods, pending_end} | Stack]);
-    _ ->
-      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Bin | PartsRev], Mods, pending_end} | Stack])
-  end;
+  linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Bin | PartsRev], Mods, pending_end} | Stack]);
 
 linear_to_legacy([{begin_interpolation, StartMeta, _Kind} | T], Out, Stack) ->
   %% Push interpolation frame; collect inner tokens
@@ -220,8 +212,7 @@ linear_to_legacy([{end_interpolation, EndMeta, _Kind} | T], Out, [{interpol, Sta
     [{K, Meta, Delim, Parts, Extra} | Stack] when K =:= bin_heredoc; K =:= list_heredoc ->
       linear_to_legacy(T, Out, [{K, Meta, Delim, [Part | Parts], Extra} | Stack]);
     [{sigil, Meta, SigilAtom, Delim, Parts, Mods, pending_end} | Stack] ->
-      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Part | Parts], Mods, pending_end} | Stack]);
-    _ -> linear_to_legacy(T, [Part | Out], StackRest)
+      linear_to_legacy(T, Out, [{sigil, Meta, SigilAtom, Delim, [Part | Parts], Mods, pending_end} | Stack])
   end;
 
 %% Accumulate inner tokens for interpolation
@@ -244,6 +235,7 @@ linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Me
       case Stack of
         [{interpol, InterpMeta, InnerRev} | StackRest] ->
           % If inside interpolation, add sigil token to interpolation frame
+          % TODO: no test coverage
           linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
         _ ->
           linear_to_legacy(T, [Tok | Out], Stack)
@@ -263,7 +255,9 @@ linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Me
 linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
-    [] -> [<<>>];  % Empty string should have empty binary part, not empty list
+    [] ->
+      % TODO: no test coverage, is it correct?
+      [<<>>];  % Empty string should have empty binary part, not empty list
     RevParts -> RevParts
   end,
   Final = unescape_binary_parts(Parts),
@@ -279,7 +273,9 @@ linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, Me
 linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
-    [] -> [<<>>];  % Empty charlist should use empty binary like bin_string, not empty string
+    [] ->
+      % TODO: no test coverage, is it correct?
+      [<<>>];  % Empty charlist should use empty binary like bin_string, not empty string
     RevParts -> RevParts
   end,
   Final = unescape_binary_parts(Parts),
@@ -330,13 +326,10 @@ linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list
   end;
 %% Keep EOL tokens in collapsed ranges
 
-linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{Kind, MetaStart, _Delim2, PartsRev} | Stack]) when Kind =:= bin_string; Kind =:= list_string ->
   Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
+  {{SL, SC}, {EL, EC}, _} = combine_range_meta(MetaStart, MetaEnd),
+  CM = {{SL, SC}, {EL, EC}, Delim},
   Final = unescape_binary_parts(Parts),
   Tok = case Final of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
@@ -349,51 +342,10 @@ linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{bin_st
     _ ->
       linear_to_legacy(T, [Tok | Out], Stack)
   end;
-linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{bin_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{Kind, MetaStart, _Delim2, PartsRev} | Stack]) when Kind =:= bin_string; Kind =:= list_string ->
   Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
-  Final = unescape_binary_parts(Parts),
-  Tok = case Final of
-    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
-    [] -> {kw_identifier, CM, ''};
-    _ -> {kw_identifier_safe, CM, Final}
-  end,
-  case Stack of
-    [{interpol, InterpMeta, InnerRev} | StackRest] ->
-      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
-    _ ->
-      linear_to_legacy(T, [Tok | Out], Stack)
-  end;
-linear_to_legacy([{kw_identifier_unsafe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
-  Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
-  Final = unescape_binary_parts(Parts),
-  Tok = case Final of
-    [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
-    [] -> {kw_identifier, CM, ''};
-    _ -> {kw_identifier_unsafe, CM, Final}
-  end,
-  case Stack of
-    [{interpol, InterpMeta, InnerRev} | StackRest] ->
-      linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
-    _ ->
-      linear_to_legacy(T, [Tok | Out], Stack)
-  end;
-linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_string, MetaStart, _Delim2, PartsRev} | Stack]) ->
-  Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
+  {{SL, SC}, {EL, EC}, _} = combine_range_meta(MetaStart, MetaEnd),
+  CM = {{SL, SC}, {EL, EC}, Delim},
   Final = unescape_binary_parts(Parts),
   Tok = case Final of
     [Bin] when is_binary(Bin) -> {kw_identifier, CM, binary_to_atom(Bin, utf8)};
@@ -408,11 +360,8 @@ linear_to_legacy([{kw_identifier_safe_end, MetaEnd, Delim} | T], Out, [{list_str
   end;
 linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
+  {{SL, SC}, {EL, EC}, _} = combine_range_meta(MetaStart, MetaEnd),
+  CM = {{SL, SC}, {EL, EC}, Delim},
   Final = unescape_binary_parts(Parts),
   Tok = case Final of
     [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
@@ -428,11 +377,8 @@ linear_to_legacy([{atom_unsafe_end, MetaEnd, Delim} | T], Out, [{atom_unsafe, Me
   end;
 linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaStart, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
-  CM0 = combine_range_meta(MetaStart, MetaEnd),
-  CM = case CM0 of
-    {{SL, SC}, {EL, EC}, _} -> {{SL, SC}, {EL, EC}, Delim};
-    _ -> CM0
-  end,
+  {{SL, SC}, {EL, EC}, _} = combine_range_meta(MetaStart, MetaEnd),
+  CM = {{SL, SC}, {EL, EC}, Delim},
   Final = unescape_binary_parts(Parts),
   Tok = case Final of
     [Bin] when is_binary(Bin) -> {atom_quoted, CM, binary_to_atom(Bin, utf8)};
@@ -447,109 +393,22 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
       linear_to_legacy(T, [Tok | Out], Stack)
   end;
 
-%% Close quoted identifier and emit identifier token
-% linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
-%   Parts = unescape_binary_parts(lists:reverse(PartsRev)),
-%   % Convert parts to identifier atom and extract content end position  
-%   {Atom, ContentEnd} = case Parts of
-%     [{string_fragment, FragMeta, Content}] ->
-%       % Single string fragment - convert to atom and extract end position
-%       AtomVal = case is_binary(Content) of
-%         true -> binary_to_atom(Content, utf8);
-%         false -> list_to_atom(Content)
-%       end,
-%       % Extract end position from string fragment
-%       ContentEndPos = case FragMeta of
-%         {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-%         _ -> {1, 7}  % Fallback 
-%       end,
-%       {AtomVal, ContentEndPos};
-%     Parts when is_list(Parts) andalso length(Parts) > 1 ->
-%       % Multiple parts - find the last string_fragment and concatenate content
-%       StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
-%       case StringFragments of
-%         % [] ->
-%         %   % No string fragments - fallback
-%         %   {'UNKNOWN', {1, 7}};
-%         _ ->
-%           % Extract end position from last string fragment and concatenate all content
-%           {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
-%           ContentEndPos = case LastFragMeta of
-%             {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-%             _ -> {1, 7}  % Fallback
-%           end,
-%           % Concatenate all string fragment content
-%           AllContent = [Content || {string_fragment, _, Content} <- StringFragments],
-%           ConcatContent = case AllContent of
-%             [SingleBinary] when is_binary(SingleBinary) -> SingleBinary;
-%             Binaries when is_list(Binaries) -> 
-%               case lists:all(fun is_binary/1, Binaries) of
-%                 true -> iolist_to_binary(Binaries);
-%                 false -> lists:append(AllContent)
-%               end
-%           end,
-%           AtomVal = case is_binary(ConcatContent) of
-%             true -> binary_to_atom(ConcatContent, utf8);
-%             false -> list_to_atom(ConcatContent)
-%           end,
-%           {AtomVal, ContentEndPos}
-%       end;
-%     [Content] when is_binary(Content) ->
-%       {binary_to_atom(Content, utf8), {1, 7}};
-%     [Content] when is_list(Content) ->
-%       {list_to_atom(Content), {1, 7}};
-%     [] ->
-%       {'', {1, 3}}
-%   end,
-%   % Calculate closing quote position - content end + 1 column for closing quote
-%   % The string fragment ends before the closing quote, so we need to add 1 column
-%   ClosingQuotePos = case ContentEnd of
-%     {Line, Column} -> {Line, Column + 1};
-%     Other -> Other
-%   end,
-%   % Create identifier metadata spanning from opening quote to closing quote (inclusive)
-%   IdentifierMeta = case StartMeta of
-%     {{SL, SC}, _SEnd, _SX} ->
-%       % Start position from StartMeta (now correctly positioned at opening quote)
-%       % End position should be the closing quote position
-%       {{SL, SC}, ClosingQuotePos, Delim};
-%     _ ->
-%       % Fallback 
-%       {{1, 2}, ClosingQuotePos, Delim}
-%   end,
-%   IdentTok = {identifier, IdentifierMeta, Atom},
-%   case Stack of
-%     [{interpol, InterpMeta, InnerRev} | StackRest] ->
-%       linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
-%     _ ->
-%       linear_to_legacy(T, [IdentTok | Out], Stack)
-%   end;
-
 linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
-      AtomVal = case is_binary(Content) of
-        true -> binary_to_atom(unescape_bin(Content), utf8);
-        false -> list_to_atom(Content)
-      end,
-      ContentEndPos = case FragMeta of
-        {{_, _}, {FEL, FEC}, _} -> {FEL, FEC};
-        _ -> {1, 7}
-      end,
+      AtomVal = binary_to_atom(unescape_bin(Content), utf8),
+      {{_, _}, {FEL, FEC}, _} = FragMeta,
+      ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
-    [Content] when is_binary(Content) -> {binary_to_atom(Content, utf8), {1, 7}};
-    [Content] when is_list(Content) -> {list_to_atom(Content), {1, 7}};
-    [] -> {'', {1, 3}}
+    [] ->
+      % TODO: WTF? why not start meta + 2
+      {'', {1, 3}}
   end,
-  ClosingQuotePos = case ContentEnd of
-    {Line, Column} -> {Line, Column + 1};
-    Other -> Other
-  end,
-  IdentifierMeta = case StartMeta of
-    {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim};
-    _ -> {{1, 2}, ClosingQuotePos, Delim}
-  end,
+  {Line, Column} = ContentEnd,
+  ClosingQuotePos = {Line, Column + 1},
+  {{SL, SC}, _SEnd, _SX} = StartMeta,
+  IdentifierMeta = {{SL, SC}, ClosingQuotePos, Delim},
   DoIdTok = {identifier, IdentifierMeta, Atom},
   %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
   case Stack of
