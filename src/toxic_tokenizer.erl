@@ -418,20 +418,72 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-%% Close quoted identifier followed by do and emit do_identifier + do
-linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
-  Parts = unescape_binary_parts(lists:reverse(PartsRev)),
+linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
-      AtomVal = case is_binary(Content) of true -> binary_to_atom(Content, utf8); false -> list_to_atom(Content) end,
-      ContentEndPos = case FragMeta of {{_, _}, {FEL, FEC}, _} -> {FEL, FEC}; _ -> {1, 7} end,
+      AtomVal = binary_to_atom(unescape_bin(Content), utf8),
+      {{_, _}, {FEL, FEC}, _} = FragMeta,
+      ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
-    [Content] when is_binary(Content) -> {binary_to_atom(Content, utf8), {1, 7}};
-    [Content] when is_list(Content) -> {list_to_atom(Content), {1, 7}};
-    [] -> {'', {1, 4}}
+    [] ->
+      % TODO: WTF? why not start meta + 2
+      {'', {1, 3}}
   end,
-  ClosingQuotePos = case ContentEnd of {Line, Column} -> {Line, Column + 1}; Other -> Other end,
-  IdentifierMeta = case StartMeta of {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim}; _ -> {{1, 2}, ClosingQuotePos, Delim} end,
+  {Line, Column} = ContentEnd,
+  ClosingQuotePos = {Line, Column + 1},
+  {{SL, SC}, _SEnd, _SX} = StartMeta,
+  IdentifierMeta = {{SL, SC}, ClosingQuotePos, Delim},
+  DoIdTok = {paren_identifier, IdentifierMeta, Atom},
+  %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [DoIdTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [DoIdTok | Out], Stack)
+  end;
+
+linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  {Atom, ContentEnd} = case Parts of
+    [{string_fragment, FragMeta, Content}] ->
+      AtomVal = binary_to_atom(unescape_bin(Content), utf8),
+      {{_, _}, {FEL, FEC}, _} = FragMeta,
+      ContentEndPos = {FEL, FEC},
+      {AtomVal, ContentEndPos};
+    [] ->
+      % TODO: WTF? why not start meta + 2
+      {'', {1, 3}}
+  end,
+  {Line, Column} = ContentEnd,
+  ClosingQuotePos = {Line, Column + 1},
+  {{SL, SC}, _SEnd, _SX} = StartMeta,
+  IdentifierMeta = {{SL, SC}, ClosingQuotePos, Delim},
+  DoIdTok = {bracket_identifier, IdentifierMeta, Atom},
+  %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
+  case Stack of
+    [{interpol, InterpMeta, InnerRev} | StackRest] ->
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [DoIdTok | InnerRev]} | StackRest]);
+    _ ->
+      linear_to_legacy(T, [DoIdTok | Out], Stack)
+  end;
+
+linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+  Parts = lists:reverse(PartsRev),
+  {Atom, ContentEnd} = case Parts of
+    [{string_fragment, FragMeta, Content}] ->
+      AtomVal = binary_to_atom(unescape_bin(Content), utf8),
+      {{_, _}, {FEL, FEC}, _} = FragMeta,
+      ContentEndPos = {FEL, FEC},
+      {AtomVal, ContentEndPos};
+    [] ->
+      % TODO: WTF? why not start meta + 2
+      {'', {1, 4}}
+  end,
+  {Line, Column} = ContentEnd,
+  ClosingQuotePos = {Line, Column + 1},
+  {{SL, SC}, _SEnd, _SX} = StartMeta,
+  IdentifierMeta = {{SL, SC}, ClosingQuotePos, Delim},
   DoIdTok = {do_identifier, IdentifierMeta, Atom},
   %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
   case Stack of
@@ -441,185 +493,29 @@ linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quote
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-%% Close quoted identifier where next token is dual_op start -> op_identifier
 linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
-  Parts = unescape_binary_parts(lists:reverse(PartsRev)),
+  Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
-      AtomVal = case is_binary(Content) of
-        true -> binary_to_atom(Content, utf8);
-        false -> list_to_atom(Content)
-      end,
-      ContentEndPos = case FragMeta of
-        {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-        _ -> {1, 7}
-      end,
+      AtomVal = binary_to_atom(unescape_bin(Content), utf8),
+      {{_, _}, {FEL, FEC}, _} = FragMeta,
+      ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
-    [] -> {'', {1, 4}}
-  end,
-  ClosingQuotePos = case ContentEnd of
-    {Line, Column} -> {Line, Column + 1};
-    Other -> Other
-  end,
-  IdentifierMeta = case StartMeta of
-    {{SL, SC}, _SEnd, _SX} -> {{SL, SC}, ClosingQuotePos, Delim};
-    _ -> {{1,2}, ClosingQuotePos, Delim}
-  end,
-  IdentTok = {op_identifier, IdentifierMeta, Atom},
-  case Stack of
-    [{interpol, InterpMeta, InnerRev} | StackRest] ->
-      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
-    _ ->
-      linear_to_legacy(T, [IdentTok | Out], Stack)
-  end;
-
-%% Close quoted paren identifier and emit paren_identifier token
-linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
-  Parts = unescape_binary_parts(lists:reverse(PartsRev)),
-  % Convert parts to identifier atom and extract content end position  
-  {Atom, ContentEnd} = case Parts of
-    [{string_fragment, FragMeta, Content}] ->
-      % Single string fragment - convert to atom and extract end position
-      AtomVal = case is_binary(Content) of
-        true -> binary_to_atom(Content, utf8);
-        false -> list_to_atom(Content)
-      end,
-      % Extract end position from string fragment
-      ContentEndPos = case FragMeta of
-        {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-        _ -> {1, 7}  % Fallback 
-      end,
-      {AtomVal, ContentEndPos};
-    Parts when is_list(Parts) andalso length(Parts) > 1 ->
-      % Multiple parts - find the last string_fragment and concatenate content
-      StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
-      case StringFragments of
-        % [] ->
-        %   % No string fragments - fallback
-        %   {'UNKNOWN', {1, 7}};
-        _ ->
-          % Extract end position from last string fragment and concatenate all content
-          {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
-          ContentEndPos = case LastFragMeta of
-            {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-            _ -> {1, 7}  % Fallback
-          end,
-          % Concatenate all string fragment content
-          AllContent = [Content || {string_fragment, _, Content} <- StringFragments],
-          ConcatContent = case AllContent of
-            [SingleBinary] when is_binary(SingleBinary) -> SingleBinary;
-            Binaries when is_list(Binaries) -> 
-              case lists:all(fun is_binary/1, Binaries) of
-                true -> iolist_to_binary(Binaries);
-                false -> lists:append(AllContent)
-              end
-          end,
-          AtomVal = case is_binary(ConcatContent) of
-            true -> binary_to_atom(ConcatContent, utf8);
-            false -> list_to_atom(ConcatContent)
-          end,
-          {AtomVal, ContentEndPos}
-      end;
-    [Content] when is_binary(Content) ->
-      {binary_to_atom(Content, utf8), {1, 7}};
-    [Content] when is_list(Content) ->
-      {list_to_atom(Content), {1, 7}};
     [] ->
-      {'', {1, 3}}
+      % TODO: WTF? why not start meta + 2
+      {'', {1, 4}}
   end,
-  % Calculate closing quote position - content end + 1 column for closing quote
-  % The string fragment ends before the closing quote, so we need to add 1 column
-  ClosingQuotePos = case ContentEnd of
-    {Line, Column} -> {Line, Column + 1};
-    Other -> Other
-  end,
-  % Create paren_identifier metadata spanning from opening quote to closing quote (inclusive)
-  IdentifierMeta = case StartMeta of
-    {{SL, SC}, _SEnd, _SX} ->
-      % Start position from StartMeta (now correctly positioned at opening quote)
-      % End position should be the closing quote position
-      {{SL, SC}, ClosingQuotePos, Delim};
-    _ ->
-      % Fallback 
-      {{1, 2}, ClosingQuotePos, Delim}
-  end,
-  IdentTok = {paren_identifier, IdentifierMeta, Atom},
-  case Stack of
-    [{interpol, InterpMeta, InnerRev} | StackRest] ->
-      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
-    _ ->
-      linear_to_legacy(T, [IdentTok | Out], Stack)
-  end;
-
-%% Close quoted bracket identifier and emit bracket_identifier token
-linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
-  Parts = unescape_binary_parts(lists:reverse(PartsRev)),
-  % Convert parts to identifier atom and extract content end position  
-  {Atom, ContentEnd} = case Parts of
-    [{string_fragment, FragMeta, Content}] ->
-      % Single string fragment - convert to atom and extract end position
-      AtomVal = case is_binary(Content) of
-        true -> binary_to_atom(Content, utf8);
-        false -> list_to_atom(Content)
-      end,
-      % Extract end position from string fragment
-      ContentEndPos = case FragMeta of
-        {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-        _ -> {1, 7}  % Fallback 
-      end,
-      {AtomVal, ContentEndPos};
-    Parts when is_list(Parts) andalso length(Parts) > 1 ->
-      % Multiple parts - find the last string_fragment and concatenate content
-      StringFragments = [Frag || {string_fragment, _, _} = Frag <- Parts],
-      case StringFragments of
-        % [] ->
-        %   % No string fragments - fallback
-        %   {'UNKNOWN', {1, 7}};
-        _ ->
-          % Extract end position from last string fragment and concatenate all content
-          {string_fragment, LastFragMeta, _} = lists:last(StringFragments),
-          ContentEndPos = case LastFragMeta of
-            {{_FSL, _FSC}, {FEL, FEC}, _FX} -> {FEL, FEC};
-            _ -> {1, 7}  % Fallback
-          end,
-          % Concatenate all string fragment content
-          AllContent = [Content || {string_fragment, _, Content} <- StringFragments],
-          ConcatContent = case AllContent of
-            [SingleBinary] when is_binary(SingleBinary) -> SingleBinary;
-            Binaries when is_list(Binaries) -> 
-              case lists:all(fun is_binary/1, Binaries) of
-                true -> iolist_to_binary(Binaries);
-                false -> lists:append(AllContent)
-              end
-          end,
-          AtomVal = case is_binary(ConcatContent) of
-            true -> binary_to_atom(ConcatContent, utf8);
-            false -> list_to_atom(ConcatContent)
-          end,
-          {AtomVal, ContentEndPos}
-      end;
-    [Content] when is_binary(Content) ->
-      {binary_to_atom(Content, utf8), {1, 7}};
-    [Content] when is_list(Content) ->
-      {list_to_atom(Content), {1, 7}};
-    [] ->
-      {'', {1, 3}}
-  end,
-  % Calculate closing quote position - content end + 1 column for closing quote
-  % The string fragment ends before the closing quote, so we need to add 1 column
-  ClosingQuotePos = case ContentEnd of
-    {Line, Column} -> {Line, Column + 1};
-    Other -> Other
-  end,
-  % Create bracket_identifier metadata spanning from opening quote to closing quote (inclusive)
+  {Line, Column} = ContentEnd,
+  ClosingQuotePos = {Line, Column + 1},
   {{SL, SC}, _SEnd, _SX} = StartMeta,
   IdentifierMeta = {{SL, SC}, ClosingQuotePos, Delim},
-  IdentTok = {bracket_identifier, IdentifierMeta, Atom},
+  DoIdTok = {op_identifier, IdentifierMeta, Atom},
+  %% Don't emit do token here - let normal tokenizer handle it to avoid duplicates
   case Stack of
     [{interpol, InterpMeta, InnerRev} | StackRest] ->
-      linear_to_legacy(T, Out, [{interpol, InterpMeta, [IdentTok | InnerRev]} | StackRest]);
+      linear_to_legacy(T, Out, [{interpol, InterpMeta, [DoIdTok | InnerRev]} | StackRest]);
     _ ->
-      linear_to_legacy(T, [IdentTok | Out], Stack)
+      linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
 %% Pass-through for non-linear tokens
