@@ -85,7 +85,6 @@ defmodule Toxic.Driver do
           state
       )
       when terminators == [] or elem(hd(terminators), 0) != :"{" do
-    # ) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
 
     new_state = %{
@@ -136,8 +135,8 @@ defmodule Toxic.Driver do
         # TODO: no test coverage?
         {[], state}
 
-      {:fragment, meta = meta(start_line, start_column, _end_line, end_column, extra),
-       binary_part, rest, line, column, scope} ->
+      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
+       line, column, scope} ->
         {binary_part, line} =
           case state.recent_token do
             {kind, _, _} when kind in [:bin_heredoc_start, :list_heredoc_start] ->
@@ -152,33 +151,17 @@ defmodule Toxic.Driver do
               {binary_part, line}
           end
 
-        case kind do
-          # Keep sigils and heredocs escaped; collapse stage will handle each correctly
-          k when k in [:sigil, :bin_heredoc, :list_heredoc] or true ->
-            return_token({:string_fragment, meta(start_line, start_column, line, end_column, extra), binary_part}, rest, %{
-              state
-              | line: line,
-                column: column,
-                scope: scope
-            })
-
-          # Regular strings: unescape immediately
-          _ ->
-            case Toxic.Util.unescape_tokens([binary_part], line, column, scope) do
-              {:ok, [unescaped]} ->
-                return_token(
-                  {:string_fragment, meta(start_line, start_column, line, end_column, extra),
-                   unescaped},
-                  rest,
-                  %{
-                    state
-                    | line: line,
-                      column: column,
-                      scope: scope
-                  }
-                )
-            end
-        end
+        return_token(
+          {:string_fragment, meta(start_line, start_column, line, end_column, extra),
+           binary_part},
+          rest,
+          %{
+            state
+            | line: line,
+              column: column,
+              scope: scope
+          }
+        )
 
       # Sigil completion (no indentation)
       {:done, meta, _binary_part, rest, line, column, scope} when kind == :sigil ->
@@ -283,7 +266,9 @@ defmodule Toxic.Driver do
                 scope(existing_atoms_only: true) ->
                   # TODO: no test coverage
                   :kw_identifier_safe_end
-                _ -> :kw_identifier_unsafe_end
+
+                _ ->
+                  :kw_identifier_unsafe_end
               end
 
             {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
@@ -298,12 +283,18 @@ defmodule Toxic.Driver do
           _ ->
             end_token_type =
               case kind do
-                :charlist -> :list_string_end
+                :charlist ->
+                  :list_string_end
+
                 :atom_safe ->
                   # TODO: no test coverage
                   :atom_safe_end
-                :atom_unsafe -> :atom_unsafe_end
-                _ -> :bin_string_end
+
+                :atom_unsafe ->
+                  :atom_unsafe_end
+
+                _ ->
+                  :bin_string_end
               end
 
             return_token({end_token_type, meta, delim}, rest, %{
@@ -456,9 +447,6 @@ defmodule Toxic.Driver do
       {{:token_with_eol, token}, rest, line, column, scope} ->
         carry_with_recent =
           case {token, deferrals} do
-            {{:unary_op, _, _} = left, tokens} ->
-              # TODO: no test coverage
-              [left | tokens]
             {left, [{:eol, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end

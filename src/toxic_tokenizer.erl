@@ -7,109 +7,6 @@
 -include("toxic_tokenizer.hrl").
 -export([ranges_to_legacy/1, collapse_linear_ranges/1]).
 
--define(at_op(T),
-  T =:= $@).
-
--define(capture_op(T),
-  T =:= $&).
-
--define(unary_op(T),
-  T =:= $!;
-  T =:= $^).
-
--define(range_op(T1, T2),
-  T1 =:= $., T2 =:= $.).
-
--define(concat_op(T1, T2),
-  T1 =:= $+, T2 =:= $+;
-  T1 =:= $-, T2 =:= $-;
-  T1 =:= $<, T2 =:= $>).
-
--define(concat_op3(T1, T2, T3),
-  T1 =:= $+, T2 =:= $+, T3 =:= $+;
-  T1 =:= $-, T2 =:= $-, T3 =:= $-).
-
--define(power_op(T1, T2),
-  T1 =:= $*, T2 =:= $*).
-
--define(mult_op(T),
-  T =:= $* orelse T =:= $/).
-
--define(dual_op(T),
-  T =:= $+ orelse T =:= $-).
-
--define(arrow_op3(T1, T2, T3),
-  T1 =:= $<, T2 =:= $<, T3 =:= $<;
-  T1 =:= $>, T2 =:= $>, T3 =:= $>;
-  T1 =:= $~, T2 =:= $>, T3 =:= $>;
-  T1 =:= $<, T2 =:= $<, T3 =:= $~;
-  T1 =:= $<, T2 =:= $~, T3 =:= $>;
-  T1 =:= $<, T2 =:= $|, T3 =:= $>).
-
--define(arrow_op(T1, T2),
-  T1 =:= $|, T2 =:= $>;
-  T1 =:= $~, T2 =:= $>;
-  T1 =:= $<, T2 =:= $~).
-
--define(rel_op(T),
-  T =:= $<;
-  T =:= $>).
-
--define(rel_op2(T1, T2),
-  T1 =:= $<, T2 =:= $=;
-  T1 =:= $>, T2 =:= $=).
-
--define(comp_op2(T1, T2),
-  T1 =:= $=, T2 =:= $=;
-  T1 =:= $=, T2 =:= $~;
-  T1 =:= $!, T2 =:= $=).
-
--define(comp_op3(T1, T2, T3),
-  T1 =:= $=, T2 =:= $=, T3 =:= $=;
-  T1 =:= $!, T2 =:= $=, T3 =:= $=).
-
--define(ternary_op(T1, T2),
-  T1 =:= $/, T2 =:= $/).
-
--define(and_op(T1, T2),
-  T1 =:= $&, T2 =:= $&).
-
--define(or_op(T1, T2),
-  T1 =:= $|, T2 =:= $|).
-
--define(and_op3(T1, T2, T3),
-  T1 =:= $&, T2 =:= $&, T3 =:= $&).
-
--define(or_op3(T1, T2, T3),
-  T1 =:= $|, T2 =:= $|, T3 =:= $|).
-
--define(match_op(T),
-  T =:= $=).
-
--define(in_match_op(T1, T2),
-  T1 =:= $<, T2 =:= $-;
-  T1 =:= $\\, T2 =:= $\\).
-
--define(stab_op(T1, T2),
-  T1 =:= $-, T2 =:= $>).
-
--define(type_op(T1, T2),
-  T1 =:= $:, T2 =:= $:).
-
--define(pipe_op(T),
-  T =:= $|).
-
--define(ellipsis_op3(T1, T2, T3),
-  T1 =:= $., T2 =:= $., T3 =:= $.).
-
-%% Deprecated operators
-
--define(unary_op3(T1, T2, T3),
-  T1 =:= $~, T2 =:= $~, T3 =:= $~).
-
--define(xor_op3(T1, T2, T3),
-  T1 =:= $^, T2 =:= $^, T3 =:= $^).
-
 %% Convert range tokens back to legacy metas {Line, Column, Extra}
 ranges_to_legacy(TokensWithRanges) ->
   ranges_to_legacy_after_collapse(TokensWithRanges, false, []).
@@ -235,7 +132,6 @@ linear_to_legacy([{sigil_end, EndMeta, _Delim, Indent} | Rest], Out, [{sigil, Me
       case Stack of
         [{interpol, InterpMeta, InnerRev} | StackRest] ->
           % If inside interpolation, add sigil token to interpolation frame
-          % TODO: no test coverage
           linear_to_legacy(T, Out, [{interpol, InterpMeta, [Tok | InnerRev]} | StackRest]);
         _ ->
           linear_to_legacy(T, [Tok | Out], Stack)
@@ -256,7 +152,6 @@ linear_to_legacy([{bin_string_end, MetaEnd, _Delim1} | T], Out, [{bin_string, Me
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
     [] ->
-      % TODO: no test coverage, is it correct?
       [<<>>];  % Empty string should have empty binary part, not empty list
     RevParts -> RevParts
   end,
@@ -274,7 +169,6 @@ linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, 
   CM = combine_range_meta(MetaStart, MetaEnd),
   Parts = case lists:reverse(PartsRev) of
     [] ->
-      % TODO: no test coverage, is it correct?
       [<<>>];  % Empty charlist should use empty binary like bin_string, not empty string
     RevParts -> RevParts
   end,
@@ -290,13 +184,8 @@ linear_to_legacy([{list_string_end, MetaEnd, _Delim1} | T], Out, [{list_string, 
   end;
 linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Parts = case lists:reverse(PartsRev) of
-    [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
-    RevParts -> 
-      TrimmedEscaped = strip_heredoc_indentation(RevParts, Indent),
-      Final = unescape_binary_parts(TrimmedEscaped),
-      add_missing_empty_fragments(Final, Indent)
-  end,
+  TrimmedEscaped = strip_heredoc_indentation(lists:reverse(PartsRev), Indent),
+  Parts = unescape_binary_parts(TrimmedEscaped),
   Tok = {bin_heredoc, CM, Indent, Parts},
   case Stack of
     [{interpol, InterpMeta, InnerRev} | StackRest] ->
@@ -308,13 +197,8 @@ linear_to_legacy([{bin_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{bin_h
   end;
 linear_to_legacy([{list_heredoc_end, MetaEnd, _Delim1, Indent} | T], Out, [{list_heredoc, MetaStart, _Delim2, PartsRev, _} | Stack]) ->
   CM = combine_range_meta(MetaStart, MetaEnd),
-  Parts = case lists:reverse(PartsRev) of
-    [] -> [<<>>];  % Empty heredoc should use empty binary like bin_string
-    RevParts -> 
-      TrimmedEscaped = strip_heredoc_indentation(RevParts, Indent),
-      Final = unescape_binary_parts(TrimmedEscaped),
-      add_missing_empty_fragments(Final)
-  end,
+  TrimmedEscaped = strip_heredoc_indentation(lists:reverse(PartsRev), Indent),
+  Parts = unescape_binary_parts(TrimmedEscaped),
   Tok = {list_heredoc, CM, Indent, Parts},
   case Stack of
     [{interpol, InterpMeta, InnerRev} | StackRest] ->
@@ -572,46 +456,3 @@ unescape_bin(Bin) ->
     {ok, [Un]} -> Un;
     _ -> Bin
   end.
-
-
-%% Add missing empty fragments for heredocs where interpolation starts at column 1
-add_missing_empty_fragments(Parts) ->
-  fix_missing_spaces_in_parts(Parts).
-
-%% Add missing empty fragments for heredocs where interpolation starts at column 1 
-%% with indentation-aware space restoration
-add_missing_empty_fragments(Parts, Indent) ->
-  % First part is not an interpolation at column 1 or Parts is empty
-  if 
-    Indent > 0 ->
-      % Apply targeted space restoration only when there's actual indentation
-      fix_missing_spaces_in_parts(Parts, Indent);
-    true ->
-      % No indentation stripping, no need for space restoration
-      Parts
-  end.
-
-%% Fix missing spaces in final fragments due to indentation stripping
-%% Only apply fixes when there is actual indentation (indent > 0)
-fix_missing_spaces_in_parts(Parts) ->
-  Parts.
-
-%% Fix missing spaces with indentation context
-fix_missing_spaces_in_parts(Parts, Indent) when Indent > 0 ->
-  % Only apply space restoration when there's actual indentation stripping
-  fix_indentation_over_stripping(Parts);
-fix_missing_spaces_in_parts(Parts, _Indent) ->
-  % No indentation stripping, return parts as-is
-  Parts.
-
-%% Fix cases where indentation stripping removed content spaces
-fix_indentation_over_stripping(Parts) ->
-  fix_indentation_over_stripping(Parts, []).
-
-fix_indentation_over_stripping([], Acc) ->
-  lists:reverse(Acc);
-fix_indentation_over_stripping([Part | Rest], Acc) when is_binary(Part) ->
-  fix_indentation_over_stripping(Rest, [Part | Acc]);
-fix_indentation_over_stripping([Part | Rest], Acc) ->
-  % For interpolation parts, keep as-is
-  fix_indentation_over_stripping(Rest, [Part | Acc]).

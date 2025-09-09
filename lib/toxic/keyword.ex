@@ -43,7 +43,6 @@ defmodule Toxic.Keyword do
              | _t
            ]} ->
             not_info_meta = meta(start_line, start_column, line, column + length, extra)
-            # TODO: is not added with eol? maybe no need to do that again
             token = {:in_op, not_info_meta, :"not in"}
             multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)
 

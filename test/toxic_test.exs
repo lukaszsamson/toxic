@@ -1536,6 +1536,9 @@ defmodule ToxicTest do
     test "empty heredocs" do
       assert tokenize("\"\"\"\n\"\"\"") ==
                {:ok, [{:bin_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
+
+      assert tokenize("\"\"\"\r\n\"\"\"") ==
+               {:ok, [{:bin_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
     end
 
     test "simple heredocs" do
@@ -3530,6 +3533,20 @@ defmodule ToxicTest do
                     "\"\"\""
                   }
                 ], ""}
+
+      assert tokenize("~x\"\"\"\r\n\"\"\"") ==
+               {:ok,
+                [
+                  {
+                    :sigil,
+                    {{1, 1}, {2, 4}, nil},
+                    :sigil_x,
+                    [""],
+                    [],
+                    0,
+                    "\"\"\""
+                  }
+                ], ""}
     end
 
     test "heredoc empty indent" do
@@ -4363,6 +4380,12 @@ defmodule ToxicTest do
     test "sigil inside interpolation" do
       code = """
       :"foo\#{~s/\\n/}bar"\
+      """
+
+      assert {:ok, _, _} = tokenize(code)
+
+      code = """
+      :"foo\#{~s/\\n/a}bar"\
       """
 
       assert {:ok, _, _} = tokenize(code)
