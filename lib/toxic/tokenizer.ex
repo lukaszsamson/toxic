@@ -5,9 +5,10 @@ defmodule Toxic.Tokenizer do
   import Toxic.Util
   import Toxic.Scope
 
-  def tokenize_single([], _line, _column, _scope, _tokens) do
-    :eof
-  end
+  # This cannot happen
+  # def tokenize_single([], _line, _column, _scope, _tokens) do
+  #   :eof
+  # end
 
   # VC merge conflict
 
@@ -51,8 +52,8 @@ defmodule Toxic.Tokenizer do
         # preserve_comments(line, column, _tokens, Comment, rest),
         # tokenize(rest, line, column, scope, reset_eol(_tokens))
         case tokens do
-          [{:eol, _meta} | _] -> {:reset_eol, rest, line, column, scope}
-          _ -> {nil, rest, line, column, scope}
+          [{:eol, _meta} | _] -> reset_eol(rest, line, column, scope)
+          _ -> no_token(rest, line, column, scope)
         end
     end
   end
@@ -412,7 +413,7 @@ defmodule Toxic.Tokenizer do
       # unexpected_token(Original, Line, Column, Scope, Tokens);
       :empty ->
         # TODO: cursor completion
-        {nil, [], line, column, scope}
+        no_token([], line, column, scope)
 
       {:unexpected_token, _length} ->
         {:error, :unexpected_token_identifier}
@@ -437,7 +438,7 @@ defmodule Toxic.Tokenizer do
         if number == 0 and i in [?x, ?0, ?b] and rest == [] and cursor_completion != false do
           # tokenize([], line, column, scope, tokens)
           # TODO: cursor completion
-          {nil, [], line, column, scope}
+          no_token([], line, column, scope)
         else
           # Msg =
           #   io_lib:format(
@@ -641,10 +642,10 @@ defmodule Toxic.Tokenizer do
         # TODO: cursor completion
         case string do
           [?~, l] when is_upcase(l) or is_downcase(l) ->
-            {nil, [], line, column, original_scope}
+            no_token([], line, column, original_scope)
 
           [?~] ->
-            {nil, [], line, column, original_scope}
+            no_token([], line, column, original_scope)
 
           _ ->
             # unexpected_token(string, line, column, original_scope, tokens)
@@ -682,13 +683,13 @@ defmodule Toxic.Tokenizer do
 
     case eol do
       nil ->
-        {nil, rest, line + 1, 1, indented_scope}
+        no_token(rest, line + 1, 1, indented_scope)
 
       :increase_eol ->
-        {:increase_eol, rest, line + 1, 1, indented_scope}
+        increase_eol(rest, line + 1, 1, indented_scope)
 
       eol_token ->
-        {{:token, eol_token}, rest, line + 1, 1, indented_scope}
+        emit(eol_token, rest, line + 1, 1, indented_scope)
     end
   end
 
@@ -696,7 +697,7 @@ defmodule Toxic.Tokenizer do
   # Keywords are not ambiguous operators
   defp handle_space_sensitive_tokens([sign, ?:, space | _] = string, line, column, scope, _tokens)
        when dual_op(sign) and is_space(space) do
-    {nil, string, line, column, scope}
+    no_token(string, line, column, scope)
   end
 
   # But everything else, except other operators, are
@@ -718,6 +719,6 @@ defmodule Toxic.Tokenizer do
   #   tokenize([$(], line, column+1, scope, [{paren_identifier, Info, Identifier} | tokens]);
 
   defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) do
-    {nil, string, line, column, scope}
+    no_token(string, line, column, scope)
   end
 end

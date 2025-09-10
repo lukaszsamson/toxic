@@ -32,19 +32,20 @@ defmodule Toxic.Interpolation do
      :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [], line, column, scope}
   end
 
-  def tokenize_single(
-        [],
-        [],
-        _line,
-        _column,
-        _start_line,
-        _start_column,
-        scope(cursor_completion: false),
-        _interpol,
-        _last
-      ) do
-    :eof
-  end
+  # This cannot happen
+  # def tokenize_single(
+  #       [],
+  #       [],
+  #       _line,
+  #       _column,
+  #       _start_line,
+  #       _start_column,
+  #       scope(cursor_completion: false),
+  #       _interpol,
+  #       _last
+  #     ) do
+  #   :eof
+  # end
 
   def tokenize_single(
         [last | rest],

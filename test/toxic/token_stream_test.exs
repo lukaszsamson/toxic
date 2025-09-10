@@ -460,6 +460,29 @@ defmodule Toxic.TokenStreamTest do
       assert closer == :"\""
     end
 
+    test "suggests closing delimiter in bin_string empty" do
+      stream = TokenStream.new("\"")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\""
+    end
+
+    test "suggests closing delimiter in bin_string empty escape" do
+      stream = TokenStream.new("\"\\")
+
+      # Consume tokens
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {:ok, _fragment, stream} = TokenStream.next(stream)
+
+      {closer, _stream} = TokenStream.peek_missing_terminator(stream)
+
+      assert closer == :"\""
+    end
+
     test "suggests closing delimiter in list_string" do
       stream = TokenStream.new("'foo")
 

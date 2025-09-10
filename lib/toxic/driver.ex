@@ -131,9 +131,8 @@ defmodule Toxic.Driver do
            string,
            delim
          ) do
-      :eof ->
-        # TODO: no test coverage?
-        {[], state}
+      # :eof ->
+      #   {[], state}
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
        line, column, scope} ->
@@ -324,9 +323,8 @@ defmodule Toxic.Driver do
          result
        ) do
     case result do
-      :eof ->
-        # TODO: no test coverage
-        {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
+      # :eof ->
+      #   {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
 
       {nil, rest, line, column, scope} ->
         {rest, %{state | line: line, column: column, scope: scope}}
@@ -499,7 +497,9 @@ defmodule Toxic.Driver do
 
     current_terms =
       case current_terms do
-        :none -> []
+        :none ->
+          # TODO: no coverage
+          []
         other -> other
       end
 
@@ -520,7 +520,9 @@ defmodule Toxic.Driver do
           # Get parent terminators
           parent_terms =
             case parent_terms do
-              :none -> []
+              :none ->
+                # TODO: no coverage
+                []
               list when is_list(list) -> list
             end
 
@@ -546,7 +548,9 @@ defmodule Toxic.Driver do
   def peek_missing_terminator(%__MODULE__{} = driver) do
     case current_terminators(driver) do
       [{start, _meta, _indent} | _] -> closing_for(start)
-      [] -> nil
+      [] ->
+        # TODO: no coverage
+        nil
     end
   end
 

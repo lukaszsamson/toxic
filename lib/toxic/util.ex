@@ -8,6 +8,18 @@ defmodule Toxic.Util do
 
   def strip_horizontal_space(t, counter), do: {t, counter}
 
+  def no_token(rest, line, column, scope) do
+    {nil, rest, line, column, scope}
+  end
+
+  def reset_eol(rest, line, column, scope) do
+    {:reset_eol, rest, line, column, scope}
+  end
+
+  def increase_eol(rest, line, column, scope) do
+    {:increase_eol, rest, line, column, scope}
+  end
+
   def emit(token, rest, line, column, scope) do
     {{:token, token}, rest, line, column, scope}
   end
