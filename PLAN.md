@@ -2,7 +2,7 @@ Here’s a focused gap analysis of the existing Elixir lexer vs. what you’d ne
 
 ⸻
 
-1. End‐Position Spans on Tokens
+1. End‐Position Spans on Tokens - Done
 
 Current: tokens only carry their start {line, col, extra}; end positions are inferred by peeking at the next token.
 Why it matters: Pratt parsing (and any AST construction) needs each token’s full span to precisely attach nodes, and incremental reparsing needs stable begin/end offsets to diff.
@@ -28,7 +28,7 @@ Action Items:
 	•	Expose the terminator stack (Scope#terminators) so the parser can see exactly which opener(s) lack a match at the cursor.
 	•	Provide a helper API lexer:peek_missing_terminator/1 that returns the next expected closer (or nil) rather than waiting until EOF.
 
-4. Flat, Linear Token Stream Interface
+4. Flat, Linear Token Stream Interface - Done
 
 Current: interpolation produces nested token lists (a forest).
 Why it matters: Pratt parsers expect a flat, linear token stream they can peek and consume from—nested lists complicate lookahead and incremental diffs.
@@ -36,7 +36,7 @@ Action Items:
 	•	Introduce a flattening layer, or optionally have elixir_tokenizer emit both (a) a raw nested output and (b) a linearized stream of tokens with explicit {:begin_interpolation, …} / {:end_interpolation, …} markers.
 	•	Ensure that every synthetic marker carries precise spans.
 
-5. Token Lookahead / Pushback API
+5. Token Lookahead / Pushback API - Done
 
 Current: the lexer is purely functional: it returns all tokens in one go, with no built-in peek/unget.
 Why it matters: a Pratt parser needs to peek at the next 1–2 tokens (e.g. to distinguish prefix vs. infix operators) and possibly unget tokens on backtrack.

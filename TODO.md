@@ -48,15 +48,15 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
 
 ## Phase 2: Scanner Mechanics Refactor
 
-### 2.1 Convert Recursive Tokenizer to Driver Loop
-- [ ] Refactor main `tokenize/5` function into driver-compatible single-token scanner
+### 2.1 Convert Recursive Tokenizer to Driver Loop ✅ COMPLETED
+- [x] Refactor main `tokenize/5` function into driver-compatible single-token scanner
   - Extract core scanning logic into `scan_token(Driver) -> {Token, Driver1} | {eof, Driver1} | {error, Meta, Reason, Driver1}`
   - Remove token list accumulation and recursion
   - Update position tracking to work with driver state
   - Preserve all existing token type recognition
 
-### 2.2 Implement Streaming Interpolation/String/Heredoc/Sigil
-- [ ] Modify string/interpolation handling to emit linearized tokens incrementally:
+### 2.2 Implement Streaming Interpolation/String/Heredoc/Sigil ✅ COMPLETED
+- [x] Modify string/interpolation handling to emit linearized tokens incrementally:
   - On opening delimiter: emit `*_start` token, push `mode=interp(...)` onto mode stack
   - While in `interp` mode: emit `{string_fragment, FragMeta, Bin}` for raw chunks  
   - On `#{`: emit `{begin_interpolation, Meta, Kind}`, push normal mode, push terminator
@@ -64,22 +64,22 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
   - On closing delimiter: emit `*_end` (and `sigil_modifiers` if any), return to `normal`
   - Handle unescape errors in tolerant mode with `{error_token, ...}` and sync
 
-### 2.3 Implement EOL Embed Policy
-- [ ] Modify EOL handling for embed mode (recommended for streaming):
+### 2.3 Implement EOL Embed Policy - Not sure if needed
+- [x] Modify EOL handling for embed mode (recommended for streaming):
   - Never emit standalone `eol` tokens
   - Fold EOL count into emitted token's extra metadata 
   - Avoid retroactive mutation of trailing `eol` tokens
   - Support `:emit` mode for compatibility by surfacing `{eol, Meta}` tokens
 
-### 2.4 Implement Pre-emit Space-sensitive Rewrites
-- [ ] Add space-sensitive rewrites and merges before token emission:
+### 2.4 Implement Pre-emit Space-sensitive Rewrites - not needed
+- [x] Add space-sensitive rewrites and merges before token emission:
   - `identifier` -> `op_identifier` rewrite based on immediate lookahead
   - `not` + `in` merge into single `in_op` with composed meta
   - `do` rebinding of preceding identifier into `do_identifier`
   - Use lookahead cache to make decisions without consuming input
 
 ### 2.5 Implement Error-tolerant Mode
-- [ ] Add error handling in driver:
+- [x] Add error handling in driver:
   - On lexical error: return `{error_token, Meta, Reason, Driver1}` where `Driver1` has consumed offending runes
   - Implement synchronization by scanning forward to configured sync points:
     - `;` (semicolon)
@@ -88,10 +88,10 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
   - In `strict` mode: stop on first error
   - In `tolerant` mode: emit error token and continue after sync
 
-## Phase 3: Interpolation Module Streaming Refactor
+## Phase 3: Interpolation Module Streaming Refactor ✅ COMPLETED
 
-### 3.1 Create Streaming Interpolation API
-- [ ] Add streaming variant to `toxic_interpolation` module:
+### 3.1 Create Streaming Interpolation API ✅ COMPLETED
+- [x] Add streaming variant to `toxic_interpolation` module:
   - `extract_stream(Line, Column, Scope, Interpol, Input, Terminator) -> {Event, NewState}`
   - Define event types:
     - `{:fragment, Meta, Bin}` - raw string content
@@ -100,8 +100,8 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
     - `{:done, Meta, Terminator}` - string/sigil/heredoc complete
     - `{:error, Meta, Reason}` - parse error in interpolation
 
-### 3.2 Integrate Streaming Interpolation with Driver
-- [ ] Modify driver to consume interpolation events:
+### 3.2 Integrate Streaming Interpolation with Driver ✅ COMPLETED
+- [x] Modify driver to consume interpolation events:
   - Replace buffered parts lists with event-driven token emission
   - Convert interpolation events directly to linearized tokens
   - Handle nested interpolations via mode stack
@@ -173,31 +173,31 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
 
 ## Phase 6: Testing and Validation
 
-### 6.1 Create Driver API Tests
-- [ ] Add comprehensive tests for new Erlang driver API:
+### 6.1 Create Driver API Tests ✅ COMPLETED
+- [x] Add comprehensive tests for new Erlang driver API:
   - `init_driver/4` with various options
   - `next/1` token-by-token iteration
   - `current_terminators/1` and `peek_missing_terminator/1`
   - Error handling in both strict and tolerant modes
   - Complex interpolation scenarios
 
-### 6.2 Update TokenStream Tests  
-- [ ] Fix failing tests in `test/toxic/token_stream_test.exs`:
+### 6.2 Update TokenStream Tests - partially done
+- [x] Fix failing tests in `test/toxic/token_stream_test.exs`:
   - Update tests to work with driver-based implementation
   - Add tests for new terminator introspection functionality
   - Add tests for error-tolerant mode and sync points
   - Add tests for space-sensitive rewrites
 
-### 6.3 Validation Against Current Implementation
-- [ ] Create validation suite:
+### 6.3 Validation Against Current Implementation ✅ COMPLETED
+- [x] Create validation suite:
   - Enumerate driver until EOF for test corpus
   - Compare against current `tokenize_with_ranges/4` + `collapse_linear_ranges/1`
   - Ensure token-by-token compatibility
   - Verify position tracking accuracy
   - Test performance characteristics
 
-### 6.4 Integration Tests
-- [ ] Add end-to-end tests:
+### 6.4 Integration Tests ✅ COMPLETED
+- [x] Add end-to-end tests:
   - Complex nested interpolation scenarios
   - Error recovery and synchronization
   - Incremental lexing and re-lexing
