@@ -21,6 +21,7 @@ defmodule Toxic.Terminator do
     # error({?LOC(line, column), Reason, ["("]}, atom_to_list(Alias) ++ [$( | rest], scope, tokens)
   end
 
+  # In elixir_tokenizer this clause is used only in eex
   def handle_terminator(rest, line, column, scope(terminators: :none) = scope, token, _tokens) do
     emit(token, rest, line, column, scope)
   end

@@ -467,6 +467,7 @@ defmodule Toxic.TokenStream do
     end
   end
 
+  # TODO: remove
   defp process_token(token, %__MODULE__{opts: opts}) do
     token =
       if Keyword.get(opts, :eol_mode, :embed) == :embed do
@@ -479,9 +480,11 @@ defmodule Toxic.TokenStream do
     apply_rewrites(token)
   end
 
+  # TODO: remove
   defp filter_eol_token({:eol, _meta}), do: nil
   defp filter_eol_token(token), do: token
 
+  # TODO: remove
   defp apply_rewrites(nil), do: nil
 
   defp apply_rewrites(token) do

@@ -498,9 +498,11 @@ defmodule Toxic.Driver do
     current_terms =
       case current_terms do
         :none ->
-          # TODO: no coverage
+          # TODO: not needed eex support?
           []
-        other -> other
+
+        other ->
+          other
       end
 
     # Walk contexts to gather all parent terminators from interpolation frames
@@ -521,9 +523,11 @@ defmodule Toxic.Driver do
           parent_terms =
             case parent_terms do
               :none ->
-                # TODO: no coverage
+                # TODO: not needed eex support?
                 []
-              list when is_list(list) -> list
+
+              list when is_list(list) ->
+                list
             end
 
           # Add delimiter terminator
@@ -548,9 +552,7 @@ defmodule Toxic.Driver do
   def peek_missing_terminator(%__MODULE__{} = driver) do
     case current_terminators(driver) do
       [{start, _meta, _indent} | _] -> closing_for(start)
-      [] ->
-        # TODO: no coverage
-        nil
+      [] -> nil
     end
   end
 

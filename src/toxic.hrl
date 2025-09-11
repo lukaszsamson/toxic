@@ -77,6 +77,5 @@
   indentation=0,
   column=1,
   mismatch_hints=[],
-  warnings=[],
-  mode=normal  % normal | {interp, Kind, Quote, Delim, State} for interpolation mode
+  warnings=[]
 }).

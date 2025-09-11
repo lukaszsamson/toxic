@@ -68,7 +68,7 @@ defmodule Toxic.Tokenizer do
   # Char tokens
 
   def tokenize_single([??, ?\\, h | t], line, column, scope, _tokens) do
-    char = :toxic_interpolation.unescape_map(h)
+    char = Toxic.Unescape.unescape_map(h)
 
     # TODO: warnings
     new_scope = scope

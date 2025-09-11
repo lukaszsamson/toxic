@@ -275,6 +275,57 @@ defmodule Toxic.TokenStreamTest do
 
       assert token == fake_token1
     end
+
+    test "pushback and peek at eof" do
+      stream = TokenStream.new("")
+
+      {:eof, stream} = TokenStream.next(stream)
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> TokenStream.pushback(fake_token1)
+
+      {:ok, token, _stream} = TokenStream.peek(stream)
+
+      assert token == fake_token1
+    end
+
+    test "pushback and peek_n push >= n" do
+      stream = TokenStream.new("")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> TokenStream.pushback(fake_token1)
+        |> TokenStream.pushback(fake_token2)
+
+      {:ok, [token1, token2], _stream} = TokenStream.peek_n(stream, 2)
+
+      assert token1 == fake_token2
+      assert token2 == fake_token1
+    end
+
+    test "pushback and peek_n push < n" do
+      stream = TokenStream.new("1")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> TokenStream.pushback(fake_token1)
+        |> TokenStream.pushback(fake_token2)
+
+      {:ok, [token1, token2, token3], _stream} = TokenStream.peek_n(stream, 3)
+
+      assert token1 == fake_token2
+      assert token2 == fake_token1
+      assert token3 == {:int, {{1, 1}, {1, 2}, 1}, ~c"1"}
+    end
   end
 
   describe "checkpoint/1 and rewind_to/2" do
@@ -399,6 +450,12 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "peek_missing_terminator/1" do
+    test "no missing" do
+      stream = TokenStream.new("")
+
+      assert {nil, _stream} = TokenStream.peek_missing_terminator(stream)
+    end
+
     # TODO: the tests here return terminators after a batch instead of on current token
     @simple_cases [
       {:"(", :")"},
@@ -685,6 +742,22 @@ defmodule Toxic.TokenStreamTest do
       assert {:int, _, ~c"1"} = token1
 
       # No EOL token in embed mode
+      {:ok, token2, stream} = TokenStream.next(stream)
+      assert {:int, _, ~c"2"} = token2
+
+      assert {:eof, _} = TokenStream.next(stream)
+    end
+
+    test "embed mode filters EOL tokens in peek" do
+      stream = TokenStream.new("1\n2", 1, 1, eol_mode: :embed)
+
+      {:ok, token1, stream} = TokenStream.next(stream)
+      assert {:int, _, ~c"1"} = token1
+
+      # No EOL token in embed mode
+      {:ok, token2, stream} = TokenStream.peek(stream)
+      assert {:int, _, ~c"2"} = token2
+
       {:ok, token2, stream} = TokenStream.next(stream)
       assert {:int, _, ~c"2"} = token2
 
