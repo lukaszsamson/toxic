@@ -528,9 +528,17 @@ defmodule Toxic.Tokenizer do
     # error(Reason, rest, scope, tokens)
   end
 
-  def tokenize_single([?%, ?{ | t], line, column, scope, tokens) do
-    # TODO: column + 1? elixir bug?
-    token = {:"{", meta(line, column, 1, nil)}
+  def tokenize_single(
+        [?%, ?{ | t],
+        line,
+        column,
+        scope = scope(elixir_compatibility: elixir_compatibility),
+        tokens
+      ) do
+    # this is a bug in elixir parser but the fix was not accepted
+    # https://github.com/elixir-lang/elixir/pull/14741
+    # we need a workaround
+    token = {:"{", meta(line, if(elixir_compatibility, do: column, else: column + 1), 1, nil)}
 
     {_, rest, line, column, scope} =
       Toxic.Terminator.handle_terminator(t, line, column + 2, scope, token, [

@@ -77,5 +77,6 @@
   indentation=0,
   column=1,
   mismatch_hints=[],
-  warnings=[]
+  warnings=[],
+  elixir_compatibility=false
 }).

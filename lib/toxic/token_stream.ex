@@ -51,7 +51,8 @@ defmodule Toxic.TokenStream do
     max_batch: 256,
     eol_mode: :emit,
     error_mode: :tolerant,
-    error_sync: [:semicolon, :newline, :closer]
+    error_sync: [:semicolon, :newline, :closer],
+    elixir_compatibility: false
   ]
 
   @doc """
@@ -66,9 +67,11 @@ defmodule Toxic.TokenStream do
   """
   @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
-    opts = Keyword.merge(@default_opts, opts)
-    driver = Toxic.Driver.new()
-    driver = %{driver | line: line, column: column}
+    opts =
+      Keyword.merge(@default_opts, opts)
+      |> Keyword.merge(line: line, column: column)
+
+    driver = Toxic.Driver.new(opts)
 
     %__MODULE__{
       driver: driver,

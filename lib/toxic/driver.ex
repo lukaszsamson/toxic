@@ -30,9 +30,16 @@ defmodule Toxic.Driver do
           recent_token: any()
         }
 
-  def new() do
+  def new(opts \\ []) do
+    elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
+    line = Keyword.get(opts, :line, 1)
+    column = Keyword.get(opts, :column, 1)
+
     %__MODULE__{
-      scope: scope(identifier_tokenizer: String.Tokenizer)
+      line: line,
+      column: column,
+      scope:
+        scope(identifier_tokenizer: String.Tokenizer, elixir_compatibility: elixir_compatibility)
     }
   end
 

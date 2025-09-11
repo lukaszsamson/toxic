@@ -7,7 +7,11 @@ defmodule ToxicTest do
     linearize = Keyword.get(opts, :linearize, false)
 
     # Use the new streaming API
-    stream = Toxic.TokenStream.new(string, 1, 1, [])
+    stream =
+      Toxic.TokenStream.new(string, 1, 1,
+        elixir_compatibility: Keyword.get(opts, :must_match_elixir, true)
+      )
+
     {toxic_tokens_with_ranges_orig, _final_stream} = collect_all_tokens(stream, [])
 
     toxic_tokens_with_ranges =
@@ -4265,7 +4269,14 @@ defmodule ToxicTest do
 
   describe "map and struct" do
     test "map" do
-      # TODO: report to elixir
+      assert tokenize("%{}") ==
+               {:ok,
+                [
+                  {:%{}, {{1, 1}, {1, 2}, nil}},
+                  {:"{", {{1, 1}, {1, 2}, nil}},
+                  {:"}", {{1, 3}, {1, 4}, nil}}
+                ], ""}
+
       assert tokenize("%{}", must_match_elixir: false) ==
                {:ok,
                 [
@@ -4885,24 +4896,7 @@ defmodule ToxicTest do
       """
 
       # Turn off validation to see the actual tokens
-      assert {:ok, toxic_tokens, _} = tokenize(source, must_match_elixir: false)
-
-      # Also get elixir tokens for comparison
-      charlist = to_charlist(source)
-      {:ok, _, _, _, elixir_tokens, _remaining} = :elixir_tokenizer.tokenize(charlist, 1, 1, [])
-      elixir_tokens_reversed = Enum.reverse(elixir_tokens)
-
-      IO.puts("\n=== TOXIC TOKENS ===")
-      toxic_legacy = :toxic_tokenizer.ranges_to_legacy(toxic_tokens)
-      IO.inspect(toxic_legacy, limit: :infinity)
-
-      IO.puts("\n=== ELIXIR TOKENS ===")
-      IO.inspect(elixir_tokens_reversed, limit: :infinity)
-
-      # Fail if they don't match so we can see the difference
-      if toxic_legacy != elixir_tokens_reversed do
-        flunk("Tokens don't match - see output above")
-      end
+      assert {:ok, _toxic_tokens, _} = tokenize(source)
     end
 
     test "integer module piece reproduction" do
