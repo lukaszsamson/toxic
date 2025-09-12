@@ -61,7 +61,7 @@ defmodule Toxic.Dot do
   end
 
   defp handle_dot([?., h | t], line, column, dot_info, base_scope, _tokens) when is_quote(h) do
-    # TODO: emit warning
+    # TODO: warning
     scope = base_scope
     # scope = case H == $' of
     #   true ->

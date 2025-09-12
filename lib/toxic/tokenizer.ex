@@ -70,7 +70,7 @@ defmodule Toxic.Tokenizer do
   def tokenize_single([??, ?\\, h | t], line, column, scope, _tokens) do
     char = Toxic.Unescape.unescape_map(h)
 
-    # TODO: warnings
+    # TODO: warn
     new_scope = scope
     # new_scope = if
     #   H =:= Char, H =/= $\\ ->
@@ -107,7 +107,7 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([??, char | t], line, column, scope, _tokens) do
-    # TODO: warnings
+    # TODO: warn
     new_scope = scope
     # new_scope = case handle_char(Char) of
     #   {Escape, Name} ->
@@ -140,7 +140,7 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?', ?', ?' | t], line, column, scope, tokens) do
-    # TODO: warnings
+    # TODO: warn
     new_scope = scope
 
     # new_scope = prepend_warning(line, column, "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"),
@@ -154,7 +154,7 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?' | t], line, column, scope, tokens) do
-    # TODO: warnings
+    # TODO: warn
     new_scope = scope
     Toxic.String.handle_strings(t, line, column + 1, ?', new_scope, tokens)
   end
@@ -194,7 +194,7 @@ defmodule Toxic.Tokenizer do
   # Two Token Operators
 
   def tokenize_single([?:, ?:, ?: | rest], line, column, scope, _tokens) do
-    # TODO: warnings
+    # TODO: warn
     new_scope = scope
     # Message = "atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity",
     # new_scope = prepend_warning(line, column, Message),
