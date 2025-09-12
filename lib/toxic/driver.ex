@@ -563,15 +563,15 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp closing_for(:fn), do: :end
-  defp closing_for(:do), do: :end
-  defp closing_for(:"("), do: :")"
-  defp closing_for(:"["), do: :"]"
-  defp closing_for(:"{"), do: :"}"
-  defp closing_for(:"<<"), do: :">>"
+  def closing_for(:fn), do: :end
+  def closing_for(:do), do: :end
+  def closing_for(:"("), do: :")"
+  def closing_for(:"["), do: :"]"
+  def closing_for(:"{"), do: :"}"
+  def closing_for(:"<<"), do: :">>"
 
   # Handle string-like delimiters - the delimiter is already converted to atom in current_terminators
-  defp closing_for(delimiter) when is_atom(delimiter) do
+  def closing_for(delimiter) when is_atom(delimiter) do
     delimiter
   end
 end

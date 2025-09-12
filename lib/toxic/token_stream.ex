@@ -24,12 +24,33 @@ defmodule Toxic.TokenStream do
 
   @typedoc "Stream handle"
   @type t :: %__MODULE__{
-          buffer: :queue.queue(token),
-          push: [token],
+          # Buffer holds entries of {token, pre_terms, pre_pos}
+          buffer:
+            :queue.queue({
+              token,
+              [{atom(), term(), non_neg_integer()}] | nil,
+              {pos_integer(), pos_integer()} | nil
+            }),
+          # Push stack holds same entry shape for accurate state when pushing back
+          push: [
+            {
+              token,
+              [{atom(), term(), non_neg_integer()}] | nil,
+              {pos_integer(), pos_integer()} | nil
+            }
+          ],
           driver: Toxic.Driver.t(),
           opts: options,
           eof: boolean(),
-          error: term() | nil
+          error: term() | nil,
+          # Track the last emitted entry to support precise pushback
+          last_emitted_entry:
+            {
+              token,
+              [{atom(), term(), non_neg_integer()}] | nil,
+              {pos_integer(), pos_integer()} | nil
+            }
+            | nil
         }
 
   # TODO: Make sure it actually works with binary, iolist and producer function
@@ -43,7 +64,8 @@ defmodule Toxic.TokenStream do
             source: nil,
             opts: [],
             eof: false,
-            error: nil
+            error: nil,
+            last_emitted_entry: nil
 
   # Default options
   @default_opts [
@@ -112,14 +134,15 @@ defmodule Toxic.TokenStream do
     do_next(stream)
   end
 
-  defp do_next(%__MODULE__{push: [token | rest]} = stream) do
+  defp do_next(%__MODULE__{push: [{token, _pre_terms, _pre_pos} | rest]} = stream) do
     {:ok, token, %{stream | push: rest}}
   end
 
   defp do_next(%__MODULE__{buffer: buffer} = stream) do
     case :queue.out(buffer) do
-      {{:value, token}, new_buffer} ->
-        stream = %{stream | buffer: new_buffer}
+      {{:value, {token, _pre_terms, _pre_pos} = entry}, new_buffer} ->
+        # Update last emitted entry for accurate pushback semantics
+        stream = %{stream | buffer: new_buffer, last_emitted_entry: entry}
         stream = maybe_refill_buffer(stream)
         token = process_token(token, stream)
 
@@ -173,13 +196,13 @@ defmodule Toxic.TokenStream do
     do_peek(stream)
   end
 
-  defp do_peek(%__MODULE__{push: [token | _]} = stream) do
+  defp do_peek(%__MODULE__{push: [{token, _, _} | _]} = stream) do
     {:ok, token, stream}
   end
 
   defp do_peek(%__MODULE__{buffer: buffer} = stream) do
     case :queue.peek(buffer) do
-      {:value, token} ->
+      {:value, {token, _pre_terms, _pre_pos}} ->
         token = process_token(token, stream)
 
         if token == nil do
@@ -216,12 +239,21 @@ defmodule Toxic.TokenStream do
   def peek_n(%__MODULE__{} = stream, n) do
     working_stream = ensure_buffer_size(stream, n)
 
-    push_tokens = Enum.take(working_stream.push, n)
+    push_tokens =
+      working_stream.push
+      |> Enum.map(fn {t, _, _} -> t end)
+      |> Enum.take(n)
+
     needed = n - length(push_tokens)
 
     tokens =
       if needed > 0 do
-        buffer_tokens = :queue.to_list(working_stream.buffer) |> Enum.take(needed)
+        buffer_tokens =
+          working_stream.buffer
+          |> :queue.to_list()
+          |> Enum.map(fn {t, _, _} -> t end)
+          |> Enum.take(needed)
+
         push_tokens ++ buffer_tokens
       else
         push_tokens
@@ -244,8 +276,14 @@ defmodule Toxic.TokenStream do
   Push a token back onto the stream.
   """
   @spec pushback(t(), token()) :: t()
-  def pushback(%__MODULE__{push: push} = stream, token) do
-    %{stream | push: [token | push]}
+  def pushback(%__MODULE__{push: push, last_emitted_entry: last} = stream, token) do
+    entry =
+      case last do
+        {^token, _pre_terms, _pre_pos} = entry -> entry
+        _ -> {token, nil, nil}
+      end
+
+    %{stream | push: [entry | push]}
   end
 
   @doc """
@@ -278,17 +316,6 @@ defmodule Toxic.TokenStream do
       nil ->
         raise ArgumentError, "Invalid checkpoint reference"
     end
-  end
-
-  @doc """
-  Get the current absolute position (start of next token).
-  """
-  @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
-  def position(%__MODULE__{driver: driver} = stream) do
-    # Extract position from driver
-    line = driver.line
-    column = driver.column
-    {{line, column}, stream}
   end
 
   @doc """
@@ -345,7 +372,8 @@ defmodule Toxic.TokenStream do
   """
   @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
   def current_terminators(%__MODULE__{} = stream) do
-    {Toxic.Driver.current_terminators(stream.driver), stream}
+    terms = terms_at_current_position(stream)
+    {terms, stream}
   end
 
   @doc """
@@ -353,8 +381,45 @@ defmodule Toxic.TokenStream do
   """
   @spec peek_missing_terminator(t()) :: {atom() | nil, t()}
   def peek_missing_terminator(%__MODULE__{} = stream) do
-    {Toxic.Driver.peek_missing_terminator(stream.driver), stream}
+    terms = terms_at_current_position(stream)
+
+    closer =
+      case terms do
+        [{start, _meta, _indent} | _] -> Toxic.Driver.closing_for(start)
+        _ -> nil
+      end
+
+    {closer, stream}
   end
+
+  # Compute terms at the logical current position (before next token)
+  defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]} = stream) do
+    cond do
+      is_list(pre_terms) ->
+        pre_terms
+
+      match?({:value, {_, _, _}}, :queue.peek(stream.buffer)) ->
+        case :queue.peek(stream.buffer) do
+          {:value, {_, buf_terms, _}} when is_list(buf_terms) -> buf_terms
+          _ -> Toxic.Driver.current_terminators(stream.driver)
+        end
+
+      true ->
+        Toxic.Driver.current_terminators(stream.driver)
+    end
+  end
+
+  defp terms_at_current_position(%__MODULE__{buffer: buffer} = stream) do
+    case :queue.peek(buffer) do
+      {:value, {_token, pre_terms, _}} when is_list(pre_terms) -> pre_terms
+      _ -> Toxic.Driver.current_terminators(stream.driver)
+    end
+  end
+
+  # Extract start position from a ranged meta token
+  defp start_pos({_, {{sl, sc}, _end_meta, _extra}, _rest1, _rest2}), do: {sl, sc}
+  defp start_pos({_, {{sl, sc}, _end_meta, _extra}, _rest}), do: {sl, sc}
+  defp start_pos({_, {{sl, sc}, _end_meta, _extra}}), do: {sl, sc}
 
   # Private functions
 
@@ -398,12 +463,16 @@ defmodule Toxic.TokenStream do
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
     case Toxic.Driver.next_with_validation(source_string, driver) do
       {:ok, token, new_source_string, new_driver} ->
-        # Do not pre-process tokens here; keep batching bounded by driver steps
+        # Snapshot terminators and starting position of the token
+        pre_terms = Toxic.Driver.current_terminators(driver)
+        pre_pos = start_pos(token)
+
+        # Accumulate entry as {token, pre_terms, pre_pos}
         fetch_tokens_from_driver(
           new_driver,
           new_source_string,
           max_batch,
-          [token | acc],
+          [{token, pre_terms, pre_pos} | acc],
           count + 1,
           opts
         )
@@ -425,8 +494,8 @@ defmodule Toxic.TokenStream do
     {tokens, source, new_driver, eof, error} = fetch_tokens_from_driver(stream, max_batch, opts)
 
     new_buffer =
-      Enum.reduce(tokens, stream.buffer, fn token, buf ->
-        :queue.in(token, buf)
+      Enum.reduce(tokens, stream.buffer, fn entry, buf ->
+        :queue.in(entry, buf)
       end)
 
     # Mark EOF if driver reported EOF or if fewer tokens than requested were returned without error.
@@ -446,6 +515,31 @@ defmodule Toxic.TokenStream do
         eof: stream_eof,
         error: error || stream.error
     }
+  end
+
+  @doc """
+  Get the current absolute position (start of next token).
+  Uses snapshot captured before the head token to avoid batch drift.
+  """
+  @spec position(t()) :: {{pos_integer(), pos_integer()}, t()}
+  def position(%__MODULE__{} = stream) do
+    cond do
+      match?([{_, _, {_l, _c}} | _], stream.push) ->
+        [{_, _, {l, c}} | _] = stream.push
+        {{l, c}, stream}
+
+      match?({:value, {_, _, {_l, _c}}}, :queue.peek(stream.buffer)) ->
+        {:value, {_, _, {l, c}}} = :queue.peek(stream.buffer)
+        {{l, c}, stream}
+
+      stream.eof ->
+        {{stream.driver.line, stream.driver.column}, stream}
+
+      true ->
+        # Ensure we have a head entry to accurately reflect the next-token start
+        stream = refill_buffer(stream)
+        position(stream)
+    end
   end
 
   defp maybe_refill_buffer(%__MODULE__{buffer: buffer, opts: opts} = stream) do

@@ -373,9 +373,85 @@ defmodule Toxic.TokenStreamTest do
 
       # Position should be updated
       {{line, col}, _stream} = TokenStream.position(stream)
-      # TODO: this is invalid - position after a batch not after current token
-      assert line == 2
-      assert col == 4
+      assert line == 1
+      assert col == 2
+    end
+  end
+
+  describe "position at EOF" do
+    test "returns end position of last token" do
+      stream = TokenStream.new("1 + 2")
+
+      # Consume all tokens, remember last token end position
+      {last_end_pos, stream} =
+        Stream.unfold(stream, fn s ->
+          case TokenStream.next(s) do
+            {:ok, token, s2} ->
+              end_pos =
+                case token do
+                  {_, {{_sl, _sc}, {el, ec}, _extra}, _rest} -> {el, ec}
+                  {_, {{_sl, _sc}, {el, ec}, _extra}} -> {el, ec}
+                  _ -> nil
+                end
+
+              {{end_pos, s2}, s2}
+
+            {:eof, _s2} ->
+              nil
+          end
+        end)
+        |> Enum.reduce({nil, stream}, fn {end_pos, s}, {_acc, _} -> {end_pos, s} end)
+
+      # At EOF, position should match last token's end position
+      {{line, col}, _} = TokenStream.position(stream)
+      assert {line, col} == last_end_pos
+    end
+  end
+
+  describe "position with batching and pushback" do
+    test "position reflects buffer head under batching" do
+      stream = TokenStream.new("1 + 2", 1, 1, max_batch: 1)
+      # Initial position at first token
+      {{l1, c1}, stream} = TokenStream.position(stream)
+      assert {l1, c1} == {1, 1}
+
+      # Peek should not advance position
+      {:ok, _t, stream} = TokenStream.peek(stream)
+      {{l2, c2}, stream} = TokenStream.position(stream)
+      assert {l2, c2} == {1, 1}
+
+      # After consuming first token ("1"), next token is '+' at col 3
+      {:ok, _t1, stream} = TokenStream.next(stream)
+      {{l3, c3}, _stream} = TokenStream.position(stream)
+      assert {l3, c3} == {1, 3}
+    end
+
+    test "position restores on pushback" do
+      stream = TokenStream.new("1 + 2")
+
+      # Take first token and remember its pre-position
+      {{pos_before_first_l, pos_before_first_c}, stream} = TokenStream.position(stream)
+      {:ok, t1, stream} = TokenStream.next(stream)
+      # Now position should be before '+'
+      {{l_after, c_after}, stream} = TokenStream.position(stream)
+      assert {l_after, c_after} == {1, 3}
+
+      # Push back t1; position should revert to the remembered pre-position
+      stream = TokenStream.pushback(stream, t1)
+      {{l_re, c_re}, _} = TokenStream.position(stream)
+      assert {l_re, c_re} == {pos_before_first_l, pos_before_first_c}
+    end
+
+    test "peek does not change position across batches" do
+      stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 2)
+      {{l0, c0}, stream} = TokenStream.position(stream)
+      assert {l0, c0} == {1, 1}
+
+      # Force a refill by peeking multiple times
+      {:ok, _t, stream} = TokenStream.peek(stream)
+      {:ok, _t, stream} = TokenStream.peek_n(stream, 5)
+      {{lA, cA}, _} = TokenStream.position(stream)
+      assert {lA, cA} == {1, 1}
     end
   end
 
@@ -442,10 +518,66 @@ defmodule Toxic.TokenStreamTest do
       assert terminators == []
 
       # After consuming '(', would have paren terminator
-      # Note: This requires actual tokenizer state tracking
-      # TODO: real implementation
-      {:ok, _token, _stream} = TokenStream.next(stream)
-      # The actual implementation would track this
+      {:ok, _token, stream} = TokenStream.next(stream)
+
+      {terms, _} = TokenStream.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "returns terminator stack at current position not batch end" do
+      stream = TokenStream.new("(1)")
+
+      # Initially empty
+      {terminators, stream} = TokenStream.current_terminators(stream)
+      assert terminators == []
+
+      # After consuming '(', would have paren terminator
+      {:ok, _token, stream} = TokenStream.next(stream)
+
+      {terms, _} = TokenStream.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "respects pushed entry snapshot over driver" do
+      stream = TokenStream.new("(")
+
+      # Consume '('
+      {:ok, tok, stream} = TokenStream.next(stream)
+
+      # Driver now expects a closing paren, but we push back '('
+      stream = TokenStream.pushback(stream, tok)
+
+      # Terminators should reflect the state before '(', which is empty
+      {terms, _} = TokenStream.current_terminators(stream)
+      assert terms == []
+    end
+
+    test "falls back to driver terms when pushed token lacks snapshot" do
+      stream = TokenStream.new("(")
+
+      # Consume '('
+      {:ok, _tok, stream} = TokenStream.next(stream)
+
+      # Push a fake token (no snapshot in stream), so current_terminators should use driver
+      fake = {:fake, {{1, 1}, {1, 1}, nil}, nil}
+      stream = TokenStream.pushback(stream, fake)
+
+      {terms, _} = TokenStream.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "falls back to driver terms when pushed token lacks snapshot - assert current position not batch end" do
+      stream = TokenStream.new("(1)")
+
+      # Consume '('
+      {:ok, _tok, stream} = TokenStream.next(stream)
+
+      # Push a fake token (no snapshot in stream), so current_terminators should use driver
+      fake = {:fake, {{1, 1}, {1, 1}, nil}, nil}
+      stream = TokenStream.pushback(stream, fake)
+
+      {terms, _} = TokenStream.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
     end
   end
 

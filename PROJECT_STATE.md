@@ -68,12 +68,7 @@ Toxic is a streaming tokenizer for Elixir designed to support Pratt parsers with
 - **Challenge**: Maintaining position accuracy during recovery
 - **Note**: Terminator stack is available via `current_terminators/1` and `peek_missing_terminator/1`
 
-### 2. Terminator stack peek
-- **Current**: Returns state after batch
-- **Needed**: Proper state on current token in stream
-- **Challenge**: How to store the stacks while refilling buffer
-
-### 3. Performance Optimization
+### 2. Performance Optimization
 - **Current**: Single-pass streaming with deferral system
 - **Achieved**: Minimal buffering through driver design
 - **Trade-off**: Optimized for incremental use cases over batch throughput
