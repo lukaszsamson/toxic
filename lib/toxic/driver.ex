@@ -32,6 +32,7 @@ defmodule Toxic.Driver do
 
   def new(opts \\ []) do
     elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
+    preserve_comments = Keyword.get(opts, :preserve_comments, false)
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
 
@@ -39,7 +40,11 @@ defmodule Toxic.Driver do
       line: line,
       column: column,
       scope:
-        scope(identifier_tokenizer: String.Tokenizer, elixir_compatibility: elixir_compatibility)
+        scope(
+          identifier_tokenizer: String.Tokenizer,
+          elixir_compatibility: elixir_compatibility,
+          preserve_comments: preserve_comments
+        )
     }
   end
 

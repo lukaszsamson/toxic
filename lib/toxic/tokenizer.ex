@@ -47,10 +47,9 @@ defmodule Toxic.Tokenizer do
         # error_comment(Char, [$# | string], line, column, scope, _tokens);
         {:error, :comment_bidi_error}
 
-      {rest, _comment} ->
-        # TODO: preserve comments
-        # preserve_comments(line, column, _tokens, Comment, rest),
-        # tokenize(rest, line, column, scope, reset_eol(_tokens))
+      {rest, comment} ->
+        preserve_comments(line, column, tokens, comment, rest, scope)
+
         case tokens do
           [{:eol, _meta} | _] -> reset_eol(rest, line, column, scope)
           _ -> no_token(rest, line, column, scope)
@@ -728,5 +727,21 @@ defmodule Toxic.Tokenizer do
 
   defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) do
     no_token(string, line, column, scope)
+  end
+
+  def preserve_comments(
+        line,
+        column,
+        tokens,
+        comment,
+        rest,
+        scope(preserve_comments: preserve_comments)
+      )
+      when is_function(preserve_comments, 5) do
+    preserve_comments.(line, column, tokens, comment, rest)
+  end
+
+  def preserve_comments(_line, _column, _tokens, _comment, _rest, _scope) do
+    :ok
   end
 end

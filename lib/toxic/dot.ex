@@ -14,9 +14,8 @@ defmodule Toxic.Dot do
             # error_comment(Char, [?# | R], line, column, scope, tokens)
             {:error, :comment_bidi_error}
 
-          {rest, _comment} ->
-            # TODO: preserve comments
-            # preserve_comments(line, column, tokens, Comment, rest, scope)
+          {rest, comment} ->
+            Toxic.Tokenizer.preserve_comments(line, column, tokens, comment, rest, scope)
             tokenize_dot(rest, line, scope_column, dot_info, scope, tokens)
         end
 

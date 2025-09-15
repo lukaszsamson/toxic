@@ -9,7 +9,8 @@ defmodule ToxicTest do
     # Use the new streaming API
     stream =
       Toxic.TokenStream.new(string, 1, 1,
-        elixir_compatibility: Keyword.get(opts, :must_match_elixir, true)
+        elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
+        preserve_comments: Keyword.get(opts, :preserve_comments, false)
       )
 
     {toxic_tokens_with_ranges_orig, _final_stream} = collect_all_tokens(stream, [])
@@ -2168,6 +2169,47 @@ defmodule ToxicTest do
     # test "comment with bidi" do
     #   assert tokenize("#\u202Afoo") == {:ok, [], ""}
     # end
+
+    test "preserve" do
+      preserve_comments = fn line, column, tokens, comment, rest ->
+        send(self(), {:comment, line, column, tokens, comment, rest})
+      end
+
+      source = """
+
+      # SPDX-FileCopyrightText: 2021 The Elixir Team
+      # SPDX-FileCopyrightText: 2012 Plataformatec
+
+      defmodule
+      """
+
+      assert {:ok, _, _} = tokenize(source, preserve_comments: preserve_comments)
+
+      assert_receive {:comment, line, column, tokens, comment, rest}
+
+      assert comment == ~c"# SPDX-FileCopyrightText: 2021 The Elixir Team"
+      assert {line, column} == {2, 1}
+      assert hd(tokens) == {:eol, {{1, 1}, {2, 1}, 1}}
+      assert [?\n, ?# | _] = rest
+    end
+
+    test "preserve after dot" do
+      preserve_comments = fn line, column, tokens, comment, rest ->
+        send(self(), {:comment, line, column, tokens, comment, rest})
+      end
+
+      source = """
+      foo.# SPDX-FileCopyrightText: 2021 The Elixir Team
+      bar
+      """
+
+      assert {:ok, _, _} = tokenize(source, preserve_comments: preserve_comments)
+
+      assert_receive {:comment, line, column, _tokens, comment, _rest}
+
+      assert comment == ~c"# SPDX-FileCopyrightText: 2021 The Elixir Team"
+      assert {line, column} == {1, 5}
+    end
   end
 
   describe "non operator atoms" do
