@@ -8,13 +8,11 @@ defmodule Toxic.Sigil do
         tokenize_sigil_contents(rest, name, new_line, new_column, new_scope, new_tokens)
 
       {:error, reason} ->
-        # reason = {make_meta_len(line, column, 1, nil, scope), Message, Token}
-        # error(Reason, T, scope, tokens)
         {:error, reason}
     end
   end
 
-  # # A one-letter sigil is ok both as upcase as well as downcase.
+  # A one-letter sigil is ok both as upcase as well as downcase.
   def tokenize_sigil_name([s | t], [], line, column, scope, tokens) when is_downcase(s) do
     tokenize_lower_sigil_name(t, [s], line, column + 1, scope, tokens)
   end
@@ -24,17 +22,22 @@ defmodule Toxic.Sigil do
   end
 
   def tokenize_lower_sigil_name(
-        [s | _t] = _original,
-        [_ | _] = _name_acc,
-        _line,
-        _column,
+        [s | _t] = original,
+        [_ | _] = name_acc,
+        line,
+        column,
         _scope,
         _tokens
       )
       when is_downcase(s) do
-    # sigil_name = Enum.reverse(name_acc) ++ original
-    # {:error, sigil_name_error(), [?~] ++ sigil_name}
-    {:error, :invalid_sigil_name}
+    sigil_name = [?~ | Enum.reverse(name_acc)] ++ original
+    # Error position should be at the start of the sigil (~)
+    error_column = column - length(name_acc) - 1
+
+    {:error,
+     {[line: line, column: error_column],
+      ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: ",
+      sigil_name}}
   end
 
   def tokenize_lower_sigil_name(t, name_acc, line, column, scope, tokens) do
@@ -60,6 +63,7 @@ defmodule Toxic.Sigil do
       when is_downcase(s) do
     # sigil_name = Enum.reverse(name_acc) ++ original
     # {:error,  sigil_name_error(), [?~] ++ sigil_name}
+    # TODO: coverage
     {:error, :invalid_sigil_name}
   end
 
@@ -93,6 +97,7 @@ defmodule Toxic.Sigil do
          line + 1, 1, scope}
 
       :error ->
+        # TODO: coverage
         {:error, :invalid_char_after_heredoc_open}
 
         # error({make_meta_len(line, column - 1 - length(sigil_name), 1, nil, scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
@@ -119,6 +124,7 @@ defmodule Toxic.Sigil do
   end
 
   def tokenize_sigil_contents([_h | _] = _original, _sigil_name, _line, _column, _scope, _tokens) do
+    # TODO: coverage
     {:error, :invalid_sigil_delimiter}
     #   # MessageString =
     #   #   "\"~ts\" (column ~p, code point U+~4.16.0B). The available delimiters are: "

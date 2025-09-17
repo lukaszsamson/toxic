@@ -4,10 +4,22 @@ defmodule Toxic.Alias do
 
   def tokenize_alias(rest, line, column, unencoded, atom, length, ascii?, special, scope, _tokens) do
     if not ascii? or special != [] do
-      {:error, :invalid_character}
-      # Invalid = hd([C || C <- Unencoded, (C < $A) or (C > 127)]),
-      # Reason = {?LOC(Line, Column), invalid_character_error("alias (only ASCII characters, without punctuation, are allowed)", Invalid), Unencoded},
-      # error(Reason, Unencoded ++ Rest, Scope, Tokens);
+      invalid_char = hd(for c <- unencoded, c < ?A or c > 127, do: c)
+      # Build message that will match when converted to binary
+      char_hex = String.upcase(Integer.to_string(invalid_char, 16))
+      char_hex_padded = String.pad_leading(char_hex, 4, "0")
+
+      message =
+        ~c"invalid character \"" ++
+          [invalid_char] ++
+          ~c"\" (code point U+" ++
+          String.to_charlist(char_hex_padded) ++
+          ~c") in " ++
+          ~c"alias (only ASCII characters, without punctuation, are allowed)" ++
+          ~c": "
+
+      reason = {[line: line, column: column], message, unencoded}
+      {:error, reason}
     else
       aliases_token = alias_token(meta(line, column, length, unencoded), atom)
       emit(aliases_token, rest, line, column + length, scope)

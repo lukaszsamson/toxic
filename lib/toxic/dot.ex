@@ -11,6 +11,7 @@ defmodule Toxic.Dot do
       {[?# | r], _} ->
         case tokenize_comment(r, [?#]) do
           {:error, _char} ->
+            # TODO: coverage
             # error_comment(Char, [?# | R], line, column, scope, tokens)
             {:error, :comment_bidi_error}
 

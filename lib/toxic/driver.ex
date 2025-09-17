@@ -122,8 +122,13 @@ defmodule Toxic.Driver do
         carry_with_recent
       )
 
-    {rest, state} = handle_tokenize_result(state, result)
-    next(rest, state)
+    case handle_tokenize_result(state, result) do
+      {:error, reason, state} ->
+        {:error, reason, string, state}
+
+      {rest, state} ->
+        next(rest, state)
+    end
   end
 
   def next(
@@ -337,6 +342,10 @@ defmodule Toxic.Driver do
     case result do
       # :eof ->
       #   {[], %{state | output: Enum.reverse(deferrals), deferrals: []}}
+
+      # Handle error case from tokenizer
+      {:error, reason} ->
+        {:error, reason, state}
 
       {nil, rest, line, column, scope} ->
         {rest, %{state | line: line, column: column, scope: scope}}

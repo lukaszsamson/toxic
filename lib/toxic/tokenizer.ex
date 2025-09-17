@@ -12,11 +12,14 @@ defmodule Toxic.Tokenizer do
 
   # VC merge conflict
 
-  def tokenize_single([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = _original, _line, 1, _scope, _tokens) do
-    {:error, :vc_marker}
-    # FirstLine = lists:takewhile(fun(C) -> C =/= $\n andalso C =/= $\r end, Original),
-    # Reason = {?LOC(Line, 1), "found an unexpected version control marker, please resolve the conflicts: ", FirstLine},
-    # error(Reason, Original, Scope, Tokens);
+  def tokenize_single([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _tokens) do
+    first_line = Enum.take_while(original, fn c -> c != ?\n and c != ?\r end)
+
+    reason =
+      {[line: line, column: 1],
+       ~c"found an unexpected version control marker, please resolve the conflicts: ", first_line}
+
+    {:error, reason}
   end
 
   # Base integers
@@ -43,9 +46,13 @@ defmodule Toxic.Tokenizer do
 
   def tokenize_single([?# | string], line, column, scope, tokens) do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
-      {:error, _char} ->
-        # error_comment(Char, [$# | string], line, column, scope, _tokens);
-        {:error, :comment_bidi_error}
+      {:error, char} ->
+        # TODO: coverage
+        reason =
+          {[line: line, column: column],
+           ~c"invalid bidirectional formatting character in comment: ", [char]}
+
+        {:error, reason}
 
       {rest, comment} ->
         preserve_comments(line, column, tokens, comment, rest, scope)
@@ -226,15 +233,16 @@ defmodule Toxic.Tokenizer do
 
   # Ternary operator
 
-  def tokenize_single([?., ?., ?/, ?/ | rest] = _string, line, column, scope, _tokens) do
+  def tokenize_single([?., ?., ?/, ?/ | rest] = string, line, column, scope, _tokens) do
     case strip_horizontal_space(rest, 0) do
       {[?/ | _] = remaining, extra} ->
         token = {:identifier, meta(line, column, 4, nil), :..//}
         emit(token, remaining, line, column + 4 + extra, scope)
 
       {_, _} ->
-        # unexpected_token(string, line, column, scope, tokens)
-        {:error, :unexpected_token_ternary}
+        # TODO: coverage
+        reason = {[line: line, column: column], ~c"unexpected token: ", string}
+        {:error, reason}
     end
   end
 
@@ -287,14 +295,14 @@ defmodule Toxic.Tokenizer do
     Toxic.Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
-  def tokenize_single([?{ | _rest], _line, _column, _scope, [{:%, _} | _] = _tokens) do
-    {:error, :unexpected_space}
-    # Message =
-    #   "unexpected space between % and {\n\n"
-    #   "If you want to define a map, write %{...}, with no spaces.\n"
-    #   "If you want to define a struct, write %StructName{...}.\n\n"
-    #   "Syntax error before: ",
-    # error({?LOC(line, column), Message, [${]}, rest, scope, tokens)
+  def tokenize_single([?{ | _rest], line, column, _scope, [{:%, _} | _] = _tokens) do
+    message =
+      ~c"unexpected space between % and {\n\n" ++
+        ~c"If you want to define a map, write %{...}, with no spaces.\n" ++
+        ~c"If you want to define a struct, write %StructName{...}.\n\n" ++
+        ~c"Syntax error before: "
+
+    {:error, {[line: line, column: column], message, [?{]}}
   end
 
   def tokenize_single([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
@@ -407,19 +415,21 @@ defmodule Toxic.Tokenizer do
         emit(token, rest, line, column + 1 + length, tracked_scope)
 
       :empty when cursor_completion == false ->
-        {:error, :unexpected_token_empty_identifier}
+        # TODO: coverage
+        {:error, {[line: line, column: column], ~c"unexpected token: ", [?:]}}
 
       # unexpected_token(Original, Line, Column, Scope, Tokens);
       :empty ->
         # TODO: cursor completion
         no_token([], line, column, scope)
 
-      {:unexpected_token, _length} ->
-        {:error, :unexpected_token_identifier}
+      {:unexpected_token, length} ->
+        # TODO: coverage
+        bad_part = Enum.drop(string, length - 1)
+        {:error, {[line: line, column: column + length - 1], ~c"unexpected token: ", bad_part}}
 
-      # unexpected_token(lists:nthtail(Length - 1, String), Line, Column + Length - 1, Scope, Tokens);
       {:error, reason} ->
-        # error(Reason, Original, Scope, Tokens)
+        # TODO: coverage
         {:error, reason}
     end
   end
@@ -429,9 +439,9 @@ defmodule Toxic.Tokenizer do
     scope(cursor_completion: cursor_completion) = scope
 
     case Toxic.Number.tokenize_number(t, [h], 1, false) do
-      {:error, reason, _original} ->
-        # error({?LOC(line, column), Reason, original}, T, scope, tokens);
-        {:error, reason}
+      {:error, reason, original} ->
+        # TODO: coverage
+        {:error, {[line: line, column: column], reason, original}}
 
       {[i | rest], number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
         if number == 0 and i in [?x, ?0, ?b] and rest == [] and cursor_completion != false do
@@ -448,8 +458,28 @@ defmodule Toxic.Tokenizer do
           #     [[I], original]
           #   ),
 
-          # error({?LOC(line, column), Msg, [I]}, T, scope, tokens)
-          {:error, :invalid_character_after_number}
+          # Convert to charlist for consistency with Elixir
+          char_str = to_charlist(<<i::utf8>>)
+          # Use original to get the number part that was parsed
+          number_str =
+            case number do
+              int when is_integer(int) -> Integer.to_charlist(int)
+              float when is_float(float) -> Float.to_charlist(float)
+              _ -> ~c"number"
+            end
+
+          # TODO: coverage
+          msg =
+            ~c"invalid character \"" ++
+              char_str ++
+              ~c"\" after number " ++
+              number_str ++
+              ~c". If you intended to write a number, " ++
+              ~c"make sure to separate the number from the character (using comma, space, etc). " ++
+              ~c"If you meant to write a function name or a variable, note that identifiers in " ++
+              ~c"Elixir cannot start with numbers. Unexpected token: "
+
+          {:error, {[line: line, column: column], msg, [i]}}
         end
 
       {rest, number, original, length} when is_integer(number) ->
@@ -482,19 +512,16 @@ defmodule Toxic.Tokenizer do
     emit(token, rest, line, column + 1, scope)
   end
 
-  def tokenize_single(~c"\\" = _original, _line, _column, _scope, _tokens) do
-    {:error, :invalid_escape}
-    # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
+  def tokenize_single(~c"\\" = _original, line, column, _scope, _tokens) do
+    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
   end
 
-  def tokenize_single(~c"\\\n" = _original, _line, _column, _scope, _tokens) do
-    {:error, :invalid_escape}
-    # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
+  def tokenize_single(~c"\\\n" = _original, line, column, _scope, _tokens) do
+    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
   end
 
-  def tokenize_single(~c"\\\r\n" = _original, _line, _column, _scope, _tokens) do
-    {:error, :invalid_escape}
-    # error({?LOC(line, column), "invalid escape \\ at end of file", []}, original, scope, tokens)
+  def tokenize_single(~c"\\\r\n" = _original, line, column, _scope, _tokens) do
+    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
   end
 
   def tokenize_single([?\\, ?\n | rest], line, _column, scope, _tokens) do
@@ -515,16 +542,12 @@ defmodule Toxic.Tokenizer do
 
   # Others
 
-  def tokenize_single([?%, ?( | _rest], _line, _column, _scope, _tokens) do
-    {:error, :invalid_map}
-    # Reason = {?LOC(line, column), "expected %{ to define a map, got: ", [$%, $(]}
-    # error(Reason, rest, scope, tokens)
+  def tokenize_single([?%, ?( | _rest], line, column, _scope, _tokens) do
+    {:error, {[line: line, column: column], ~c"expected %{ to define a map, got: ", [?%, ?(]}}
   end
 
-  def tokenize_single([?%, ?[ | _rest], _line, _column, _scope, _tokens) do
-    {:error, :invalid_map}
-    # Reason = {?LOC(line, column), "expected %{ to define a map, got: ", [$%, $[]}
-    # error(Reason, rest, scope, tokens)
+  def tokenize_single([?%, ?[ | _rest], line, column, _scope, _tokens) do
+    {:error, {[line: line, column: column], ~c"expected %{ to define a map, got: ", [?%, ?[]}}
   end
 
   def tokenize_single(
@@ -583,22 +606,21 @@ defmodule Toxic.Tokenizer do
             emit(token, t, line, column + length + 1, scope)
 
           [?: | t] when hd(t) != ?: ->
-            {:error, :keyword_arg_not_followed_by_space}
+            atom_name = Atom.to_charlist(atom) ++ [?:]
 
-          # atom_name = Atom.to_list(atom) ++ [?:]
-          # Reason = {?LOC(line, column), "keyword argument must be followed by space after: ", atomName},
-          # error(Reason, string, scope, tokens);
+            reason =
+              {[line: line, column: column],
+               ~c"keyword argument must be followed by space after: ", atom_name}
+
+            {:error, reason}
 
           _ when at? ->
-            {:error, :invalid_character}
-
-          # Reason = {?LOC(line, column), invalid_character_error(kind, $@), atom_to_list(atom)},
-          # error(Reason, string, scope, tokens);
+            # TODO: coverage
+            msg = ~c"invalid character \"@\" in " ++ to_charlist(to_string(kind)) ++ ~c": "
+            {:error, {[line: line, column: column], msg, Atom.to_charlist(atom)}}
 
           _ when atom in [:__aliases__, :__block__] ->
-            {:error, :reserved_token}
-
-          # error({?LOC(line, column), "reserved token: ", atom_to_list(atom)}, rest, scope, tokens);
+            {:error, {[line: line, column: column], ~c"reserved token: ", Atom.to_charlist(atom)}}
 
           _ when kind == :alias ->
             Toxic.Alias.tokenize_alias(
@@ -625,8 +647,8 @@ defmodule Toxic.Tokenizer do
             emit(token, rest, line, column + length, new_scope)
 
           _ ->
-            # unexpected_token(string, line, column, scope, tokens)
-            {:error, :unexpected_token_other}
+            # TODO: coverage
+            {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
         end
 
       {:keyword, atom, type, rest, length} ->
@@ -642,8 +664,8 @@ defmodule Toxic.Tokenizer do
         )
 
       :empty when cursor_completion == false ->
-        # unexpected_token(string, line, column, original_scope, tokens)
-        {:error, :unexpected_token_empty}
+        # TODO: coverage
+        {:error, {{line, column}, "unexpected token: ", string}}
 
       :empty ->
         # TODO: cursor completion
@@ -655,12 +677,14 @@ defmodule Toxic.Tokenizer do
             no_token([], line, column, original_scope)
 
           _ ->
-            # unexpected_token(string, line, column, original_scope, tokens)
-            {:error, :unexpected_token_end}
+            # TODO: coverage
+            {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
         end
 
-      {:unexpected_token, _length} ->
-        {:error, :unexpected_token_identifier}
+      {:unexpected_token, length} ->
+        # TODO: coverage
+        bad_part = Enum.drop(string, length - 1)
+        {:error, {[line: line, column: column + length - 1], ~c"unexpected token: ", bad_part}}
 
       # unexpected_token(
       #   Enum.drop(string, length - 1),
@@ -671,6 +695,7 @@ defmodule Toxic.Tokenizer do
       # )
 
       {:error, reason} ->
+        # TODO: coverage
         {:error, reason}
         # error(Reason, string, original_scope, tokens)
     end

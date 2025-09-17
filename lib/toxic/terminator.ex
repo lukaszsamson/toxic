@@ -4,6 +4,7 @@ defmodule Toxic.Terminator do
 
   def handle_terminator(_rest, _, _, _scope, {:"(", _meta}, [{:alias, _, alias} | _tokens])
       when is_atom(alias) do
+    # TODO: coverage
     {:error, :unexpected_token_after_alias}
     # Reason =
     #   io_lib:format(
@@ -47,7 +48,7 @@ defmodule Toxic.Terminator do
 
   def check_terminator({start, meta}, terminators, scope) when start in [:fn, :do] do
     scope(indentation: indentation) = scope
-
+    # TODO: hints
     # Newscope =
     #   case Terminators of
     #     %% If the do is indented equally or less than the previous do, it may be a missing end error!
@@ -62,6 +63,7 @@ defmodule Toxic.Terminator do
   end
 
   def check_terminator({:end, _end_meta}, [{:do, _, _indentation} | terminators], scope) do
+    # TODO: hints
     # Newscope =
     #   %% If the end is more indented than the do, it may be a missing do error!
     #   case scope#elixir_tokenizer.indentation > Indentation of
@@ -87,6 +89,7 @@ defmodule Toxic.Terminator do
         {:ok, scope(scope, terminators: terminators)}
 
       _expected_end ->
+        # TODO: coverage
         {:error, :unexpected_token_or_reserved}
         #   Meta = [
         #     {line, Startline},
@@ -102,8 +105,10 @@ defmodule Toxic.Terminator do
     end
   end
 
-  def check_terminator({:end, _meta}, [], _scope) do
-    {:error, :unexpected_reserved_word}
+  def check_terminator({:end, meta}, [], _scope) do
+    {{line, column}, _, _} = meta
+    # TODO: coverage
+    {:error, {[line: line, column: column], ~c"unexpected reserved word: ", ~c"end"}}
     # Suffix =
     #   case lists:keyfind('end', 1, Hints) of
     #     {'end', Hintline, _Indentation} ->
@@ -116,10 +121,10 @@ defmodule Toxic.Terminator do
     # {error, {?LOC(line, column), {"unexpected reserved word: ", Suffix}, "end"}}
   end
 
-  def check_terminator({end_token, _meta}, [], _scope)
+  def check_terminator({end_token, meta}, [], _scope)
       when end_token in ~w|) ] } >>|a do
-    {:error, :unexpected_token_terminator}
-    # {error, {?LOC(line, column), "unexpected token: ", atom_to_list(End)}}
+    {{line, column}, _, _} = meta
+    {:error, {[line: line, column: column], ~c"unexpected token: ", Atom.to_charlist(end_token)}}
   end
 
   # TODO: report dead code to elixir

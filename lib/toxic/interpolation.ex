@@ -337,6 +337,7 @@ defmodule Toxic.Interpolation do
         # Token = io_lib:format("\\u~4.16.0B", [Char]),
         # Pre = "invalid bidirectional formatting character in string: ",
         # Pos = io_lib:format(". If you want to use such character, use it in its escaped ~ts form instead", [Token]),
+        # TODO: coverage
         {:error, :bidi_formatting}
 
       [char | new_rest] when is_list(char) ->

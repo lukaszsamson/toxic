@@ -13,9 +13,8 @@ defmodule Toxic.Keyword do
 
         {list, rest, line, column, scope}
 
-      {:error, message, _token} ->
-        {:error, message}
-        # error({?LOC(line, column), Message, Token}, Token ++ rest, scope, tokens)
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -62,14 +61,22 @@ defmodule Toxic.Keyword do
      ]}
   end
 
-  defp tokenize_keyword_terminator(_line, _column, :do, _length, [{:fn, _} | _]) do
-    {:error, :invalid_do_with_fn_error, ~c"do"}
+  defp tokenize_keyword_terminator(line, column, :do, _length, [{:fn, _} | _]) do
+    message =
+      {~c"unexpected reserved word: ",
+       ~c". Anonymous functions are written as:\n\n    fn pattern -> expression end\n\nPlease remove the \"do\" keyword"}
+
+    {:error, {[line: line, column: column], message, ~c"do"}}
   end
 
   defp tokenize_keyword_terminator(line, column, :do, length, tokens) do
     case valid_do?(tokens) do
-      true -> {:ok, [{:token_with_eol, {:do, meta(line, column, length, nil)}}]}
-      false -> {:error, :unexpected_reserved_word, ~c"do"}
+      true ->
+        {:ok, [{:token_with_eol, {:do, meta(line, column, length, nil)}}]}
+
+      false ->
+        # TODO: coverage
+        {:error, {[line: line, column: column], ~c"unexpected reserved word: ", ~c"do"}}
     end
   end
 

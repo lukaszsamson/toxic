@@ -18,6 +18,7 @@ defmodule Toxic.String do
          scope}
 
       :error ->
+        # TODO: coverage
         {:error, :invalid_char_after_heredoc_open}
 
         # Message = "heredoc allows only whitespace characters followed by a new line after opening ",

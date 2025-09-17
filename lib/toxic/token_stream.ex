@@ -125,7 +125,8 @@ defmodule Toxic.TokenStream do
 
   def next(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
     if Keyword.get(opts, :error_mode, :tolerant) == :strict do
-      {:eof, stream}
+      # In strict mode, return the error immediately
+      {:error, error, stream}
     else
       # In tolerant mode, continue despite errors
       do_next(stream)
@@ -158,12 +159,16 @@ defmodule Toxic.TokenStream do
       {:empty, _} ->
         stream = refill_buffer(stream)
 
-        # Only return EOF if we're at EOF and the buffer is still empty.
-        # If the buffer received tokens, proceed to consume them even if EOF is set.
-        if stream.eof and :queue.is_empty(stream.buffer) do
-          {:eof, stream}
-        else
-          do_next(stream)
+        # Check if refill_buffer set an error
+        cond do
+          stream.error != nil and Keyword.get(stream.opts, :error_mode, :tolerant) == :strict ->
+            {:error, stream.error, stream}
+
+          stream.eof and :queue.is_empty(stream.buffer) ->
+            {:eof, stream}
+
+          true ->
+            do_next(stream)
         end
     end
   end

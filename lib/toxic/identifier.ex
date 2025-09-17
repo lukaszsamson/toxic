@@ -30,11 +30,19 @@ defmodule Toxic.Identifier do
             {kind, acc, atom, rest, length, ascii, special}
 
           {:error, reason} ->
+            # TODO: coverage
             {:error, reason}
         end
 
-      {:error, {:mixed_script, Wrong, {Prefix, Suffix}}} ->
-        {:error, :mixed_script}
+      {:error, {:mixed_script, wrong, {prefix, suffix}}} ->
+        # TODO: coverage
+        message =
+          prefix ++
+            suffix ++
+            ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+
+        reason = {[line: line, column: column], message, wrong}
+        {:error, reason}
 
       # Wrongcolumn = column + length(Wrong) - 1,
       # case suggest_simpler_unexpected_token_in_error(Wrong, line, Wrongcolumn, scope) of
@@ -48,6 +56,7 @@ defmodule Toxic.Identifier do
       # end
 
       {:error, {:unexpected_token, wrong}} ->
+        # TODO: coverage
         {:unexpected_token, length(wrong)}
 
       # Wrongcolumn = column + length(Wrong) - 1,
@@ -64,6 +73,7 @@ defmodule Toxic.Identifier do
       # end;
 
       {:error, :empty} ->
+        # TODO: coverage
         :empty
     end
   end
