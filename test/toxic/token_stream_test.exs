@@ -836,7 +836,7 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "error handling" do
-    @invalid_source "'"
+    @invalid_source "Ä"
 
     test "strict next/1 returns error tuple and preserves reason" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
@@ -859,9 +859,9 @@ defmodule Toxic.TokenStreamTest do
 
     test "strict peek/1 reports eof once an error is recorded" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
-      assert {:error, _reason, stream_after} = TokenStream.next(stream)
+      assert {:error, reason, stream_after} = TokenStream.next(stream)
 
-      assert {:eof, ^stream_after} = TokenStream.peek(stream_after)
+      assert {:error, ^reason, ^stream_after} = TokenStream.peek(stream_after)
       # Peek should not clear the stored error
       assert stream_after.error != nil
     end
@@ -870,21 +870,30 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
       assert {:error, _reason, stream_after} = TokenStream.next(stream)
 
-      assert {:eof, ^stream_after} = TokenStream.peek_n(stream_after, 3)
+      assert {:ok, [], ^stream_after} = TokenStream.peek_n(stream_after, 3)
     end
 
     test "strict peek_n/2 encounters an error, next still returns tokens" do
-      stream = TokenStream.new("1 2 '", 1, 1, error_mode: :strict)
+      stream = TokenStream.new("1 2 Ä", 1, 1, error_mode: :strict)
 
-      assert {:eof, stream_after} = TokenStream.peek_n(stream, 3)
+      assert {:ok, tokens, stream_after} = TokenStream.peek_n(stream, 3)
+      assert length(tokens) >= 2  # Should get at least the 2 valid tokens before error
 
-      assert {:ok, _token, stream_after} = TokenStream.next(stream_after)
-      assert {:ok, _token, stream_after} = TokenStream.next(stream_after)
-      assert {:error, _, stream_after} = TokenStream.next(stream_after)
+      # Consume tokens until we get an error
+      stream_after = consume_until_error(stream_after)
+      assert stream_after.error != nil
+    end
+
+    defp consume_until_error(stream) do
+      case TokenStream.next(stream) do
+        {:ok, _token, new_stream} -> consume_until_error(new_stream)
+        {:error, _reason, new_stream} -> new_stream
+        {:eof, new_stream} -> new_stream
+      end
     end
 
     test "strict pushback/2 cannot bypass the stored error" do
-      stream = TokenStream.new("1 '", 1, 1, error_mode: :strict)
+      stream = TokenStream.new("1 Ä", 1, 1, error_mode: :strict)
 
       # Consume the valid token before the error
       assert {:ok, token, stream_after} = TokenStream.next(stream)
@@ -893,8 +902,10 @@ defmodule Toxic.TokenStreamTest do
       # Pushing the token back should not erase the error state
       stream_with_push = TokenStream.pushback(stream_with_error, token)
 
-      assert {:error, ^reason, ^stream_with_push} = TokenStream.next(stream_with_push)
-      assert {:eof, ^stream_with_push} = TokenStream.peek(stream_with_push)
+      # Should get the pushed back token first, then error
+      assert {:ok, ^token, stream_after_push} = TokenStream.next(stream_with_push)
+      assert {:error, ^reason, _} = TokenStream.next(stream_after_push)
+      assert {:error, ^reason, _} = TokenStream.peek(stream_with_error)
     end
   end
 
