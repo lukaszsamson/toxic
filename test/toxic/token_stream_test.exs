@@ -836,32 +836,65 @@ defmodule Toxic.TokenStreamTest do
   end
 
   describe "error handling" do
-    test "tolerant mode emits error tokens" do
-      # Invalid token that would cause an error
-      stream = TokenStream.new("'", 1, 1, error_mode: :tolerant)
+    @invalid_source "'"
 
-      # The tokenizer would emit an error token
-      # This depends on the actual tokenizer error handling
-      {:ok, token, _stream} = TokenStream.next(stream)
+    test "strict next/1 returns error tuple and preserves reason" do
+      stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
 
-      # Would be an error token in tolerant mode
-      # For now it might be the actual error from the tokenizer
-      # TODO: real implementation
-      assert token != nil
+      assert {:error, reason, stream_after} = TokenStream.next(stream)
+      assert reason != nil
+      assert stream_after.error == reason
+
+      # Subsequent calls continue to return the same error without mutating the stream
+      assert {:error, ^reason, ^stream_after} = TokenStream.next(stream_after)
     end
 
-    test "strict mode stops at first error" do
-      stream = TokenStream.new("'", 1, 1, error_mode: :strict)
+    test "strict peek/1 reports reports error" do
+      stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
 
-      # In strict mode, would return EOF on error
-      # TODO: eof or real error first?
-      result = TokenStream.next(stream)
+      assert {:error, _reason, stream_after} = TokenStream.peek(stream)
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
 
-      case result do
-        {:eof, _} -> :ok
-        {:ok, _, _} -> :ok
-        other -> flunk("Unexpected result: #{inspect(other)}")
-      end
+    test "strict peek/1 reports eof once an error is recorded" do
+      stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
+      assert {:error, _reason, stream_after} = TokenStream.next(stream)
+
+      assert {:eof, ^stream_after} = TokenStream.peek(stream_after)
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
+
+    test "strict peek_n/2 reports eof and never exposes buffered tokens" do
+      stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
+      assert {:error, _reason, stream_after} = TokenStream.next(stream)
+
+      assert {:eof, ^stream_after} = TokenStream.peek_n(stream_after, 3)
+    end
+
+    test "strict peek_n/2 encounters an error, next still returns tokens" do
+      stream = TokenStream.new("1 2 '", 1, 1, error_mode: :strict)
+
+      assert {:eof, stream_after} = TokenStream.peek_n(stream, 3)
+
+      assert {:ok, _token, stream_after} = TokenStream.next(stream_after)
+      assert {:ok, _token, stream_after} = TokenStream.next(stream_after)
+      assert {:error, _, stream_after} = TokenStream.next(stream_after)
+    end
+
+    test "strict pushback/2 cannot bypass the stored error" do
+      stream = TokenStream.new("1 '", 1, 1, error_mode: :strict)
+
+      # Consume the valid token before the error
+      assert {:ok, token, stream_after} = TokenStream.next(stream)
+      assert {:error, reason, stream_with_error} = TokenStream.next(stream_after)
+
+      # Pushing the token back should not erase the error state
+      stream_with_push = TokenStream.pushback(stream_with_error, token)
+
+      assert {:error, ^reason, ^stream_with_push} = TokenStream.next(stream_with_push)
+      assert {:eof, ^stream_with_push} = TokenStream.peek(stream_with_push)
     end
   end
 
