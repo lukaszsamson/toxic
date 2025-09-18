@@ -257,7 +257,6 @@ defmodule ToxicTest do
     end
 
     test "special handling of :::" do
-      # TODO: assert on warning
       assert tokenize(":::") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}], ""}
     end
 
@@ -481,11 +480,6 @@ defmodule ToxicTest do
                   {:">>", {{2, 1}, {2, 3}, 1}}
                 ], ""}
     end
-
-    # TODO: this is a syntax error
-    # test "space between % and {" do
-    #   assert tokenize("% {") == {:ok, [{:ternary_op, {2, 1, 1}, :"::"}], ""}
-    # end
 
     test "[]" do
       assert tokenize("[]") ==
@@ -1033,11 +1027,6 @@ defmodule ToxicTest do
                {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
     end
 
-    test "consecutive semicolons" do
-      # TODO: this is a syntax error
-      # assert tokenize(";;") == {:ok, [{";", {1, 1, 0}}, {";", {1, 2, 0}}], ""}
-    end
-
     test "commas" do
       assert tokenize(",") == {:ok, [",": {{1, 1}, {1, 2}, 0}], ""}
     end
@@ -1101,10 +1090,6 @@ defmodule ToxicTest do
       # Escaped newlines should continue to next line without creating eol token
       assert tokenize("\\\n0x123") == {:ok, [{:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
       assert tokenize("\\\r\n0x123") == {:ok, [{:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
-      # TODO: this is a syntax error
-      # assert tokenize("\\\n") == {:ok, [], ""}
-      # assert tokenize("\\\r\n") == {:ok, [], ""}
-      # assert tokenize("\\") == {:ok, [], ""}
     end
 
     test "consecutive escaped newlines" do

@@ -416,4 +416,8 @@ defmodule ToxicErrorsTest do
   test "unexpected ternary token" do
     tokenize_and_compare_error("..//foo")
   end
+
+  test "consecutive semicolons" do
+    tokenize_and_compare_error(";;")
+  end
 end
