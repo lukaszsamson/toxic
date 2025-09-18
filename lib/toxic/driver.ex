@@ -148,8 +148,8 @@ defmodule Toxic.Driver do
            string,
            delim
          ) do
-      # :eof ->
-      #   {[], state}
+      {:error, reason} ->
+        {:error, reason, string, state}
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
        line, column, scope} ->

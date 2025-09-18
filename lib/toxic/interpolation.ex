@@ -334,11 +334,12 @@ defmodule Toxic.Interpolation do
   defp extract_char(rest, buffer, line, column, start_line, start_column, scope, interpol, last) do
     case :unicode_util.gc(rest) do
       [char | _] when bidi(char) ->
-        # Token = io_lib:format("\\u~4.16.0B", [Char]),
-        # Pre = "invalid bidirectional formatting character in string: ",
-        # Pos = io_lib:format(". If you want to use such character, use it in its escaped ~ts form instead", [Token]),
-        # TODO: coverage
-        {:error, :bidi_formatting}
+        char_hex = String.upcase(Integer.to_string(char, 16))
+        char_hex_padded = String.pad_leading(char_hex, 4, "0")
+        token = ~c"\\u" ++ String.to_charlist(char_hex_padded)
+        message = ~c"invalid bidirectional formatting character in string: " ++ token ++ ~c". If you want to use such character, use it in its escaped " ++ token ++ ~c" form instead"
+        reason = {[line: line, column: column], message, [char]}
+        {:error, reason}
 
       [char | new_rest] when is_list(char) ->
         tokenize_single(
