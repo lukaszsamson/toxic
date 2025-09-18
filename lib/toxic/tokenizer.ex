@@ -597,7 +597,7 @@ defmodule Toxic.Tokenizer do
            not previous_was_dot?(tokens)
          ) do
       {kind, unencoded, atom, rest, length, ascii, special} ->
-        at? = ?@ in special
+        at? = :at in special
         scope = track_ascii(ascii, original_scope)
 
         case rest do
@@ -615,8 +615,7 @@ defmodule Toxic.Tokenizer do
             {:error, reason}
 
           _ when at? ->
-            # TODO: coverage
-            msg = ~c"invalid character \"@\" in " ++ to_charlist(to_string(kind)) ++ ~c": "
+            msg = ~c"invalid character \"@\" (code point U+0040) in " ++ to_charlist(to_string(kind)) ++ ~c": "
             {:error, {[line: line, column: column], msg, Atom.to_charlist(atom)}}
 
           _ when atom in [:__aliases__, :__block__] ->
