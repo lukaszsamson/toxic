@@ -422,14 +422,8 @@ defmodule Toxic.Tokenizer do
         no_token([], line, column, scope)
 
       {:unexpected_token, length} ->
-        # TODO: coverage
-        bad_part = Enum.drop(string, length - 1)
-
-        reason =
-          case bad_part do
-            [bad | _] -> unexpected_token_reason(bad, line, column + length - 1)
-            [] -> unexpected_token_reason(?:, line, column)
-          end
+        [bad | _] = Enum.drop(string, length - 1)
+        reason = unexpected_token_reason(bad, line, column + length - 1)
 
         {:error, reason}
 
@@ -679,14 +673,8 @@ defmodule Toxic.Tokenizer do
         end
 
       {:unexpected_token, length} ->
-        # TODO: coverage
-        bad_part = Enum.drop(string, length - 1)
-
-        reason =
-          case bad_part do
-            [bad | _] -> unexpected_token_reason(bad, line, column + length - 1)
-            [] -> unexpected_token_reason(hd(string), line, column)
-          end
+        [bad | _] = Enum.drop(string, length - 1)
+        reason = unexpected_token_reason(bad, line, column + length - 1)
 
         {:error, reason}
 

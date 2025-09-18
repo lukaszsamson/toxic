@@ -330,6 +330,10 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("foo" <> <<0x03B1::utf8>> <> "bar")
   end
 
+  test "mixed script identifier without suggestion" do
+    tokenize_and_compare_error("foo" <> <<0x0402::utf8>>)
+  end
+
   test "identifier confusable suggestion" do
     tokenize_and_compare_error("foO" <> <<0x1D6B3::utf8>>)
   end
@@ -340,6 +344,14 @@ defmodule ToxicErrorsTest do
 
   test "unexpected token in identifier" do
     tokenize_and_compare_error(<<0x3164::utf8>>)
+  end
+
+  test "unexpected token identifier control char" do
+    tokenize_and_compare_error("foo" <> <<0x0080::utf8>>)
+  end
+
+  test "unexpected token identifier control char in atom" do
+    tokenize_and_compare_error(":foo" <> <<0x0080::utf8>>)
   end
 
   test "empty identifier after colon" do
@@ -356,6 +368,10 @@ defmodule ToxicErrorsTest do
 
   test "unexpected token after colon confusable suggestion" do
     tokenize_and_compare_error(":" <> "foO" <> <<0x1D6B3::utf8>>)
+  end
+
+  test "unexpected token after colon control char" do
+    tokenize_and_compare_error(":" <> <<0x0080::utf8>>)
   end
 
   test "identifier containing @" do

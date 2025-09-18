@@ -42,12 +42,11 @@ defmodule Toxic.Identifier do
             {:error, {location, {prefix, message_suffix}, wrong}}
 
           :no_suggestion ->
-            # TODO: coverage
             message_suffix =
               suffix ++
                 ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
 
-            reason = {[line: line, column: wrong_column], {prefix, message_suffix}, wrong}
+            reason = {[line: line, column: column], {prefix, message_suffix}, wrong}
             {:error, reason}
         end
 
@@ -70,20 +69,13 @@ defmodule Toxic.Identifier do
             {:error, reason}
 
           :no_suggestion ->
-            case wrong do
-              [] ->
-                # TODO: coverage
-                {:unexpected_token, 0}
+            last = List.last(wrong)
 
-              _ ->
-                last = List.last(wrong)
-
-                case suggest_simpler_unexpected_token_in_error([last], line, wrong_column, scope) do
-                  {:error, reason} -> {:error, reason}
-                  :no_suggestion ->
-                    # TODO: coverage
-                    {:unexpected_token, length(wrong)}
-                end
+            case suggest_simpler_unexpected_token_in_error([last], line, wrong_column, scope) do
+              {:error, reason} ->
+                {:error, reason}
+              :no_suggestion ->
+                {:unexpected_token, length(wrong)}
             end
         end
 
