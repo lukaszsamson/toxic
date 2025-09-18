@@ -34,14 +34,22 @@ defmodule Toxic.Identifier do
         end
 
       {:error, {:mixed_script, wrong, {prefix, suffix}}} ->
-        # TODO: coverage
-        message =
-          prefix ++
-            suffix ++
-            ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+        wrong_column = column + length(wrong) - 1
 
-        reason = {[line: line, column: column], message, wrong}
-        {:error, reason}
+        case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
+          {:error, {location, _message_prefix, suggestion_message}} ->
+            message_suffix = suffix ++ suggestion_message
+            {:error, {location, {prefix, message_suffix}, wrong}}
+
+          :no_suggestion ->
+            # TODO: coverage
+            message_suffix =
+              suffix ++
+                ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+
+            reason = {[line: line, column: wrong_column], {prefix, message_suffix}, wrong}
+            {:error, reason}
+        end
 
       # Wrongcolumn = column + length(Wrong) - 1,
       # case suggest_simpler_unexpected_token_in_error(Wrong, line, Wrongcolumn, scope) of
@@ -56,7 +64,26 @@ defmodule Toxic.Identifier do
 
       {:error, {:unexpected_token, wrong}} ->
         # TODO: coverage
-        {:unexpected_token, length(wrong)}
+        wrong_column = column + length(wrong) - 1
+
+        case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
+          {:error, reason} ->
+            {:error, reason}
+
+          :no_suggestion ->
+            case wrong do
+              [] ->
+                {:unexpected_token, 0}
+
+              _ ->
+                last = List.last(wrong)
+
+                case suggest_simpler_unexpected_token_in_error([last], line, wrong_column, scope) do
+                  {:error, reason} -> {:error, reason}
+                  :no_suggestion -> {:unexpected_token, length(wrong)}
+                end
+            end
+        end
 
       # Wrongcolumn = column + length(Wrong) - 1,
       # case suggest_simpler_unexpected_token_in_error(Wrong, line, Wrongcolumn, scope) of
@@ -72,7 +99,6 @@ defmodule Toxic.Identifier do
       # end;
 
       {:error, :empty} ->
-        # TODO: coverage
         :empty
     end
   end
@@ -129,5 +155,61 @@ defmodule Toxic.Identifier do
 
   defp keyword_or_unsafe_to_atom(_, part, line, column, scope) do
     unsafe_to_atom(part, line, column, scope)
+  end
+
+  defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
+    scope(identifier_tokenizer: identifier_tokenizer) = scope
+
+    nfkc = :unicode.characters_to_nfkc_list(wrong)
+
+    case identifier_tokenizer.tokenize(nfkc) do
+      {:error, _reason} ->
+        confusable = String.Tokenizer.Security.confusable_skeleton(wrong)
+
+        case identifier_tokenizer.tokenize(confusable) do
+          {_, simpler, _, _, _, _} ->
+            message =
+              suggest_change(
+                ~c"Codepoint failed identifier tokenization, but a simpler form was found.",
+                wrong,
+                ~c"You could write the above in a similar way that is accepted by Elixir:",
+                simpler,
+                ~c"See https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+              )
+
+            {:error, {[line: line, column: wrong_column], ~c"unexpected token: ", message}}
+
+          _other ->
+            # TODO: coverage
+            :no_suggestion
+        end
+
+      {_, nfkc_chars, _, _, _, _} ->
+        # TODO: coverage
+        message =
+          suggest_change(
+            ~c"Elixir expects unquoted Unicode atoms, variables, and calls to use allowed codepoints and to be in NFC form.",
+            wrong,
+            ~c"You could write the above in a compatible format that is accepted by Elixir:",
+            nfkc_chars,
+            ~c"See https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+          )
+
+        {:error, {[line: line, column: wrong_column], ~c"unexpected token: ", message}}
+    end
+  end
+
+  defp suggest_change(intro, wrong_form, hint, hinted_form, ending) do
+    wrong_codepoints = list_to_codepoint_hex(wrong_form)
+    hinted_codepoints = list_to_codepoint_hex(hinted_form)
+
+    :io_lib.format(
+      "~ts\n\nGot:\n\n    \"~ts\" (code points~ts)\n\nHint: ~ts\n\n    \"~ts\" (code points~ts)\n\n~ts",
+      [intro, wrong_form, wrong_codepoints, hint, hinted_form, hinted_codepoints, ending]
+    )
+  end
+
+  defp list_to_codepoint_hex(list) do
+    Enum.map(list, fn codepoint -> :io_lib.format(" 0x~5.16.0B", [codepoint]) end)
   end
 end

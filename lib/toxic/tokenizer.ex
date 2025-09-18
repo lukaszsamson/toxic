@@ -47,10 +47,11 @@ defmodule Toxic.Tokenizer do
   def tokenize_single([?# | string], line, column, scope, tokens) do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
       {:error, char} ->
-        # TODO: coverage
+        token = :io_lib.format("\\u~4.16.0B", [char])
+
         reason =
           {[line: line, column: column],
-           ~c"invalid bidirectional formatting character in comment: ", [char]}
+           ~c"invalid bidirectional formatting character in comment: ", token}
 
         {:error, reason}
 
@@ -240,9 +241,7 @@ defmodule Toxic.Tokenizer do
         emit(token, remaining, line, column + 4 + extra, scope)
 
       {_, _} ->
-        # TODO: coverage
-        reason = {[line: line, column: column], ~c"unexpected token: ", string}
-        {:error, reason}
+        {:error, unexpected_token_reason(hd(string), line, column)}
     end
   end
 
@@ -415,8 +414,7 @@ defmodule Toxic.Tokenizer do
         emit(token, rest, line, column + 1 + length, tracked_scope)
 
       :empty when cursor_completion == false ->
-        # TODO: coverage
-        {:error, {[line: line, column: column], ~c"unexpected token: ", [?:]}}
+        {:error, unexpected_token_reason(?:, line, column)}
 
       # unexpected_token(Original, Line, Column, Scope, Tokens);
       :empty ->
@@ -426,7 +424,14 @@ defmodule Toxic.Tokenizer do
       {:unexpected_token, length} ->
         # TODO: coverage
         bad_part = Enum.drop(string, length - 1)
-        {:error, {[line: line, column: column + length - 1], ~c"unexpected token: ", bad_part}}
+
+        reason =
+          case bad_part do
+            [bad | _] -> unexpected_token_reason(bad, line, column + length - 1)
+            [] -> unexpected_token_reason(?:, line, column)
+          end
+
+        {:error, reason}
 
       {:error, reason} ->
         # TODO: coverage
@@ -463,8 +468,12 @@ defmodule Toxic.Tokenizer do
           number_str =
             case number do
               int when is_integer(int) -> Integer.to_charlist(int)
-              float when is_float(float) -> Float.to_charlist(float)
-              _ -> ~c"number"
+              float when is_float(float) ->
+                # TODO: coverage
+                Float.to_charlist(float)
+              _ ->
+                # TODO: coverage
+                ~c"number"
             end
 
           msg =
@@ -644,8 +653,7 @@ defmodule Toxic.Tokenizer do
             emit(token, rest, line, column + length, new_scope)
 
           _ ->
-            # TODO: coverage
-            {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
+            {:error, unexpected_token_reason(hd(string), line, column)}
         end
 
       {:keyword, atom, type, rest, length} ->
@@ -661,7 +669,7 @@ defmodule Toxic.Tokenizer do
         )
 
       :empty when cursor_completion == false ->
-        {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
+        {:error, unexpected_token_reason(hd(string), line, column)}
 
       :empty ->
         # TODO: cursor completion
@@ -673,14 +681,20 @@ defmodule Toxic.Tokenizer do
             no_token([], line, column, original_scope)
 
           _ ->
-            # TODO: coverage
-            {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
+            {:error, unexpected_token_reason(hd(string), line, column)}
         end
 
       {:unexpected_token, length} ->
         # TODO: coverage
         bad_part = Enum.drop(string, length - 1)
-        {:error, {[line: line, column: column + length - 1], ~c"unexpected token: ", bad_part}}
+
+        reason =
+          case bad_part do
+            [bad | _] -> unexpected_token_reason(bad, line, column + length - 1)
+            [] -> unexpected_token_reason(hd(string), line, column)
+          end
+
+        {:error, reason}
 
       # unexpected_token(
       #   Enum.drop(string, length - 1),
@@ -691,9 +705,38 @@ defmodule Toxic.Tokenizer do
       # )
 
       {:error, reason} ->
-        {:error, reason}
+      {:error, reason}
     end
   end
+
+  defp unexpected_token_reason(char, line, column) do
+    message = unexpected_token_message(char, column)
+    {[line: line, column: column], ~c"unexpected token: ", message}
+  end
+
+  defp unexpected_token_message(char, column) do
+    case handle_char(char) do
+      {_escaped, explanation} ->
+        # TODO: coverage
+        :io_lib.format("~ts (column ~p, code point U+~4.16.0B)", [explanation, column, char])
+
+      false ->
+        :io_lib.format("\"~ts\" (column ~p, code point U+~4.16.0B)", [[char], column, char])
+    end
+  end
+
+  defp handle_char(0), do: {~c"\\0", ~c"null byte"}
+  defp handle_char(7), do: {~c"\\a", ~c"alert"}
+  defp handle_char(?\b), do: {~c"\\b", ~c"backspace"}
+  defp handle_char(?\d), do: {~c"\\d", ~c"delete"}
+  defp handle_char(?\e), do: {~c"\\e", ~c"escape"}
+  defp handle_char(?\f), do: {~c"\\f", ~c"form feed"}
+  defp handle_char(?\n), do: {~c"\\n", ~c"newline"}
+  defp handle_char(?\r), do: {~c"\\r", ~c"carriage return"}
+  defp handle_char(?\s), do: {~c"\\s", ~c"space"}
+  defp handle_char(?\t), do: {~c"\\t", ~c"tab"}
+  defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
+  defp handle_char(_), do: false
 
   defp eol(_line, _column, [{token, _meta} | _tokens]) when token in ~w(, ; eol)a do
     :increase_eol
