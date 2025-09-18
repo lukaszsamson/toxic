@@ -63,7 +63,6 @@ defmodule Toxic.Identifier do
       # end
 
       {:error, {:unexpected_token, wrong}} ->
-        # TODO: coverage
         wrong_column = column + length(wrong) - 1
 
         case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
@@ -73,6 +72,7 @@ defmodule Toxic.Identifier do
           :no_suggestion ->
             case wrong do
               [] ->
+                # TODO: coverage
                 {:unexpected_token, 0}
 
               _ ->
@@ -80,7 +80,9 @@ defmodule Toxic.Identifier do
 
                 case suggest_simpler_unexpected_token_in_error([last], line, wrong_column, scope) do
                   {:error, reason} -> {:error, reason}
-                  :no_suggestion -> {:unexpected_token, length(wrong)}
+                  :no_suggestion ->
+                    # TODO: coverage
+                    {:unexpected_token, length(wrong)}
                 end
             end
         end
@@ -180,12 +182,10 @@ defmodule Toxic.Identifier do
             {:error, {[line: line, column: wrong_column], ~c"unexpected token: ", message}}
 
           _other ->
-            # TODO: coverage
             :no_suggestion
         end
 
       {_, nfkc_chars, _, _, _, _} ->
-        # TODO: coverage
         message =
           suggest_change(
             ~c"Elixir expects unquoted Unicode atoms, variables, and calls to use allowed codepoints and to be in NFC form.",

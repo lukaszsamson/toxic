@@ -434,7 +434,6 @@ defmodule Toxic.Tokenizer do
         {:error, reason}
 
       {:error, reason} ->
-        # TODO: coverage
         {:error, reason}
     end
   end
@@ -468,12 +467,7 @@ defmodule Toxic.Tokenizer do
           number_str =
             case number do
               int when is_integer(int) -> Integer.to_charlist(int)
-              float when is_float(float) ->
-                # TODO: coverage
-                Float.to_charlist(float)
-              _ ->
-                # TODO: coverage
-                ~c"number"
+              float when is_float(float) -> Float.to_charlist(float)
             end
 
           msg =
@@ -717,7 +711,6 @@ defmodule Toxic.Tokenizer do
   defp unexpected_token_message(char, column) do
     case handle_char(char) do
       {_escaped, explanation} ->
-        # TODO: coverage
         :io_lib.format("~ts (column ~p, code point U+~4.16.0B)", [explanation, column, char])
 
       false ->

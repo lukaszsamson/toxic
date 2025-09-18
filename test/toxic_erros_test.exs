@@ -134,6 +134,17 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("#" <> <<0x202E::utf8>>)
   end
 
+  test "unexpected token null byte" do
+    tokenize_and_compare_error(<<0>>)
+    tokenize_and_compare_error("\a")
+    tokenize_and_compare_error("\b")
+    tokenize_and_compare_error("\d")
+    tokenize_and_compare_error("\e")
+    tokenize_and_compare_error("\f")
+    tokenize_and_compare_error("\r")
+    tokenize_and_compare_error("\v")
+  end
+
   # Tokenizer errors - Strings/Heredocs
   test "invalid char after string heredoc open" do
     tokenize_and_compare_error("\"\"\"foo\"\"\"",
@@ -149,6 +160,10 @@ defmodule ToxicErrorsTest do
   # Tokenizer errors - Number validation
   test "invalid character after number" do
     tokenize_and_compare_error("123abc")
+  end
+
+  test "invalid character after float" do
+    tokenize_and_compare_error("1.2a")
   end
 
   test "invalid float number" do
@@ -315,6 +330,14 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("foo" <> <<0x03B1::utf8>> <> "bar")
   end
 
+  test "identifier confusable suggestion" do
+    tokenize_and_compare_error("foO" <> <<0x1D6B3::utf8>>)
+  end
+
+  test "identifier nfkc suggestion" do
+    tokenize_and_compare_error("foo" <> <<0x06CC::utf8>> <> <<0x1D6B3::utf8>>)
+  end
+
   test "unexpected token in identifier" do
     tokenize_and_compare_error(<<0x3164::utf8>>)
   end
@@ -325,6 +348,14 @@ defmodule ToxicErrorsTest do
 
   test "unexpected token after colon" do
     tokenize_and_compare_error(":" <> <<0x200B::utf8>>)
+  end
+
+  test "unexpected token after colon with zero width joiner" do
+    tokenize_and_compare_error(":" <> <<0x200C::utf8>>)
+  end
+
+  test "unexpected token after colon confusable suggestion" do
+    tokenize_and_compare_error(":" <> "foO" <> <<0x1D6B3::utf8>>)
   end
 
   test "identifier containing @" do
