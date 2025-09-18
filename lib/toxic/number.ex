@@ -74,8 +74,8 @@ defmodule Toxic.Number do
       {rest, List.to_float(number), original, length}
     rescue
       ArgumentError ->
-        # TODO: coverage
-        {:invalid_float, Enum.reverse(acc)}
+        original = Enum.reverse(acc)
+        {:error, ~c"invalid float number ", original}
     end
   end
 
