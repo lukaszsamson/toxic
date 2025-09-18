@@ -55,15 +55,34 @@ defmodule ToxicErrorsTest do
   end
 
   defp normalize_message({prefix, suffix}) do
-    IO.iodata_to_binary(prefix) <> IO.iodata_to_binary(suffix)
+    try do
+      IO.iodata_to_binary(prefix) <> IO.iodata_to_binary(suffix)
+    rescue
+      ArgumentError ->
+        # Fallback for invalid iodata
+        inspect(prefix) <> inspect(suffix)
+    end
   end
 
   defp normalize_message(message) do
-    IO.iodata_to_binary(message)
+    try do
+      IO.iodata_to_binary(message)
+    rescue
+      ArgumentError ->
+        # Fallback for invalid iodata
+        inspect(message)
+    end
   end
 
   defp normalize_reason({position, message, token}) do
-    {position, normalize_message(message), IO.iodata_to_binary(token)}
+    normalized_token = try do
+      IO.iodata_to_binary(token)
+    rescue
+      ArgumentError ->
+        # If token is not valid iodata, convert to string representation
+        inspect(token)
+    end
+    {position, normalize_message(message), normalized_token}
   end
 
   defp collect_all_tokens(stream, acc) do
