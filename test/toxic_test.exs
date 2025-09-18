@@ -10,7 +10,8 @@ defmodule ToxicTest do
     stream =
       Toxic.TokenStream.new(string, 1, 1,
         elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
-        preserve_comments: Keyword.get(opts, :preserve_comments, false)
+        preserve_comments: Keyword.get(opts, :preserve_comments, false),
+        existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)
       )
 
     {toxic_tokens_with_ranges_orig, _final_stream} = collect_all_tokens(stream, [])
@@ -27,7 +28,7 @@ defmodule ToxicTest do
       toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
 
       {:ok, _, _, _, elixir_tokens, _remaining} =
-        :elixir_tokenizer.tokenize(charlist, 1, 1, [])
+        :elixir_tokenizer.tokenize(charlist, 1, 1, [existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)])
 
       elixir_tokens_reversed = Enum.reverse(elixir_tokens)
 
@@ -6013,5 +6014,61 @@ defmodule ToxicTest do
 
     assert match?({:do_identifier, {_, _, ~c"try"}, :try}, try_token),
            "try should be :do_identifier, got: #{inspect(try_token)}"
+  end
+
+  test "existing_atoms_only" do
+    code = """
+      :"foo\#{a}bar"
+      """
+
+      assert {:ok, [{:atom_unsafe, _, _} | _], _} = tokenize(code)
+
+      code = """
+      :"foo\#{a}bar"
+      """
+
+      assert {:ok, [{:atom_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      :"foo"
+      """
+
+      assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      :""
+      """
+
+      assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      ["foo\#{a}bar": 1]
+      """
+
+      assert {:ok, [_, {:kw_identifier_unsafe, _, _} | _], _} = tokenize(code)
+
+      code = """
+      ["foo\#{a}bar": 1]
+      """
+
+      assert {:ok, [_, {:kw_identifier_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      ["foo": 1]
+      """
+
+      assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      ["": 1]
+      """
+
+      assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+
+      code = """
+      ~x|\#{["": :""]}|
+      """
+
+      assert {:ok, _, _} = tokenize(code, existing_atoms_only: true)
   end
 end

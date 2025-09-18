@@ -10,13 +10,6 @@ defmodule Toxic.Interpolation do
 
   # Terminators
 
-  # extract([], _Buffer, _Output, Line, Column, #elixir_tokenizer{cursor_completion=false}, _Interpol, Last) ->
-  #   {error, {string, Line, Column, io_lib:format("missing terminator: ~ts", [[Last]]), []}};
-
-  # def tokenize_single([], buffer, line, column, start_line, start_column, scope, _interpol, _last) do
-  #   finish_extraction([], Buffer, Output, Line, Column, Scope)
-  # end
-
   def tokenize_single(
         [],
         buffer = [_ | _],
@@ -256,24 +249,6 @@ defmodule Toxic.Interpolation do
         _last
       ) do
     {:begin_interpolation, meta(line, column, 2, nil), :string, rest, line, column + 2, scope}
-    #   Output1 = build_string(Buffer, Output),
-    #   case elixir_tokenizer:tokenize(Rest, Line, Column + 2, Scope#elixir_tokenizer{terminators=[]}) of
-    #     {error, {Location, _, "}"}, [$} | NewRest], Warnings, Tokens} ->
-    #       NewScope = Scope#elixir_tokenizer{warnings=Warnings},
-    #       {line, EndLine} = lists:keyfind(line, 1, Location),
-    #       {column, EndColumn} = lists:keyfind(column, 1, Location),
-    #       Output2 = build_interpol(Line, Column, EndLine, EndColumn, lists:reverse(Tokens), Output1),
-    #       extract(NewRest, [], Output2, EndLine, EndColumn + 1, NewScope, true, Last);
-    #     {error, Reason, _, _, _} ->
-    #       {error, Reason};
-    #     {ok, EndLine, EndColumn, Warnings, Tokens, Terminators} when Scope#elixir_tokenizer.cursor_completion /= false ->
-    #       NewScope = Scope#elixir_tokenizer{warnings=Warnings, cursor_completion=noprune},
-    #       {CursorTerminators, _} = cursor_complete(EndLine, EndColumn, Terminators),
-    #       Output2 = build_interpol(Line, Column, EndLine, EndColumn, lists:reverse(Tokens, CursorTerminators), Output1),
-    #       extract([], [], Output2, EndLine, EndColumn, NewScope, true, Last);
-    #     {ok, _, _, _, _, _} ->
-    #       {error, {string, Line, Column, "missing interpolation terminator: \"}\"", []}}
-    #   end
   end
 
   def tokenize_single(
@@ -375,7 +350,6 @@ defmodule Toxic.Interpolation do
   defp extract_nl(rest, buffer, line, start_line, start_column, scope, interpol, [h, h, h] = last) do
     case strip_horizontal_space(rest, buffer, 1) do
       {[^h, ^h, ^h | new_rest], _new_buffer, column} ->
-        # finish_extraction(new_rest, buffer, output, line + 1, column + 3, scope)
         {:fragment, meta(start_line, start_column, line + 1, 1, nil),
          :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [h, h, h | new_rest], line + 1,
          column, scope}

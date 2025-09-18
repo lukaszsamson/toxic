@@ -21,6 +21,7 @@ defmodule Toxic.TokenStream do
           | {:error_mode, :tolerant | :strict}
           | {:error_sync, [:semicolon | :newline | :closer]}
           | {:preserve_comments, false | (integer(), integer(), list(), list(), list() -> any())}
+          | {:existing_atoms_only, boolean()}
         ]
 
   @typedoc "Stream handle"
@@ -76,7 +77,8 @@ defmodule Toxic.TokenStream do
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer],
     elixir_compatibility: false,
-    preserve_comments: false
+    preserve_comments: false,
+    existing_atoms_only: false
   ]
 
   @doc """

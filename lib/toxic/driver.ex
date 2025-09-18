@@ -33,6 +33,7 @@ defmodule Toxic.Driver do
   def new(opts \\ []) do
     elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
     preserve_comments = Keyword.get(opts, :preserve_comments, false)
+    existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
 
@@ -43,11 +44,13 @@ defmodule Toxic.Driver do
         scope(
           identifier_tokenizer: String.Tokenizer,
           elixir_compatibility: elixir_compatibility,
-          preserve_comments: preserve_comments
+          preserve_comments: preserve_comments,
+          existing_atoms_only: existing_atoms_only
         )
     }
   end
 
+  # TODO: remove? no longer needed
   def next_with_validation(string, state) do
     result = next(string, state)
     state = result |> Tuple.to_list() |> List.last()
@@ -280,7 +283,6 @@ defmodule Toxic.Driver do
             end_token_type =
               case scope do
                 scope(existing_atoms_only: true) ->
-                  # TODO: no test coverage
                   :kw_identifier_safe_end
 
                 _ ->
@@ -569,6 +571,7 @@ defmodule Toxic.Driver do
 
   Returns the closer atom (e.g., :")", :"]", :"}", :">>", :end) or nil if none.
   """
+  # TODO: remove? not used
   @spec peek_missing_terminator(t()) :: atom() | nil
   def peek_missing_terminator(%__MODULE__{} = driver) do
     case current_terminators(driver) do
