@@ -610,7 +610,10 @@ defmodule Toxic.Tokenizer do
             {:error, reason}
 
           _ when at? ->
-            msg = ~c"invalid character \"@\" (code point U+0040) in " ++ to_charlist(to_string(kind)) ++ ~c": "
+            msg =
+              ~c"invalid character \"@\" (code point U+0040) in " ++
+                to_charlist(to_string(kind)) ++ ~c": "
+
             {:error, {[line: line, column: column], msg, Atom.to_charlist(atom)}}
 
           _ when atom in [:__aliases__, :__block__] ->
@@ -687,7 +690,7 @@ defmodule Toxic.Tokenizer do
       # )
 
       {:error, reason} ->
-      {:error, reason}
+        {:error, reason}
     end
   end
 

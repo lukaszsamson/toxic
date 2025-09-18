@@ -75,13 +75,15 @@ defmodule ToxicErrorsTest do
   end
 
   defp normalize_reason({position, message, token}) do
-    normalized_token = try do
-      IO.iodata_to_binary(token)
-    rescue
-      ArgumentError ->
-        # If token is not valid iodata, convert to string representation
-        inspect(token)
-    end
+    normalized_token =
+      try do
+        IO.iodata_to_binary(token)
+      rescue
+        ArgumentError ->
+          # If token is not valid iodata, convert to string representation
+          inspect(token)
+      end
+
     {position, normalize_message(message), normalized_token}
   end
 
@@ -175,14 +177,14 @@ defmodule ToxicErrorsTest do
 
           {:invalid_float, original} ->
             flunk(
-              "Expected Toxic tokenizer to return Elixir-style error tuple for invalid float. " \
-              <> "Elixir returned #{inspect(elixir_reason)}, toxic returned {:invalid_float, #{inspect(original)}}"
+              "Expected Toxic tokenizer to return Elixir-style error tuple for invalid float. " <>
+                "Elixir returned #{inspect(elixir_reason)}, toxic returned {:invalid_float, #{inspect(original)}}"
             )
 
           other ->
             flunk(
-              "Unexpected Toxic tokenizer result for invalid float. " \
-              <> "Elixir returned #{inspect(elixir_reason)}, toxic returned #{inspect(other)}"
+              "Unexpected Toxic tokenizer result for invalid float. " <>
+                "Elixir returned #{inspect(elixir_reason)}, toxic returned #{inspect(other)}"
             )
         end
       end
@@ -399,7 +401,10 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("\"" <> <<0x202E::utf8>> <> "\"",
       assert: fn elixir_reason, toxic_reason ->
         {_position, toxic_message, _token} = toxic_reason
-        assert IO.iodata_to_binary(toxic_message) =~ "invalid bidirectional formatting character in string"
+
+        assert IO.iodata_to_binary(toxic_message) =~
+                 "invalid bidirectional formatting character in string"
+
         {_position, message, token} = normalize_reason(elixir_reason)
         assert message =~ "invalid bidirectional formatting character in string"
         assert token == "\\u202E"

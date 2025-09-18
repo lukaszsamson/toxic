@@ -877,7 +877,8 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new("1 2 Ä", 1, 1, error_mode: :strict)
 
       assert {:ok, tokens, stream_after} = TokenStream.peek_n(stream, 3)
-      assert length(tokens) >= 2  # Should get at least the 2 valid tokens before error
+      # Should get at least the 2 valid tokens before error
+      assert length(tokens) >= 2
 
       # Consume tokens until we get an error
       stream_after = consume_until_error(stream_after)

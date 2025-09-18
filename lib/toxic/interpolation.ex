@@ -312,7 +312,13 @@ defmodule Toxic.Interpolation do
         char_hex = String.upcase(Integer.to_string(char, 16))
         char_hex_padded = String.pad_leading(char_hex, 4, "0")
         token = ~c"\\u" ++ String.to_charlist(char_hex_padded)
-        message = ~c"invalid bidirectional formatting character in string: " ++ token ++ ~c". If you want to use such character, use it in its escaped " ++ token ++ ~c" form instead"
+
+        message =
+          ~c"invalid bidirectional formatting character in string: " ++
+            token ++
+            ~c". If you want to use such character, use it in its escaped " ++
+            token ++ ~c" form instead"
+
         reason = {[line: line, column: column], message, [char]}
         {:error, reason}
 

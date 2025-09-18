@@ -28,7 +28,9 @@ defmodule ToxicTest do
       toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
 
       {:ok, _, _, _, elixir_tokens, _remaining} =
-        :elixir_tokenizer.tokenize(charlist, 1, 1, [existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)])
+        :elixir_tokenizer.tokenize(charlist, 1, 1,
+          existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)
+        )
 
       elixir_tokens_reversed = Enum.reverse(elixir_tokens)
 
@@ -6018,57 +6020,58 @@ defmodule ToxicTest do
 
   test "existing_atoms_only" do
     code = """
-      :"foo\#{a}bar"
-      """
+    :"foo\#{a}bar"
+    """
 
-      assert {:ok, [{:atom_unsafe, _, _} | _], _} = tokenize(code)
+    assert {:ok, [{:atom_unsafe, _, _} | _], _} = tokenize(code)
 
-      code = """
-      :"foo\#{a}bar"
-      """
+    code = """
+    :"foo\#{a}bar"
+    """
 
-      assert {:ok, [{:atom_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [{:atom_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
 
-      code = """
-      :"foo"
-      """
+    code = """
+    :"foo"
+    """
 
-      assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
 
-      code = """
-      :""
-      """
+    code = """
+    :""
+    """
 
-      assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
 
-      code = """
-      ["foo\#{a}bar": 1]
-      """
+    code = """
+    ["foo\#{a}bar": 1]
+    """
 
-      assert {:ok, [_, {:kw_identifier_unsafe, _, _} | _], _} = tokenize(code)
+    assert {:ok, [_, {:kw_identifier_unsafe, _, _} | _], _} = tokenize(code)
 
-      code = """
-      ["foo\#{a}bar": 1]
-      """
+    code = """
+    ["foo\#{a}bar": 1]
+    """
 
-      assert {:ok, [_, {:kw_identifier_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [_, {:kw_identifier_safe, _, _} | _], _} =
+             tokenize(code, existing_atoms_only: true)
 
-      code = """
-      ["foo": 1]
-      """
+    code = """
+    ["foo": 1]
+    """
 
-      assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
 
-      code = """
-      ["": 1]
-      """
+    code = """
+    ["": 1]
+    """
 
-      assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
 
-      code = """
-      ~x|\#{["": :""]}|
-      """
+    code = """
+    ~x|\#{["": :""]}|
+    """
 
-      assert {:ok, _, _} = tokenize(code, existing_atoms_only: true)
+    assert {:ok, _, _} = tokenize(code, existing_atoms_only: true)
   end
 end

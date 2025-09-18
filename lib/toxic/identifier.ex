@@ -74,6 +74,7 @@ defmodule Toxic.Identifier do
             case suggest_simpler_unexpected_token_in_error([last], line, wrong_column, scope) do
               {:error, reason} ->
                 {:error, reason}
+
               :no_suggestion ->
                 {:unexpected_token, length(wrong)}
             end

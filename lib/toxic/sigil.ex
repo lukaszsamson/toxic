@@ -63,9 +63,12 @@ defmodule Toxic.Sigil do
       when is_downcase(s) do
     sigil_name = [?~ | Enum.reverse(name_acc)] ++ original
     error_column = column - length(name_acc) - 1
-    reason = {[line: line, column: error_column],
-      ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: ",
-      sigil_name}
+
+    reason =
+      {[line: line, column: error_column],
+       ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: ",
+       sigil_name}
+
     {:error, reason}
   end
 
@@ -99,7 +102,9 @@ defmodule Toxic.Sigil do
          line + 1, 1, scope}
 
       :error ->
-        message = ~c"heredoc allows only whitespace characters followed by a new line after opening "
+        message =
+          ~c"heredoc allows only whitespace characters followed by a new line after opening "
+
         start_column = column - length(sigil_name) - 1
         sigil_name_str = [?~ | sigil_name]
         reason = {[line: line, column: start_column], message, sigil_name_str}
@@ -132,7 +137,16 @@ defmodule Toxic.Sigil do
     start_column = column - length(sigil_name) - 1
     char_hex = String.upcase(Integer.to_string(h, 16))
     char_hex_padded = String.pad_leading(char_hex, 4, "0")
-    message = ~c"invalid sigil delimiter: \"" ++ [h] ++ ~c"\" (column " ++ Integer.to_charlist(column) ++ ~c", code point U+" ++ String.to_charlist(char_hex_padded) ++ ~c"). The available delimiters are: //, ||, \"\", '', (), [], {}, <>"
+
+    message =
+      ~c"invalid sigil delimiter: \"" ++
+        [h] ++
+        ~c"\" (column " ++
+        Integer.to_charlist(column) ++
+        ~c", code point U+" ++
+        String.to_charlist(char_hex_padded) ++
+        ~c"). The available delimiters are: //, ||, \"\", '', (), [], {}, <>"
+
     token = [?~ | sigil_name] ++ original
     reason = {[line: line, column: start_column], message, token}
     {:error, reason}
