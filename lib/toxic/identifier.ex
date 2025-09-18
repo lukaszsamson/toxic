@@ -30,7 +30,6 @@ defmodule Toxic.Identifier do
             {kind, acc, atom, rest, length, ascii, special}
 
           {:error, reason} ->
-            # TODO: coverage
             {:error, reason}
         end
 

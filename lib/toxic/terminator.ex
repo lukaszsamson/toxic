@@ -4,7 +4,6 @@ defmodule Toxic.Terminator do
 
   def handle_terminator(_rest, _, _, _scope, {:"(", _meta}, [{:alias, _, alias} | _tokens])
       when is_atom(alias) do
-    # TODO: coverage
     {:error, :unexpected_token_after_alias}
     # Reason =
     #   io_lib:format(
@@ -89,7 +88,6 @@ defmodule Toxic.Terminator do
         {:ok, scope(scope, terminators: terminators)}
 
       _expected_end ->
-        # TODO: coverage
         {:error, :unexpected_token_or_reserved}
         #   Meta = [
         #     {line, Startline},
@@ -107,7 +105,6 @@ defmodule Toxic.Terminator do
 
   def check_terminator({:end, meta}, [], _scope) do
     {{line, column}, _, _} = meta
-    # TODO: coverage
     {:error, {[line: line, column: column], ~c"unexpected reserved word: ", ~c"end"}}
     # Suffix =
     #   case lists:keyfind('end', 1, Hints) of
@@ -124,7 +121,7 @@ defmodule Toxic.Terminator do
   def check_terminator({end_token, meta}, [], _scope)
       when end_token in ~w|) ] } >>|a do
     {{line, column}, _, _} = meta
-    {:error, {[line: line, column: column], ~c"unexpected token: ", Atom.to_charlist(end_token)}}
+    {:error, {[line: line, column: column], ~c"unexpected token: ", [~c"#{end_token}"]}}
   end
 
   # TODO: report dead code to elixir

@@ -440,7 +440,6 @@ defmodule Toxic.Tokenizer do
 
     case Toxic.Number.tokenize_number(t, [h], 1, false) do
       {:error, reason, original} ->
-        # TODO: coverage
         {:error, {[line: line, column: column], reason, original}}
 
       {[i | rest], number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
@@ -468,7 +467,6 @@ defmodule Toxic.Tokenizer do
               _ -> ~c"number"
             end
 
-          # TODO: coverage
           msg =
             ~c"invalid character \"" ++
               char_str ++
@@ -663,8 +661,7 @@ defmodule Toxic.Tokenizer do
         )
 
       :empty when cursor_completion == false ->
-        # TODO: coverage
-        {:error, {{line, column}, "unexpected token: ", string}}
+        {:error, {[line: line, column: column], ~c"unexpected token: ", string}}
 
       :empty ->
         # TODO: cursor completion
@@ -694,9 +691,7 @@ defmodule Toxic.Tokenizer do
       # )
 
       {:error, reason} ->
-        # TODO: coverage
         {:error, reason}
-        # error(Reason, string, original_scope, tokens)
     end
   end
 

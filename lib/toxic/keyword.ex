@@ -8,10 +8,12 @@ defmodule Toxic.Keyword do
       {:ok, list} ->
         {_, check} = List.last(list)
 
-        {_, rest, line, column, scope} =
-          handle_terminator(rest, line, column + length, scope, check, tokens)
-
-        {list, rest, line, column, scope}
+        case handle_terminator(rest, line, column + length, scope, check, tokens) do
+          {:error, reason} ->
+            {:error, reason}
+          {_, rest, line, column, scope} ->
+            {list, rest, line, column, scope}
+        end
 
       {:error, reason} ->
         {:error, reason}
