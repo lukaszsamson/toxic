@@ -277,7 +277,7 @@ linear_to_legacy([{atom_safe_end, MetaEnd, Delim} | T], Out, [{atom_safe, MetaSt
       linear_to_legacy(T, [Tok | Out], Stack)
   end;
 
-linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -286,8 +286,8 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
     [] ->
-      % TODO: WTF? why not start meta + 2
-      {'', {1, 3}}
+      {EndPos, _, _} = EndMeta,
+      {'', EndPos}
   end,
   {Line, Column} = ContentEnd,
   ClosingQuotePos = {Line, Column + 1},
@@ -302,7 +302,7 @@ linear_to_legacy([{quoted_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_i
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_paren_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -311,8 +311,8 @@ linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{qu
       ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
     [] ->
-      % TODO: WTF? why not start meta + 2
-      {'', {1, 3}}
+      {EndPos, _, _} = EndMeta,
+      {'', EndPos}
   end,
   {Line, Column} = ContentEnd,
   ClosingQuotePos = {Line, Column + 1},
@@ -327,7 +327,7 @@ linear_to_legacy([{quoted_paren_identifier_end, _EndMeta, Delim} | T], Out, [{qu
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_bracket_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -336,8 +336,8 @@ linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{
       ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
     [] ->
-      % TODO: WTF? why not start meta + 2
-      {'', {1, 3}}
+      {EndPos, _, _} = EndMeta,
+      {'', EndPos}
   end,
   {Line, Column} = ContentEnd,
   ClosingQuotePos = {Line, Column + 1},
@@ -352,7 +352,7 @@ linear_to_legacy([{quoted_bracket_identifier_end, _EndMeta, Delim} | T], Out, [{
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_do_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -361,8 +361,8 @@ linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quote
       ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
     [] ->
-      % TODO: WTF? why not start meta + 2
-      {'', {1, 4}}
+      {EndPos, _, _} = EndMeta,
+      {'', EndPos}
   end,
   {Line, Column} = ContentEnd,
   ClosingQuotePos = {Line, Column + 1},
@@ -377,7 +377,7 @@ linear_to_legacy([{quoted_do_identifier_end, _EndMeta, Delim} | T], Out, [{quote
       linear_to_legacy(T, [DoIdTok | Out], Stack)
   end;
 
-linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
+linear_to_legacy([{quoted_op_identifier_end, EndMeta, Delim} | T], Out, [{quoted_identifier, StartMeta, _Delim2, PartsRev} | Stack]) ->
   Parts = lists:reverse(PartsRev),
   {Atom, ContentEnd} = case Parts of
     [{string_fragment, FragMeta, Content}] ->
@@ -386,8 +386,8 @@ linear_to_legacy([{quoted_op_identifier_end, _EndMeta, Delim} | T], Out, [{quote
       ContentEndPos = {FEL, FEC},
       {AtomVal, ContentEndPos};
     [] ->
-      % TODO: WTF? why not start meta + 2
-      {'', {1, 4}}
+      {EndPos, _, _} = EndMeta,
+      {'', EndPos}
   end,
   {Line, Column} = ContentEnd,
   ClosingQuotePos = {Line, Column + 1},
