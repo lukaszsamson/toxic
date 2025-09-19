@@ -18,14 +18,14 @@ defmodule ToxicTest do
 
     toxic_tokens_with_ranges =
       if not linearize do
-        :toxic_tokenizer.collapse_linear_ranges(toxic_tokens_with_ranges_orig |> Enum.reverse())
+        Toxic.Legacy.collapse_linear_ranges(toxic_tokens_with_ranges_orig |> Enum.reverse())
       else
         toxic_tokens_with_ranges_orig
       end
 
     if Keyword.get(opts, :must_match_elixir, true) do
       # Convert back to legacy format for comparison
-      toxic_tokens = :toxic_tokenizer.ranges_to_legacy(toxic_tokens_with_ranges)
+      toxic_tokens = Toxic.Legacy.ranges_to_legacy(toxic_tokens_with_ranges)
 
       {:ok, _, _, _, elixir_tokens, _remaining} =
         :elixir_tokenizer.tokenize(charlist, 1, 1,
@@ -4945,7 +4945,7 @@ defmodule ToxicTest do
       elixir_tokens_reversed = Enum.reverse(elixir_tokens)
 
       IO.puts("\n=== TOXIC TOKENS ===")
-      toxic_legacy = :toxic_tokenizer.ranges_to_legacy(toxic_tokens)
+      toxic_legacy = Toxic.Legacy.ranges_to_legacy(toxic_tokens)
       IO.inspect(toxic_legacy, limit: :infinity)
 
       IO.puts("\n=== ELIXIR TOKENS ===")
@@ -4991,7 +4991,7 @@ defmodule ToxicTest do
       """
 
       {:ok, toks, ""} = tokenize(code)
-      legacy = :toxic_tokenizer.ranges_to_legacy(toks)
+      legacy = Toxic.Legacy.ranges_to_legacy(toks)
       # Ensure there is no standalone EOL token before when_op
       idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
       prev = Enum.at(legacy, idx - 1)
@@ -5007,7 +5007,7 @@ defmodule ToxicTest do
       """
 
       {:ok, toks, ""} = tokenize(code)
-      legacy = :toxic_tokenizer.ranges_to_legacy(toks)
+      legacy = Toxic.Legacy.ranges_to_legacy(toks)
       idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
       prev = Enum.at(legacy, idx - 1)
       refute match?({:eol, _}, prev)
