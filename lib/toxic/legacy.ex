@@ -234,193 +234,114 @@ defmodule Toxic.Legacy do
     end
   end
 
-  defp linear_to_legacy(
-         [{:bin_string_end, meta_end, _delim1} | rest],
-         out,
-         [{:bin_string, meta_start, _delim2, parts_rev} | stack]
-       ) do
-    cm = combine_range_meta(meta_start, meta_end)
+  for string_type <- ~w(bin_string list_string)a do
+    end_token = :"#{string_type}_end"
 
-    parts =
-      case Enum.reverse(parts_rev) do
-        [] -> [<<>>]
-        rev_parts -> rev_parts
+    defp linear_to_legacy(
+           [{unquote(end_token), meta_end, _delim1} | rest],
+           out,
+           [{unquote(string_type), meta_start, _delim2, parts_rev} | stack]
+         ) do
+      cm = combine_range_meta(meta_start, meta_end)
+
+      parts =
+        case Enum.reverse(parts_rev) do
+          [] -> [<<>>]
+          rev_parts -> rev_parts
+        end
+
+      token = {unquote(string_type), cm, unescape_binary_parts(parts)}
+
+      case stack do
+        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
+          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
+
+        _ ->
+          linear_to_legacy(rest, [token | out], stack)
       end
-
-    token = {:bin_string, cm, unescape_binary_parts(parts)}
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
     end
   end
 
-  defp linear_to_legacy(
-         [{:list_string_end, meta_end, _delim1} | rest],
-         out,
-         [{:list_string, meta_start, _delim2, parts_rev} | stack]
-       ) do
-    cm = combine_range_meta(meta_start, meta_end)
+  for heredoc_type <- ~w(bin_heredoc list_heredoc)a do
+    end_token = :"#{heredoc_type}_end"
 
-    parts =
-      case Enum.reverse(parts_rev) do
-        [] -> [<<>>]
-        rev_parts -> rev_parts
+    defp linear_to_legacy(
+           [{unquote(end_token), meta_end, _delim1, indent} | rest],
+           out,
+           [{unquote(heredoc_type), meta_start, _delim2, parts_rev, _} | stack]
+         ) do
+      cm = combine_range_meta(meta_start, meta_end)
+      trimmed = strip_heredoc_indentation(Enum.reverse(parts_rev), indent)
+      token = {unquote(heredoc_type), cm, indent, unescape_binary_parts(trimmed)}
+
+      case stack do
+        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
+          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
+
+        _ ->
+          linear_to_legacy(rest, [token | out], stack)
       end
-
-    token = {:list_string, cm, unescape_binary_parts(parts)}
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
     end
   end
 
-  defp linear_to_legacy(
-         [{:bin_heredoc_end, meta_end, _delim1, indent} | rest],
-         out,
-         [{:bin_heredoc, meta_start, _delim2, parts_rev, _} | stack]
-       ) do
-    cm = combine_range_meta(meta_start, meta_end)
-    trimmed = strip_heredoc_indentation(Enum.reverse(parts_rev), indent)
-    token = {:bin_heredoc, cm, indent, unescape_binary_parts(trimmed)}
+  for kw_identifier_type <- ~w(kw_identifier_unsafe kw_identifier_safe)a do
+    end_token = :"#{kw_identifier_type}_end"
 
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
+    defp linear_to_legacy(
+           [{unquote(end_token), meta_end, delim} | rest],
+           out,
+           [{kind, meta_start, _delim2, parts_rev} | stack]
+         )
+         when kind in [:bin_string, :list_string] do
+      parts = Enum.reverse(parts_rev)
+      {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
+      cm = {{sl, sc}, {el, ec}, delim}
+      final = unescape_binary_parts(parts)
 
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
-    end
-  end
+      token =
+        case final do
+          [bin] when is_binary(bin) -> {:kw_identifier, cm, String.to_atom(bin)}
+          [] -> {:kw_identifier, cm, :""}
+          _ -> {unquote(kw_identifier_type), cm, final}
+        end
 
-  defp linear_to_legacy(
-         [{:list_heredoc_end, meta_end, _delim1, indent} | rest],
-         out,
-         [{:list_heredoc, meta_start, _delim2, parts_rev, _} | stack]
-       ) do
-    cm = combine_range_meta(meta_start, meta_end)
-    trimmed = strip_heredoc_indentation(Enum.reverse(parts_rev), indent)
-    token = {:list_heredoc, cm, indent, unescape_binary_parts(trimmed)}
+      case stack do
+        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
+          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
 
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
-    end
-  end
-
-  defp linear_to_legacy(
-         [{:kw_identifier_unsafe_end, meta_end, delim} | rest],
-         out,
-         [{kind, meta_start, _delim2, parts_rev} | stack]
-       )
-       when kind in [:bin_string, :list_string] do
-    parts = Enum.reverse(parts_rev)
-    {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
-    cm = {{sl, sc}, {el, ec}, delim}
-    final = unescape_binary_parts(parts)
-
-    token =
-      case final do
-        [bin] when is_binary(bin) -> {:kw_identifier, cm, :erlang.binary_to_atom(bin, :utf8)}
-        [] -> {:kw_identifier, cm, :""}
-        _ -> {:kw_identifier_unsafe, cm, final}
+        _ ->
+          linear_to_legacy(rest, [token | out], stack)
       end
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
     end
   end
 
-  defp linear_to_legacy(
-         [{:kw_identifier_safe_end, meta_end, delim} | rest],
-         out,
-         [{kind, meta_start, _delim2, parts_rev} | stack]
-       )
-       when kind in [:bin_string, :list_string] do
-    parts = Enum.reverse(parts_rev)
-    {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
-    cm = {{sl, sc}, {el, ec}, delim}
-    final = unescape_binary_parts(parts)
+  for atom_type <- ~w(atom_unsafe atom_safe)a do
+    end_token = :"#{atom_type}_end"
 
-    token =
-      case final do
-        [bin] when is_binary(bin) -> {:kw_identifier, cm, :erlang.binary_to_atom(bin, :utf8)}
-        [] -> {:kw_identifier, cm, :""}
-        _ -> {:kw_identifier_safe, cm, final}
+    defp linear_to_legacy(
+           [{unquote(end_token), meta_end, delim} | rest],
+           out,
+           [{unquote(atom_type), meta_start, _delim2, parts_rev} | stack]
+         ) do
+      parts = Enum.reverse(parts_rev)
+      {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
+      cm = {{sl, sc}, {el, ec}, delim}
+      final = unescape_binary_parts(parts)
+
+      token =
+        case final do
+          [bin] when is_binary(bin) -> {:atom_quoted, cm, String.to_atom(bin)}
+          [] -> {:atom_quoted, cm, :""}
+          _ -> {unquote(atom_type), cm, final}
+        end
+
+      case stack do
+        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
+          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
+
+        _ ->
+          linear_to_legacy(rest, [token | out], stack)
       end
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
-    end
-  end
-
-  defp linear_to_legacy(
-         [{:atom_unsafe_end, meta_end, delim} | rest],
-         out,
-         [{:atom_unsafe, meta_start, _delim2, parts_rev} | stack]
-       ) do
-    parts = Enum.reverse(parts_rev)
-    {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
-    cm = {{sl, sc}, {el, ec}, delim}
-    final = unescape_binary_parts(parts)
-
-    token =
-      case final do
-        [bin] when is_binary(bin) -> {:atom_quoted, cm, :erlang.binary_to_atom(bin, :utf8)}
-        [] -> {:atom_quoted, cm, :""}
-        _ -> {:atom_unsafe, cm, final}
-      end
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
-    end
-  end
-
-  defp linear_to_legacy(
-         [{:atom_safe_end, meta_end, delim} | rest],
-         out,
-         [{:atom_safe, meta_start, _delim2, parts_rev} | stack]
-       ) do
-    parts = Enum.reverse(parts_rev)
-    {{sl, sc}, {el, ec}, _} = combine_range_meta(meta_start, meta_end)
-    cm = {{sl, sc}, {el, ec}, delim}
-    final = unescape_binary_parts(parts)
-
-    token =
-      case final do
-        [bin] when is_binary(bin) -> {:atom_quoted, cm, :erlang.binary_to_atom(bin, :utf8)}
-        [] -> {:atom_quoted, cm, :""}
-        _ -> {:atom_safe, cm, final}
-      end
-
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
     end
   end
 
@@ -441,72 +362,25 @@ defmodule Toxic.Legacy do
     )
   end
 
-  defp linear_to_legacy(
-         [{:quoted_paren_identifier_end, end_meta, delim} | rest],
-         out,
-         [{:quoted_identifier, start_meta, _delim2, parts_rev} | stack]
-       ) do
-    finalize_quoted_identifier(
-      rest,
-      out,
-      stack,
-      start_meta,
-      end_meta,
-      delim,
-      parts_rev,
-      :paren_identifier
-    )
-  end
+  for identifier_type <- ~w(paren bracket do op) do
+    end_token_type = :"quoted_#{identifier_type}_identifier_end"
 
-  defp linear_to_legacy(
-         [{:quoted_bracket_identifier_end, end_meta, delim} | rest],
-         out,
-         [{:quoted_identifier, start_meta, _delim2, parts_rev} | stack]
-       ) do
-    finalize_quoted_identifier(
-      rest,
-      out,
-      stack,
-      start_meta,
-      end_meta,
-      delim,
-      parts_rev,
-      :bracket_identifier
-    )
-  end
-
-  defp linear_to_legacy(
-         [{:quoted_do_identifier_end, end_meta, delim} | rest],
-         out,
-         [{:quoted_identifier, start_meta, _delim2, parts_rev} | stack]
-       ) do
-    finalize_quoted_identifier(
-      rest,
-      out,
-      stack,
-      start_meta,
-      end_meta,
-      delim,
-      parts_rev,
-      :do_identifier
-    )
-  end
-
-  defp linear_to_legacy(
-         [{:quoted_op_identifier_end, end_meta, delim} | rest],
-         out,
-         [{:quoted_identifier, start_meta, _delim2, parts_rev} | stack]
-       ) do
-    finalize_quoted_identifier(
-      rest,
-      out,
-      stack,
-      start_meta,
-      end_meta,
-      delim,
-      parts_rev,
-      :op_identifier
-    )
+    defp linear_to_legacy(
+           [{unquote(end_token_type), end_meta, delim} | rest],
+           out,
+           [{:quoted_identifier, start_meta, _delim2, parts_rev} | stack]
+         ) do
+      finalize_quoted_identifier(
+        rest,
+        out,
+        stack,
+        start_meta,
+        end_meta,
+        delim,
+        parts_rev,
+        :"#{unquote(identifier_type)}_identifier"
+      )
+    end
   end
 
   defp linear_to_legacy([token | rest], out, stack) do
@@ -530,7 +404,7 @@ defmodule Toxic.Legacy do
     {atom, content_end} =
       case parts do
         [{:string_fragment, frag_meta, content}] ->
-          atom = :erlang.binary_to_atom(unescape_bin(content), :utf8)
+          atom = String.to_atom(unescape_bin(content))
           {{_, _}, {fel, fec}, _} = frag_meta
           {atom, {fel, fec}}
 
@@ -587,7 +461,7 @@ defmodule Toxic.Legacy do
   end
 
   defp strip_bin_indent(bin, indent, at_line_start, spaces_left) when is_binary(bin) do
-    strip_bin_indent(:erlang.binary_to_list(bin), indent, at_line_start, spaces_left, [])
+    strip_bin_indent(String.to_charlist(bin), indent, at_line_start, spaces_left, [])
   end
 
   defp strip_bin_indent([?\n | rest], indent, _at_line_start, _spaces_left, acc) do
@@ -604,7 +478,7 @@ defmodule Toxic.Legacy do
   end
 
   defp strip_bin_indent([], _indent, at_line_start, spaces_left, acc) do
-    {acc |> Enum.reverse() |> :erlang.list_to_binary(), at_line_start, spaces_left}
+    {acc |> Enum.reverse() |> List.to_string(), at_line_start, spaces_left}
   end
 
   defp unescape_binary_parts(parts) do
