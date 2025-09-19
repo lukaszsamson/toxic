@@ -452,7 +452,7 @@ unescape_binary_parts(Parts) ->
   lists:map(Fun, Parts).
 
 unescape_bin(Bin) ->
-  case toxic_interpolation:unescape_tokens([Bin]) of
+  case 'Elixir.Toxic.Unescape':unescape_tokens([Bin]) of
     {ok, [Un]} -> Un;
     _ -> Bin
   end.
