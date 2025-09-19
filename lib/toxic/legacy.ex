@@ -91,36 +91,17 @@ defmodule Toxic.Legacy do
     Enum.reverse(out)
   end
 
-  defp linear_to_legacy([{:bin_string_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:bin_string, meta, delim, []} | stack])
-  end
+  for token <-
+        ~w(bin_string list_string bin_heredoc list_heredoc quoted_identifier atom_safe atom_unsafe)a do
+    start_token = :"#{token}_start"
 
-  defp linear_to_legacy([{:list_string_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:list_string, meta, delim, []} | stack])
-  end
-
-  defp linear_to_legacy([{:bin_heredoc_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:bin_heredoc, meta, delim, [], :undefined} | stack])
-  end
-
-  defp linear_to_legacy([{:list_heredoc_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:list_heredoc, meta, delim, [], :undefined} | stack])
+    defp linear_to_legacy([{unquote(start_token), meta, delim} | rest], out, stack) do
+      linear_to_legacy(rest, out, [{unquote(token), meta, delim, []} | stack])
+    end
   end
 
   defp linear_to_legacy([{:sigil_start, meta, sigil_atom, delim} | rest], out, stack) do
     linear_to_legacy(rest, out, [{:sigil, meta, sigil_atom, delim, [], nil, :pending_end} | stack])
-  end
-
-  defp linear_to_legacy([{:quoted_identifier_start, start_meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:quoted_identifier, start_meta, delim, []} | stack])
-  end
-
-  defp linear_to_legacy([{:atom_unsafe_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:atom_unsafe, meta, delim, []} | stack])
-  end
-
-  defp linear_to_legacy([{:atom_safe_start, meta, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:atom_safe, meta, delim, []} | stack])
   end
 
   defp linear_to_legacy([{:string_fragment, frag_meta, bin} | rest], out, [
@@ -135,13 +116,6 @@ defmodule Toxic.Legacy do
          {kind, meta, delim, parts} | stack
        ]) do
     linear_to_legacy(rest, out, [{kind, meta, delim, [bin | parts]} | stack])
-  end
-
-  defp linear_to_legacy([{:string_fragment, _frag_meta, bin} | rest], out, [
-         {kind, meta, delim, parts, extra} | stack
-       ])
-       when kind in [:bin_heredoc, :list_heredoc] do
-    linear_to_legacy(rest, out, [{kind, meta, delim, [bin | parts], extra} | stack])
   end
 
   defp linear_to_legacy(
@@ -268,7 +242,7 @@ defmodule Toxic.Legacy do
     defp linear_to_legacy(
            [{unquote(end_token), meta_end, _delim1, indent} | rest],
            out,
-           [{unquote(heredoc_type), meta_start, _delim2, parts_rev, _} | stack]
+           [{unquote(heredoc_type), meta_start, _delim2, parts_rev} | stack]
          ) do
       cm = combine_range_meta(meta_start, meta_end)
       trimmed = strip_heredoc_indentation(Enum.reverse(parts_rev), indent)
