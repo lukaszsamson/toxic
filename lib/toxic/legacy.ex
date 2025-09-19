@@ -104,14 +104,6 @@ defmodule Toxic.Legacy do
     linear_to_legacy(rest, out, [{:sigil, meta, sigil_atom, delim, [], nil, :pending_end} | stack])
   end
 
-  defp linear_to_legacy([{:string_fragment, frag_meta, bin} | rest], out, [
-         {:quoted_identifier, meta, delim, parts} | stack
-       ]) do
-    linear_to_legacy(rest, out, [
-      {:quoted_identifier, meta, delim, [{:string_fragment, frag_meta, bin} | parts]} | stack
-    ])
-  end
-
   defp linear_to_legacy([{:string_fragment, _frag_meta, bin} | rest], out, [
          {kind, meta, delim, parts} | stack
        ]) do
@@ -144,9 +136,6 @@ defmodule Toxic.Legacy do
     case stack_rest do
       [{kind, meta, delim, parts} | stack] ->
         linear_to_legacy(rest, out, [{kind, meta, delim, [part | parts]} | stack])
-
-      [{kind, meta, delim, parts, extra} | stack] when kind in [:bin_heredoc, :list_heredoc] ->
-        linear_to_legacy(rest, out, [{kind, meta, delim, [part | parts], extra} | stack])
 
       [{:sigil, meta, sigil_atom, delim, parts, modifiers, :pending_end} | stack] ->
         linear_to_legacy(rest, out, [
@@ -375,19 +364,16 @@ defmodule Toxic.Legacy do
        ) do
     parts = Enum.reverse(parts_rev)
 
-    {atom, content_end} =
+    atom =
       case parts do
-        [{:string_fragment, frag_meta, content}] ->
-          atom = String.to_atom(unescape_bin(content))
-          {{_, _}, {fel, fec}, _} = frag_meta
-          {atom, {fel, fec}}
+        [content] ->
+          String.to_atom(unescape_bin(content))
 
         [] ->
-          {{line, column}, _end_pos, _extra} = end_meta
-          {:"", {line, column}}
+          :""
       end
 
-    {line, column} = content_end
+    {{line, column}, _end_pos, _extra} = end_meta
     closing_quote_pos = {line, column + 1}
     {{sl, sc}, _send, _sx} = start_meta
     identifier_meta = {{sl, sc}, closing_quote_pos, delim}
