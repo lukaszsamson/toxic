@@ -86,7 +86,7 @@ defmodule Toxic.Util do
   end
 
   def unescape_tokens(tokens, _line, _column, scope(unescape: true)) do
-    case :toxic_interpolation.unescape_tokens(tokens) do
+    case Toxic.Unescape.unescape_tokens(tokens) do
       {:ok, result} ->
         {:ok, result}
 
@@ -108,7 +108,21 @@ defmodule Toxic.Util do
 
   defp tokens_to_binary(tokens) do
     for token <- tokens do
-      if is_list(token), do: :toxic_utils.characters_to_binary(token), else: token
+      if is_list(token), do: characters_to_binary(token), else: token
     end
+  end
+
+  def characters_to_binary(data) when is_binary(data), do: data
+
+  def characters_to_binary(data) do
+    case :unicode.characters_to_binary(data) do
+      result when is_binary(result) -> result
+      {:error, encoded, rest} -> conversion_error(:invalid, encoded, rest)
+      {:incomplete, encoded, rest} -> conversion_error(:incomplete, encoded, rest)
+    end
+  end
+
+  defp conversion_error(kind, encoded, rest) do
+    raise UnicodeConversionError.exception(encoded: encoded, rest: rest, kind: kind)
   end
 end

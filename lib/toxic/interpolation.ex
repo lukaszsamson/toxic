@@ -22,7 +22,7 @@ defmodule Toxic.Interpolation do
         _last
       ) do
     {:fragment, meta(start_line, start_column, line, column, nil),
-     :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [], line, column, scope}
+     Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [], line, column, scope}
   end
 
   # This cannot happen
@@ -52,7 +52,7 @@ defmodule Toxic.Interpolation do
         last
       ) do
     {:fragment, meta(start_line, start_column, line, column, nil),
-     :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [last | rest], line, column, scope}
+     Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [last | rest], line, column, scope}
   end
 
   def tokenize_single(
@@ -231,7 +231,7 @@ defmodule Toxic.Interpolation do
         true,
         _last
       ) do
-    content = :toxic_utils.characters_to_binary(Enum.reverse(buffer))
+    content = Toxic.Util.characters_to_binary(Enum.reverse(buffer))
 
     {:fragment, meta(start_line, start_column, line, column, nil), content, [?#, ?{ | rest], line,
      column, scope}
@@ -357,7 +357,7 @@ defmodule Toxic.Interpolation do
     case strip_horizontal_space(rest, buffer, 1) do
       {[^h, ^h, ^h | new_rest], _new_buffer, column} ->
         {:fragment, meta(start_line, start_column, line + 1, 1, nil),
-         :toxic_utils.characters_to_binary(Enum.reverse(buffer)), [h, h, h | new_rest], line + 1,
+         Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [h, h, h | new_rest], line + 1,
          column, scope}
 
       {new_rest, new_buffer, column} ->

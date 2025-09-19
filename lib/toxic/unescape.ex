@@ -12,7 +12,7 @@ defmodule Toxic.Unescape do
   end
 
   defp unescape_token(token, map_fun) when is_list(token) do
-    unescape_chars(:toxic_utils.characters_to_binary(token), map_fun)
+    unescape_chars(Toxic.Util.characters_to_binary(token), map_fun)
   end
 
   defp unescape_token(token, map_fun) when is_binary(token) do
