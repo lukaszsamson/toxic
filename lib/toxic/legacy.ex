@@ -170,30 +170,12 @@ defmodule Toxic.Legacy do
         cm0 = combine_range_meta(meta, end_meta)
         cm = combine_range_meta(cm0, modifiers_meta)
         token = {:sigil, cm, sigil_atom, parts, modifiers, indent, delim}
-
-        case stack do
-          [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-            linear_to_legacy(tail, out, [
-              {:interpol, interp_meta, [token | inner_rev]} | stack_rest
-            ])
-
-          _ ->
-            linear_to_legacy(tail, [token | out], stack)
-        end
+        emit_or_push_token(tail, out, stack, token)
 
       _ ->
         cm = combine_range_meta(meta, end_meta)
         token = {:sigil, cm, sigil_atom, parts, [], indent, delim}
-
-        case stack do
-          [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-            linear_to_legacy(rest, out, [
-              {:interpol, interp_meta, [token | inner_rev]} | stack_rest
-            ])
-
-          _ ->
-            linear_to_legacy(rest, [token | out], stack)
-        end
+        emit_or_push_token(rest, out, stack, token)
     end
   end
 
@@ -215,13 +197,7 @@ defmodule Toxic.Legacy do
 
       token = {unquote(string_type), cm, unescape_binary_parts(parts)}
 
-      case stack do
-        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-        _ ->
-          linear_to_legacy(rest, [token | out], stack)
-      end
+      emit_or_push_token(rest, out, stack, token)
     end
   end
 
@@ -237,13 +213,7 @@ defmodule Toxic.Legacy do
       trimmed = strip_heredoc_indentation(Enum.reverse(parts_rev), indent)
       token = {unquote(heredoc_type), cm, indent, unescape_binary_parts(trimmed)}
 
-      case stack do
-        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-        _ ->
-          linear_to_legacy(rest, [token | out], stack)
-      end
+      emit_or_push_token(rest, out, stack, token)
     end
   end
 
@@ -268,13 +238,7 @@ defmodule Toxic.Legacy do
           _ -> {unquote(kw_identifier_type), cm, final}
         end
 
-      case stack do
-        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-        _ ->
-          linear_to_legacy(rest, [token | out], stack)
-      end
+      emit_or_push_token(rest, out, stack, token)
     end
   end
 
@@ -298,13 +262,7 @@ defmodule Toxic.Legacy do
           _ -> {unquote(atom_type), cm, final}
         end
 
-      case stack do
-        [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-          linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
-
-        _ ->
-          linear_to_legacy(rest, [token | out], stack)
-      end
+      emit_or_push_token(rest, out, stack, token)
     end
   end
 
@@ -379,13 +337,22 @@ defmodule Toxic.Legacy do
     identifier_meta = {{sl, sc}, closing_quote_pos, delim}
     token = {token_type, identifier_meta, atom}
 
-    case stack do
-      [{:interpol, interp_meta, inner_rev} | stack_rest] ->
-        linear_to_legacy(rest, out, [{:interpol, interp_meta, [token | inner_rev]} | stack_rest])
+    emit_or_push_token(rest, out, stack, token)
+  end
 
-      _ ->
-        linear_to_legacy(rest, [token | out], stack)
-    end
+  defp emit_or_push_token(
+         remainder,
+         out,
+         [{:interpol, interp_meta, inner_rev} | stack_rest],
+         token
+       ) do
+    linear_to_legacy(remainder, out, [
+      {:interpol, interp_meta, [token | inner_rev]} | stack_rest
+    ])
+  end
+
+  defp emit_or_push_token(remainder, out, stack, token) do
+    linear_to_legacy(remainder, [token | out], stack)
   end
 
   defp combine_range_meta({{sl, sc}, _send, _sx}, {_estart, {el, ec}, _ex}),
