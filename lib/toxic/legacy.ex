@@ -101,7 +101,7 @@ defmodule Toxic.Legacy do
   end
 
   defp linear_to_legacy([{:sigil_start, meta, sigil_atom, delim} | rest], out, stack) do
-    linear_to_legacy(rest, out, [{:sigil, meta, sigil_atom, delim, [], nil, :pending_end} | stack])
+    linear_to_legacy(rest, out, [{:sigil, meta, sigil_atom, delim, []} | stack])
   end
 
   defp linear_to_legacy([{:string_fragment, _frag_meta, bin} | rest], out, [
@@ -113,11 +113,11 @@ defmodule Toxic.Legacy do
   defp linear_to_legacy(
          [{:string_fragment, _frag_meta, bin} | rest],
          out,
-         [{:sigil, meta, sigil_atom, delim, parts_rev, modifiers, :pending_end} | stack]
+         [{:sigil, meta, sigil_atom, delim, parts_rev} | stack]
        )
        when is_binary(bin) do
     linear_to_legacy(rest, out, [
-      {:sigil, meta, sigil_atom, delim, [bin | parts_rev], modifiers, :pending_end} | stack
+      {:sigil, meta, sigil_atom, delim, [bin | parts_rev]} | stack
     ])
   end
 
@@ -137,9 +137,9 @@ defmodule Toxic.Legacy do
       [{kind, meta, delim, parts} | stack] ->
         linear_to_legacy(rest, out, [{kind, meta, delim, [part | parts]} | stack])
 
-      [{:sigil, meta, sigil_atom, delim, parts, modifiers, :pending_end} | stack] ->
+      [{:sigil, meta, sigil_atom, delim, parts} | stack] ->
         linear_to_legacy(rest, out, [
-          {:sigil, meta, sigil_atom, delim, [part | parts], modifiers, :pending_end} | stack
+          {:sigil, meta, sigil_atom, delim, [part | parts]} | stack
         ])
     end
   end
@@ -151,7 +151,7 @@ defmodule Toxic.Legacy do
   defp linear_to_legacy(
          [{:sigil_end, end_meta, _delim, indent} | rest],
          out,
-         [{:sigil, meta, sigil_atom, delim, parts_rev, _mods, :pending_end} | stack]
+         [{:sigil, meta, sigil_atom, delim, parts_rev} | stack]
        ) do
     rev_parts =
       case Enum.reverse(parts_rev) do
