@@ -27,7 +27,8 @@ defmodule Toxic.Driver do
             list(:normal | {:interp, interp_kind(), boolean(), interp_delim(), terminators()}),
           deferrals: list(),
           output: list(),
-          recent_token: any()
+          recent_token: any(),
+          scope: Toxic.Scope.scope()
         }
 
   def new(opts \\ []) do
