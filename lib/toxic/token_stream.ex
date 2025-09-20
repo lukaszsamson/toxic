@@ -588,7 +588,7 @@ defmodule Toxic.TokenStream do
         driver: new_driver,
         source: source,
         eof: stream_eof,
-        error: error || stream.error
+        error: stream.error || error
     }
   end
 

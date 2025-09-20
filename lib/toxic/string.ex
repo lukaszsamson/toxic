@@ -18,7 +18,11 @@ defmodule Toxic.String do
          scope}
 
       :error ->
-        {:error, :invalid_char_after_heredoc_open}
+        message =
+          ~c"heredoc allows only whitespace characters followed by a new line after opening "
+
+        reason = {[line: line, column: column + 3], message, [h, h, h]}
+        {:error, reason}
 
         # Message = "heredoc allows only whitespace characters followed by a new line after opening ",
         # error({?LOC(Line, Column + 3), io_lib:format(Message, []), [H, H, H]}, [H, H, H] ++ T, Scope, _Tokens)

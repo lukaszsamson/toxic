@@ -105,9 +105,8 @@ defmodule Toxic.Sigil do
         message =
           ~c"heredoc allows only whitespace characters followed by a new line after opening "
 
-        start_column = column - length(sigil_name) - 1
-        sigil_name_str = [?~ | sigil_name]
-        reason = {[line: line, column: start_column], message, sigil_name_str}
+        error_column = column + 3
+        reason = {[line: line, column: error_column], message, [h, h, h]}
         {:error, reason}
 
         # error({make_meta_len(line, column - 1 - length(sigil_name), 1, nil, scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)

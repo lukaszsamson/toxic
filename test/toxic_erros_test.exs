@@ -149,14 +149,7 @@ defmodule ToxicErrorsTest do
 
   # Tokenizer errors - Strings/Heredocs
   test "invalid char after string heredoc open" do
-    tokenize_and_compare_error("\"\"\"foo\"\"\"",
-      assert: fn elixir_reason, toxic_reason ->
-        assert toxic_reason == :invalid_char_after_heredoc_open
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "heredoc allows only whitespace"
-        assert token == "\"\"\""
-      end
-    )
+    tokenize_and_compare_error("\"\"\"foo\"\"\"")
   end
 
   # Tokenizer errors - Number validation
@@ -410,6 +403,64 @@ defmodule ToxicErrorsTest do
         assert token == "\\u202E"
       end
     )
+  end
+
+  test "interpolation in quoted identifier" do
+    tokenize_and_compare_error(~S|foo."bar#{baz}"()|)
+  end
+
+  test "missing string terminator" do
+    tokenize_and_compare_error("\"")
+    tokenize_and_compare_error("'")
+  end
+
+  test "missing heredoc terminator" do
+    tokenize_and_compare_error("\"\"\"")
+    tokenize_and_compare_error("\"\"\"\n")
+    tokenize_and_compare_error("'''")
+    tokenize_and_compare_error("'''\n")
+  end
+
+  test "missing quoted atom terminator" do
+    tokenize_and_compare_error(":\"")
+    tokenize_and_compare_error(":'")
+  end
+
+  test "missing quoted identifier terminator" do
+    tokenize_and_compare_error("K.\"")
+    tokenize_and_compare_error("K.'")
+  end
+
+  test "missing sigil terminator" do
+    tokenize_and_compare_error("~s\"")
+    tokenize_and_compare_error("~S\"\"\"")
+  end
+
+  test "missing interpolation terminator" do
+    tokenize_and_compare_error("\"\#{foo")
+  end
+
+  test "missing terminator inside interpolation" do
+    tokenize_and_compare_error("\"\#{foo(}\"")
+    tokenize_and_compare_error("\"\#{foo[}\"")
+  end
+
+  test "missing terminator" do
+    tokenize_and_compare_error("foo(")
+    tokenize_and_compare_error("foo[")
+    tokenize_and_compare_error("(")
+    tokenize_and_compare_error("[")
+    tokenize_and_compare_error("{")
+    tokenize_and_compare_error("<<")
+    tokenize_and_compare_error("a do\n")
+    tokenize_and_compare_error("fn -> ")
+  end
+
+  test "missing invalid character inside interpolation" do
+    tokenize_and_compare_error("\"\#{\r}\"")
+    tokenize_and_compare_error("\"\#{\\}\"")
+    tokenize_and_compare_error("\"\#{\\n}\"")
+    tokenize_and_compare_error("\"\#{;;}\"")
   end
 
   # Ternary errors

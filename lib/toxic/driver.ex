@@ -26,8 +26,8 @@ defmodule Toxic.Driver do
           contexts:
             list(
               :normal
-              | {:interp, interp_kind(), boolean(), interp_delim(), terminators(), pos_integer(),
-                 pos_integer()}
+              | {:interp, interp_kind(), boolean(), interp_delim(), terminators(),
+                 %{line: pos_integer(), column: pos_integer(), token: tuple()}}
             ),
           deferrals: list(),
           output: list(),
@@ -85,15 +85,18 @@ defmodule Toxic.Driver do
   end
 
   def next([], %__MODULE__{deferrals: []} = state) do
-    case pending_context_error(state.contexts) do
+    case pending_error(state) do
       nil ->
         {:eof, state}
 
-      {:missing_terminator, interp_context} ->
-        {:error, missing_terminator_reason(interp_context), [], state}
-
       {:missing_interpolation, interp_context} ->
-        {:error, missing_interpolation_reason(interp_context), [], state}
+        {:error, missing_interpolation_reason(interp_context, state), [], state}
+
+      {:missing_context, interp_context} ->
+        {:error, missing_terminator_reason(interp_context, state), [], state}
+
+      {:missing_scope, entry} ->
+        {:error, missing_scope_terminator_reason(entry, state), [], state}
     end
   end
 
@@ -106,23 +109,65 @@ defmodule Toxic.Driver do
         %__MODULE__{
           contexts: [
             :normal,
-            {:interp, kind, interpolation, delim, parent_terminators, start_line, start_column}
-            | contexts_rest
+            {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info}
+            | _contexts_rest
           ],
-          deferrals: deferrals,
-          scope: scope(terminators: terminators)
+          scope: scope(terminators: [{start_token, _meta, _indent} = entry | _])
         } =
           state
       )
-      when terminators == [] or elem(hd(terminators), 0) != :"{" do
+      when start_token != :"{" do
+    {:error, mismatched_delimiter_reason(entry, :"}", state), rest, state}
+  end
+
+  def next(
+        [?} | rest],
+        %__MODULE__{
+          contexts: [
+            :normal,
+            {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+          ],
+          deferrals: deferrals,
+          scope: scope(terminators: [])
+        } =
+          state
+      ) do
     meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
 
     new_state = %{
       state
       | column: state.column + 1,
-        contexts:
-          [{:interp, kind, interpolation, delim, parent_terminators, start_line, start_column}
-           | contexts_rest],
+        contexts: [
+          {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+        ],
+        output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
+        deferrals: []
+    }
+
+    next(rest, new_state)
+  end
+
+  def next(
+        [?} | rest],
+        %__MODULE__{
+          contexts: [
+            :normal,
+            {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+          ],
+          deferrals: deferrals,
+          scope: scope(terminators: [{start, _meta, _indent} | _])
+        } =
+          state
+      )
+      when start != :"{" do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
+
+    new_state = %{
+      state
+      | column: state.column + 1,
+        contexts: [
+          {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+        ],
         output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
         deferrals: []
     }
@@ -156,8 +201,7 @@ defmodule Toxic.Driver do
         %__MODULE__{
           contexts:
             [
-              {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_line,
-               start_column}
+              {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info}
               | contexts_rest
             ] =
               contexts
@@ -347,7 +391,8 @@ defmodule Toxic.Driver do
 
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
         if kind == :quoted_identifier do
-          {:error, interpolation_in_quoted_identifier_reason(start_line, start_column, delim),
+          {:error,
+           interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim),
            rest, state}
         else
           updated = %{
@@ -510,13 +555,13 @@ defmodule Toxic.Driver do
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope = scope(terminators: terminators)} ->
-        {{start_line, start_column}, _end_pos, _extra} = elem(start_token, 1)
+        start_info = compute_start_info(start_token, delimiter, line, column)
 
-        contexts = [
-          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_line,
-           start_column}
-          | contexts
-        ]
+        contexts =
+          [
+            {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info}
+            | contexts
+          ]
 
         {rest,
          %{
@@ -531,39 +576,199 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp pending_context_error([]), do: nil
-  defp pending_context_error([:normal]), do: nil
+  defp compute_start_info(start_token, delimiter, line, column) do
+    {{_meta_start_line, meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
+      elem(start_token, 1)
 
-  defp pending_context_error([{:interp, _, _, _, _, _, _} = interp | _]) do
-    {:missing_terminator, interp}
+    delimiter_length = delimiter_length(delimiter)
+
+    cond do
+      line == meta_end_line and column - delimiter_length >= 1 ->
+        %{line: meta_end_line, column: column - delimiter_length, token: start_token}
+
+      true ->
+        base_column =
+          if meta_end_column > meta_start_column do
+            meta_end_column - delimiter_length
+          else
+            meta_start_column
+          end
+
+        %{line: meta_end_line, column: max(base_column, 1), token: start_token}
+    end
   end
 
-  defp pending_context_error([:normal, {:interp, _, _, _, _, _, _} = interp | _]) do
-    {:missing_interpolation, interp}
+  defp pending_error(%__MODULE__{contexts: contexts, scope: scope} = _state) do
+    cond do
+      interp = find_missing_interpolation(contexts) ->
+        {:missing_interpolation, interp}
+
+      context = find_missing_context(contexts) ->
+        {:missing_context, context}
+
+      entry = find_missing_scope_terminator(scope) ->
+        {:missing_scope, entry}
+
+      true ->
+        nil
+    end
   end
 
-  defp pending_context_error([_ | rest]), do: pending_context_error(rest)
+  defp find_missing_interpolation([:normal, {:interp, _, _, _, _, _} = interp | _]), do: interp
+  defp find_missing_interpolation([_ | rest]), do: find_missing_interpolation(rest)
+  defp find_missing_interpolation(_), do: nil
+
+  defp find_missing_context([{:interp, _, _, _, _, _} = interp | _]), do: interp
+  defp find_missing_context([_ | rest]), do: find_missing_context(rest)
+  defp find_missing_context(_), do: nil
+
+  defp find_missing_scope_terminator(scope(terminators: :none)), do: nil
+  defp find_missing_scope_terminator(scope(terminators: [])), do: nil
+  defp find_missing_scope_terminator(scope(terminators: [entry | _])), do: entry
 
   defp missing_terminator_reason(
-         {:interp, _kind, _allowed?, delim, _parents, start_line, start_column}
+         {:interp, kind, _allowed?, delim, _parents,
+          %{line: start_line, column: start_column} =
+            start_info},
+         %__MODULE__{line: end_line, column: end_column}
        ) do
     delim_chars = delimiter_charlist(delim)
-    delimiter = delimiter_atom(delim_chars)
-    position = string_position(delimiter, start_line, start_column, length(delim_chars))
-    message = ~c"missing terminator: " ++ delim_chars
-    suffix = missing_string_suffix(start_line)
-    {position, [message, suffix], []}
+    opening_atom = delimiter_atom(delim_chars)
+
+    delimiter_length = delimiter_length(delim)
+
+    {resolved_end_line, resolved_end_column} =
+      if start_line == end_line do
+        {start_line, start_column + delimiter_length}
+      else
+        {end_line, end_column}
+      end
+
+    meta = [
+      opening_delimiter: opening_atom,
+      expected_delimiter: opening_atom,
+      line: start_line,
+      column: start_column,
+      end_line: resolved_end_line,
+      end_column: resolved_end_column
+    ]
+
+    message = :io_lib.format(~c"missing terminator: ~ts", [delim_chars])
+    suffix = context_suffix(kind, delim, start_info)
+
+    {meta, [message, suffix], []}
   end
 
   defp missing_interpolation_reason(
-         {:interp, _kind, _allowed?, delim, _parents, start_line, start_column}
+         {:interp, kind, _allowed?, delim, _parents,
+          %{line: start_line, column: start_column} =
+            start_info},
+         %__MODULE__{line: end_line, column: end_column}
        ) do
     delim_chars = delimiter_charlist(delim)
-    delimiter = delimiter_atom(delim_chars)
-    position = string_position(delimiter, start_line, start_column, length(delim_chars))
-    message = ~c"missing interpolation terminator: " ++ [?", ?}, ?"]
-    suffix = missing_string_suffix(start_line)
-    {position, [message, suffix], []}
+    opening_atom = delimiter_atom(delim_chars)
+
+    delimiter_length = delimiter_length(delim)
+
+    {resolved_end_line, resolved_end_column} =
+      if start_line == end_line do
+        {start_line, start_column + delimiter_length}
+      else
+        {end_line, end_column}
+      end
+
+    meta = [
+      opening_delimiter: opening_atom,
+      expected_delimiter: opening_atom,
+      line: start_line,
+      column: start_column,
+      end_line: resolved_end_line,
+      end_column: resolved_end_column
+    ]
+
+    message = :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]])
+    suffix = context_suffix(kind, delim, start_info)
+
+    {meta, [message, suffix], []}
+  end
+
+  defp missing_scope_terminator_reason(
+         {start, meta, _indentation} = entry,
+         %__MODULE__{line: end_line, column: end_column, scope: scope} = _state
+       ) do
+    closing = closing_for(start)
+    closing_chars = terminator_chars(closing)
+    message = :io_lib.format(~c"missing terminator: ~ts", [closing_chars])
+    hint = missing_scope_hint(entry, closing, scope)
+
+    {{start_line, start_column}, _end_pos, _extra} = meta
+
+    meta_list = [
+      opening_delimiter: start,
+      expected_delimiter: closing,
+      line: start_line,
+      column: start_column,
+      end_line: end_line,
+      end_column: end_column
+    ]
+
+    {meta_list, [message, hint], []}
+  end
+
+  defp mismatched_delimiter_reason({start, meta, _indent}, closing, %__MODULE__{
+         line: end_line,
+         column: end_column
+       }) do
+    expected = closing_for(start)
+    closing_chars = terminator_chars(closing)
+
+    {{start_line, start_column}, _end_pos, _extra} = meta
+
+    meta_list = [
+      line: start_line,
+      column: start_column,
+      end_line: end_line,
+      end_column: end_column,
+      error_type: :mismatched_delimiter,
+      opening_delimiter: start,
+      closing_delimiter: closing,
+      expected_delimiter: expected
+    ]
+
+    {meta_list, ~c"unexpected token: ", closing_chars}
+  end
+
+  defp context_suffix(:sigil, delim, %{line: line, token: {:sigil_start, _meta, sigil_atom, _}}) do
+    sigil_name =
+      sigil_atom
+      |> Atom.to_string()
+      |> String.replace_prefix("sigil_", "")
+      |> String.to_charlist()
+
+    sigil_label = [?~ | sigil_name]
+    delimiter_chars = delimiter_charlist(delim)
+
+    :io_lib.format(~c" (for sigil ~ts~ts starting at line ~B)", [
+      sigil_label,
+      delimiter_chars,
+      line
+    ])
+  end
+
+  defp context_suffix(:quoted_identifier, _delim, %{line: line}) do
+    :io_lib.format(~c" (for function name starting at line ~B)", [line])
+  end
+
+  defp context_suffix(kind, _delim, %{line: line}) when kind in [:atom_safe, :atom_unsafe] do
+    :io_lib.format(~c" (for atom starting at line ~B)", [line])
+  end
+
+  defp context_suffix(kind, _delim, %{line: line}) when kind in [:bin_heredoc, :list_heredoc] do
+    :io_lib.format(~c" (for heredoc starting at line ~B)", [line])
+  end
+
+  defp context_suffix(_, _delim, %{line: line}) do
+    :io_lib.format(~c" (for string starting at line ~B)", [line])
   end
 
   defp interpolation_in_quoted_identifier_reason(start_line, start_column, delim) do
@@ -583,29 +788,24 @@ defmodule Toxic.Driver do
 
   defp delimiter_atom(chars) do
     chars
-    |> Enum.map(fn
-      char when is_integer(char) -> char
-      other when is_binary(other) -> String.to_charlist(other)
-      other when is_list(other) -> other
-    end)
     |> List.flatten()
     |> List.to_atom()
   end
 
-  defp string_position(delimiter, start_line, start_column, delimiter_length) do
-    [
-      opening_delimiter: delimiter,
-      expected_delimiter: delimiter,
-      line: start_line,
-      column: start_column,
-      end_line: start_line,
-      end_column: start_column + delimiter_length
-    ]
+  defp delimiter_length(delim) do
+    delim
+    |> delimiter_charlist()
+    |> length()
   end
 
-  defp missing_string_suffix(start_line) do
-    ~c" (for string starting at line " ++ Integer.to_charlist(start_line) ++ ~c")"
+  defp terminator_chars(delimiter) when is_atom(delimiter) do
+    delimiter
+    |> Atom.to_string()
+    |> String.to_charlist()
   end
+
+  defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: [])), do: []
+  defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: _)), do: []
 
   # Helper to return a token and update recent_token in state
   defp return_token(token, rest, state) do
@@ -647,7 +847,7 @@ defmodule Toxic.Driver do
           # Add the interpolation brace terminator
           [{:"{", nil, 0}]
 
-        {{:interp, _kind, _allowed?, delim, parent_terms, _start_line, _start_column}, _index} ->
+        {{:interp, _kind, _allowed?, delim, parent_terms, _start_info}, _index} ->
           # Get parent terminators
           parent_terms =
             case parent_terms do
