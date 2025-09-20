@@ -112,11 +112,17 @@ defmodule Toxic.TokenStream do
   Returns `{:ok, token, stream}` or `{:eof, stream}`.
   """
   @spec next(t()) :: {:ok, token(), t()} | {:eof, t()}
-  def next(%__MODULE__{eof: true, push: [], buffer: buffer} = stream) do
-    case :queue.is_empty(buffer) do
-      true -> {:eof, stream}
-      # Still have tokens in buffer
-      false -> do_next(stream)
+  def next(%__MODULE__{eof: true, push: [], buffer: buffer, error: error, opts: opts} = stream) do
+    cond do
+      error != nil and Keyword.get(opts, :error_mode, :tolerant) == :strict and
+          :queue.is_empty(buffer) ->
+        {:error, error, stream}
+
+      :queue.is_empty(buffer) ->
+        {:eof, stream}
+
+      true ->
+        do_next(stream)
     end
   end
 

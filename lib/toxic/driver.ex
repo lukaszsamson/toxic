@@ -24,7 +24,11 @@ defmodule Toxic.Driver do
           line: pos_integer(),
           column: pos_integer(),
           contexts:
-            list(:normal | {:interp, interp_kind(), boolean(), interp_delim(), terminators()}),
+            list(
+              :normal
+              | {:interp, interp_kind(), boolean(), interp_delim(), terminators(), pos_integer(),
+                 pos_integer()}
+            ),
           deferrals: list(),
           output: list(),
           recent_token: any(),
@@ -81,7 +85,16 @@ defmodule Toxic.Driver do
   end
 
   def next([], %__MODULE__{deferrals: []} = state) do
-    {:eof, state}
+    case pending_context_error(state.contexts) do
+      nil ->
+        {:eof, state}
+
+      {:missing_terminator, interp_context} ->
+        {:error, missing_terminator_reason(interp_context), [], state}
+
+      {:missing_interpolation, interp_context} ->
+        {:error, missing_interpolation_reason(interp_context), [], state}
+    end
   end
 
   def next([], %__MODULE__{deferrals: [_h | _t] = deferrals} = state) do
@@ -93,7 +106,8 @@ defmodule Toxic.Driver do
         %__MODULE__{
           contexts: [
             :normal,
-            {:interp, kind, interpolation, delim, parent_terminators} | contexts_rest
+            {:interp, kind, interpolation, delim, parent_terminators, start_line, start_column}
+            | contexts_rest
           ],
           deferrals: deferrals,
           scope: scope(terminators: terminators)
@@ -106,7 +120,9 @@ defmodule Toxic.Driver do
     new_state = %{
       state
       | column: state.column + 1,
-        contexts: [{:interp, kind, interpolation, delim, parent_terminators} | contexts_rest],
+        contexts:
+          [{:interp, kind, interpolation, delim, parent_terminators, start_line, start_column}
+           | contexts_rest],
         output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
         deferrals: []
     }
@@ -139,7 +155,11 @@ defmodule Toxic.Driver do
         string,
         %__MODULE__{
           contexts:
-            [{:interp, kind, interpolation_allowed?, delim, parent_terminators} | contexts_rest] =
+            [
+              {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_line,
+               start_column}
+              | contexts_rest
+            ] =
               contexts
         } =
           state
@@ -326,15 +346,20 @@ defmodule Toxic.Driver do
         end
 
       {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
-        updated = %{
-          state
-          | line: line,
-            column: column,
-            scope: scope,
-            contexts: [:normal | contexts]
-        }
+        if kind == :quoted_identifier do
+          {:error, interpolation_in_quoted_identifier_reason(start_line, start_column, delim),
+           rest, state}
+        else
+          updated = %{
+            state
+            | line: line,
+              column: column,
+              scope: scope,
+              contexts: [:normal | contexts]
+          }
 
-        return_token({:begin_interpolation, meta, kind}, rest, updated)
+          return_token({:begin_interpolation, meta, kind}, rest, updated)
+        end
     end
   end
 
@@ -485,8 +510,12 @@ defmodule Toxic.Driver do
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope = scope(terminators: terminators)} ->
+        {{start_line, start_column}, _end_pos, _extra} = elem(start_token, 1)
+
         contexts = [
-          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators} | contexts
+          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_line,
+           start_column}
+          | contexts
         ]
 
         {rest,
@@ -500,6 +529,82 @@ defmodule Toxic.Driver do
              contexts: contexts
          }}
     end
+  end
+
+  defp pending_context_error([]), do: nil
+  defp pending_context_error([:normal]), do: nil
+
+  defp pending_context_error([{:interp, _, _, _, _, _, _} = interp | _]) do
+    {:missing_terminator, interp}
+  end
+
+  defp pending_context_error([:normal, {:interp, _, _, _, _, _, _} = interp | _]) do
+    {:missing_interpolation, interp}
+  end
+
+  defp pending_context_error([_ | rest]), do: pending_context_error(rest)
+
+  defp missing_terminator_reason(
+         {:interp, _kind, _allowed?, delim, _parents, start_line, start_column}
+       ) do
+    delim_chars = delimiter_charlist(delim)
+    delimiter = delimiter_atom(delim_chars)
+    position = string_position(delimiter, start_line, start_column, length(delim_chars))
+    message = ~c"missing terminator: " ++ delim_chars
+    suffix = missing_string_suffix(start_line)
+    {position, [message, suffix], []}
+  end
+
+  defp missing_interpolation_reason(
+         {:interp, _kind, _allowed?, delim, _parents, start_line, start_column}
+       ) do
+    delim_chars = delimiter_charlist(delim)
+    delimiter = delimiter_atom(delim_chars)
+    position = string_position(delimiter, start_line, start_column, length(delim_chars))
+    message = ~c"missing interpolation terminator: " ++ [?", ?}, ?"]
+    suffix = missing_string_suffix(start_line)
+    {position, [message, suffix], []}
+  end
+
+  defp interpolation_in_quoted_identifier_reason(start_line, start_column, delim) do
+    message =
+      ~c"interpolation is not allowed when calling function/macro. Found interpolation in a call starting with: "
+
+    {[line: start_line, column: start_column], message, delimiter_charlist(delim)}
+  end
+
+  defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
+
+  defp delimiter_charlist(delim) when is_binary(delim) do
+    String.to_charlist(delim)
+  end
+
+  defp delimiter_charlist(delim) when is_list(delim), do: delim
+
+  defp delimiter_atom(chars) do
+    chars
+    |> Enum.map(fn
+      char when is_integer(char) -> char
+      other when is_binary(other) -> String.to_charlist(other)
+      other when is_list(other) -> other
+    end)
+    |> List.flatten()
+    |> List.to_atom()
+  end
+
+  defp string_position(delimiter, start_line, start_column, delimiter_length) do
+    [
+      opening_delimiter: delimiter,
+      expected_delimiter: delimiter,
+      line: start_line,
+      column: start_column,
+      end_line: start_line,
+      end_column: start_column + delimiter_length
+    ]
+  end
+
+  defp missing_string_suffix(start_line) do
+    ~c" (for string starting at line " ++ Integer.to_charlist(start_line) ++ ~c")"
   end
 
   # Helper to return a token and update recent_token in state
@@ -542,7 +647,7 @@ defmodule Toxic.Driver do
           # Add the interpolation brace terminator
           [{:"{", nil, 0}]
 
-        {{:interp, _kind, _allowed?, delim, parent_terms}, _index} ->
+        {{:interp, _kind, _allowed?, delim, parent_terms, _start_line, _start_column}, _index} ->
           # Get parent terminators
           parent_terms =
             case parent_terms do
