@@ -326,6 +326,30 @@ defmodule Toxic.TokenStreamTest do
       assert token2 == fake_token1
       assert token3 == {:int, {{1, 1}, {1, 2}, 1}, ~c"1"}
     end
+
+    test "pushback and peek_n at eof" do
+      stream = TokenStream.new("1")
+
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> TokenStream.pushback(fake_token1)
+        |> TokenStream.pushback(fake_token2)
+
+      {:ok, [^fake_token2, ^fake_token1], _stream} = TokenStream.peek_n(stream, 3)
+    end
+
+    test "peek_n at eof, buffered token" do
+      stream = TokenStream.new("1")
+
+      {:ok, token, stream} = TokenStream.peek(stream)
+
+      {:ok, [^token], _stream} = TokenStream.peek_n(stream, 3)
+    end
   end
 
   describe "checkpoint/1 and rewind_to/2" do
@@ -849,6 +873,17 @@ defmodule Toxic.TokenStreamTest do
       assert {:error, ^reason, ^stream_after} = TokenStream.next(stream_after)
     end
 
+    test "strict next/1 returns error at eof" do
+      stream = TokenStream.new("}", 1, 1, error_mode: :strict)
+
+      assert {:error, reason, stream_after} = TokenStream.next(stream)
+      assert reason != nil
+      assert stream_after.error == reason
+
+      # Subsequent calls continue to return the same error without mutating the stream
+      assert {:error, ^reason, ^stream_after} = TokenStream.next(stream_after)
+    end
+
     test "strict peek/1 reports reports error" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
 
@@ -864,6 +899,35 @@ defmodule Toxic.TokenStreamTest do
       assert {:error, ^reason, ^stream_after} = TokenStream.peek(stream_after)
       # Peek should not clear the stored error
       assert stream_after.error != nil
+    end
+
+    test "strict peek/1 returns buffered tokens up until error" do
+      stream = TokenStream.new("1 1 Ä", 1, 1, error_mode: :strict)
+      # fetches a batch and sets error
+      assert {:ok, _token, stream_after} = TokenStream.next(stream)
+      # should still be able to peek one token
+      assert {:ok, _token, ^stream_after} = TokenStream.peek(stream_after)
+
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
+
+    test "strict peek_n/2 returns buffered tokens up until error" do
+      stream = TokenStream.new("1 1 1 1 Ä", 1, 1, error_mode: :strict)
+      # fetches a batch and sets error
+      assert {:ok, _token, stream_after} = TokenStream.next(stream)
+      # should still be able to peek one token
+      assert {:ok, tokens, ^stream_after} = TokenStream.peek_n(stream_after, 3)
+
+      assert length(tokens) == 3
+
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+
+      # should not peek past the error
+      assert {:ok, tokens, ^stream_after} = TokenStream.peek_n(stream_after, 4)
+
+      assert length(tokens) == 3
     end
 
     test "strict peek_n/2 reports eof and never exposes buffered tokens" do

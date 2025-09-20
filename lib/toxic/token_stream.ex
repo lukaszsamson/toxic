@@ -116,6 +116,7 @@ defmodule Toxic.TokenStream do
     cond do
       error != nil and Keyword.get(opts, :error_mode, :tolerant) == :strict and
           :queue.is_empty(buffer) ->
+        # TODO: no coverage
         {:error, error, stream}
 
       :queue.is_empty(buffer) ->
@@ -141,6 +142,7 @@ defmodule Toxic.TokenStream do
       if Keyword.get(opts, :error_mode, :tolerant) == :strict do
         {:error, error, stream}
       else
+        # TODO: tolerant mode
         do_next(stream)
       end
     end
@@ -216,6 +218,7 @@ defmodule Toxic.TokenStream do
         # Return error, not EOF
         {:error, error, stream}
       else
+        # TODO: tolerant mode
         do_peek(stream)
       end
     end
@@ -274,7 +277,8 @@ defmodule Toxic.TokenStream do
     case :queue.is_empty(buffer) do
       true -> {:eof, stream}
       # Still have buffered tokens
-      false -> do_peek_n(stream, n)
+      false ->
+        do_peek_n(stream, n)
     end
   end
 
@@ -294,6 +298,7 @@ defmodule Toxic.TokenStream do
         # Empty list when no tokens available
         {:ok, [], stream}
       else
+        # TODO: tolerant mode
         do_peek_n(stream, n)
       end
     end
@@ -427,6 +432,7 @@ defmodule Toxic.TokenStream do
     new(slice_source, line_base, column_base, opts)
   end
 
+  # TODO: implement
   # @doc """
   # Re-lex a range of the input.
   # """
@@ -476,7 +482,9 @@ defmodule Toxic.TokenStream do
       match?({:value, {_, _, _}}, :queue.peek(stream.buffer)) ->
         case :queue.peek(stream.buffer) do
           {:value, {_, buf_terms, _}} when is_list(buf_terms) -> buf_terms
-          _ -> Toxic.Driver.current_terminators(stream.driver)
+          _ ->
+            # TODO: no coverage
+            Toxic.Driver.current_terminators(stream.driver)
         end
 
       true ->
@@ -501,6 +509,7 @@ defmodule Toxic.TokenStream do
   defp normalize_source_for_driver(source) when is_binary(source), do: String.to_charlist(source)
   defp normalize_source_for_driver(source) when is_list(source), do: source
 
+  # TODO: no coverage
   defp normalize_source_for_driver(source) when is_function(source, 2) do
     # For function sources, convert to charlist on each call
     fn line, column ->
@@ -511,6 +520,7 @@ defmodule Toxic.TokenStream do
     end
   end
 
+  # TODO: remove
   # defp driver_opts(opts) do
   #   [
   #     unescape: Keyword.get(opts, :unescape, true),
@@ -673,6 +683,7 @@ defmodule Toxic.TokenStream do
     binary_part(source, start_offset, end_offset - start_offset)
   end
 
+  # TODO: no coverage
   defp extract_slice(source, start_offset, end_offset) when is_function(source, 2) do
     # For function sources, we'd need to call it appropriately
     # This is a simplified implementation

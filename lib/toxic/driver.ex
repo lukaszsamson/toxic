@@ -147,33 +147,34 @@ defmodule Toxic.Driver do
     next(rest, new_state)
   end
 
-  def next(
-        [?} | rest],
-        %__MODULE__{
-          contexts: [
-            :normal,
-            {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
-          ],
-          deferrals: deferrals,
-          scope: scope(terminators: [{start, _meta, _indent} | _])
-        } =
-          state
-      )
-      when start != :"{" do
-    meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
+  # TODO: no coverage, not possible?
+  # def next(
+  #       [?} | rest],
+  #       %__MODULE__{
+  #         contexts: [
+  #           :normal,
+  #           {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+  #         ],
+  #         deferrals: deferrals,
+  #         scope: scope(terminators: [{start, _meta, _indent} | _])
+  #       } =
+  #         state
+  #     )
+  #     when start != :"{" do
+  #   meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
 
-    new_state = %{
-      state
-      | column: state.column + 1,
-        contexts: [
-          {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
-        ],
-        output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
-        deferrals: []
-    }
+  #   new_state = %{
+  #     state
+  #     | column: state.column + 1,
+  #       contexts: [
+  #         {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+  #       ],
+  #       output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
+  #       deferrals: []
+  #   }
 
-    next(rest, new_state)
-  end
+  #   next(rest, new_state)
+  # end
 
   def next(string, %__MODULE__{contexts: [:normal | _] = _contexts} = state) do
     carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
@@ -591,6 +592,7 @@ defmodule Toxic.Driver do
           if meta_end_column > meta_start_column do
             meta_end_column - delimiter_length
           else
+            # TODO: no coverage, not possible?
             meta_start_column
           end
 
@@ -622,6 +624,7 @@ defmodule Toxic.Driver do
   defp find_missing_context([_ | rest]), do: find_missing_context(rest)
   defp find_missing_context(_), do: nil
 
+  # TODO: eex support, remove?
   defp find_missing_scope_terminator(scope(terminators: :none)), do: nil
   defp find_missing_scope_terminator(scope(terminators: [])), do: nil
   defp find_missing_scope_terminator(scope(terminators: [entry | _])), do: entry
@@ -780,9 +783,10 @@ defmodule Toxic.Driver do
 
   defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
 
-  defp delimiter_charlist(delim) when is_binary(delim) do
-    String.to_charlist(delim)
-  end
+  # TODO: no coverage, not possible?
+  # defp delimiter_charlist(delim) when is_binary(delim) do
+  #   String.to_charlist(delim)
+  # end
 
   defp delimiter_charlist(delim) when is_list(delim), do: delim
 
@@ -805,7 +809,8 @@ defmodule Toxic.Driver do
   end
 
   defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: [])), do: []
-  defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: _)), do: []
+  # TODO: no coverage, not possible?
+  # defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: _)), do: []
 
   # Helper to return a token and update recent_token in state
   defp return_token(token, rest, state) do

@@ -90,6 +90,7 @@ defmodule ToxicErrorsTest do
   defp collect_all_tokens(stream, acc) do
     case Toxic.TokenStream.next(stream) do
       {:ok, token, new_stream} ->
+        IO.inspect(token)
         collect_all_tokens(new_stream, [token | acc])
 
       {:error, reason, _final_stream} ->
