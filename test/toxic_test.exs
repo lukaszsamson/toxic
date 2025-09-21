@@ -2014,8 +2014,8 @@ defmodule ToxicTest do
     end
 
     test "token after char with raw LF" do
-      # TODO: elixir tokenizer bug - does not advance line
-      assert tokenize("?\n1", must_match_elixir: false) ==
+      must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
+      assert tokenize("?\n1", must_match_elixir: must_match_elixir) ==
                {:ok,
                 [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
     end
@@ -2060,21 +2060,21 @@ defmodule ToxicTest do
     end
 
     test "token after escaped LF" do
-      # TODO: elixir tokenizer bug - does not advance line
-      assert tokenize("?\\\n1", must_match_elixir: false) ==
+      must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
+      assert tokenize("?\\\n1", must_match_elixir: must_match_elixir) ==
                {:ok,
                 [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}],
                 ""}
     end
 
     test "escaped CR LF" do
-      # TODO: elixir tokenizer bug - should not consume the newline, only advance line
+      # I'm not sure if the tokenizer is correct here but we keep elixir compatibility
       assert tokenize("?\\\r\n") ==
                {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}}], ""}
     end
 
     test "token after escaped CR LF" do
-      # TODO: elixir tokenizer bug - should not consume the newline, only advance line
+      # I'm not sure if the tokenizer is correct here but we keep elixir compatibility
       assert tokenize("?\\\r\n1") ==
                {:ok,
                 [
