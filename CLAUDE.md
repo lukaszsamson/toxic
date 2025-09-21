@@ -1,226 +1,92 @@
-# Toxic Tokenizer - Claude Development Guide
+# Toxic Tokenizer – Agent Guide
 
-## Project Context
-Toxic is a streaming tokenizer for Elixir that replaces batch tokenization with a single-token streaming approach. The project aims to support advanced features like error recovery, incremental lexing, and precise position tracking for IDE/tooling scenarios.
+This guide keeps contributors and agents aligned on how to work in this repo. It summarizes the current architecture and codifies priorities and conventions so changes stay focused and correct.
 
-## Current Status
-- ✅ **Core streaming tokenizer working** (472/472 tests passing)
-- ✅ **Streaming interpolation implemented** - Returns fragment/interpolation events
-- ✅ **Driver loop complete** - Single-token streaming with deferrals
-- ❌ **Error handling not implemented** - No error recovery or error tokens
+## Project Snapshot
+- Streaming tokenizer for Elixir with single-token driver and deferrals.
+- Linearized output including interpolation begin/end markers; precise ranged metas `{{sl, sc}, {el, ec}, extra}`.
+- TokenStream provides buffering, lookahead (`peek/1`, `peek_n/2`), pushback, checkpoints, and position API.
+- Strict error propagation implemented at the stream level; tolerant recovery not implemented yet.
 
-## Key Files to Understand
+## Key Files
+- `lib/toxic/driver.ex` – Low-level single-token driver, contexts, deferrals, terminators.
+- `lib/toxic/token_stream.ex` – High-level Elixir API: buffering, lookahead, pushback, checkpoints.
+- `lib/toxic/tokenizer.ex` – Main lexical analysis (single-token entry used by Driver).
+- `lib/toxic/interpolation.ex` – Interpolation/string/sigil streaming.
+- Useful refs: `lib/toxic/terminator.ex`, `lib/toxic/token.ex`, `lib/toxic/scope.ex`.
 
-### Core Implementation
-- `lib/toxic/token_stream.ex` - High-level Elixir streaming API
-- `lib/toxic/driver.ex` - Low-level single-token driver
-- `lib/toxic/tokenizer.ex` - Main tokenization logic
-- `lib/toxic/interpolation.ex` - String interpolation handling
-
-### Design Documents (Evaluation)
-- `PLAN.md`, `TODO.md` - Outdated, need updating
+## Alignment With PLAN.md and PROJECT_STATE.md
+- PLAN.md items marked “Done” match code:
+  - End-position spans on tokens – present across emissions.
+  - Flat, linear stream – interpolation markers emitted, no nested lists.
+  - Lookahead/pushback – via TokenStream buffer and push stack.
+- Open gaps called out in PROJECT_STATE.md also match code:
+  - No error-token emission or sync-point recovery; tolerant mode is a TODO.
+  - Incremental lexing hooks are partial: `slice/6` is a basic slice wrapper; `relex_range/4` is stubbed out (commented).
+  - Operator precedence metadata is handled in tokenizer/operator modules; Pratt-facing mapping is not a separate table.
 
 ## Development Priorities
+1) Error Handling (High)
+- Add error-token emission in the driver instead of halting on first error.
+- Implement sync-point recovery: semicolon, newline, and nearest closer.
+- Support strict vs tolerant modes end-to-end (TokenStream opts already allow `:error_mode`).
+- Maintain position accuracy during recovery and preserve terminator state.
 
-### 1. Error Handling (High Priority)
-**Goal**: Implement proper error recovery without batch fallback
+2) Test Coverage (Medium)
+- Add tests for malformed input and recovery behavior (strict vs tolerant).
+- Expand interpolation edge cases (e.g., nested, escapes, partial closers).
+- Cover function producer sources and checkpoint/rewind behavior.
 
-**Tasks**:
-- Add error token emission in driver
-- Implement sync point recovery (semicolon, newline, closer)
-- Support strict vs tolerant modes
-- Test with malformed code examples
+3) Incremental Lexing (Low)
+- Flesh out `slice/6` for Unicode-aware slicing and consistent base positions.
+- Implement `relex_range/4` for splice/reuse flows.
+- Add offset↔position mapping helpers and token splicing rules.
 
-**Key Challenges**:
-- Maintaining position accuracy during recovery
-- Determining optimal sync points
-- Balancing error detail with streaming constraints
+## Testing
+- Run all: `mix test`
+- With coverage: `mix test --cover`
+- Key suites: `test/toxic_test.exs`, `test/toxic/token_stream_test.exs`, and strict error cases in `test/toxic_erros_test.exs`.
+- Add new error recovery tests under `test/` (prefer `toxic_error_test.exs` naming).
 
-### 2. Test Coverage (Medium Priority)
-**Goal**: Add comprehensive test coverage for edge cases
+## Implementation Patterns
+- State updates in driver
+  - `%{state | line: l, column: c, scope: scope, deferrals: deferrals}`
+- Emitting vs deferring
+  - Emit: `return_token(token, rest, updated_state)` (updates `recent_token`).
+  - Defer: `%{state | deferrals: [token | deferrals]}` with coalescing where needed (EOL).
+- Contexts
+  - Push on interpolation: `{:interp, kind, allowed?, delim, parent_terms, start_info}`.
+  - Pop back to normal and restore parent terminators.
+- Terminators
+  - Read with `Toxic.Driver.current_terminators/1`.
+  - Suggest closer via `Toxic.Driver.peek_missing_terminator/1`.
 
-**Areas needing tests**:
-- Error recovery scenarios
-- Malformed input handling
-- Edge cases in interpolation
-- Producer function source type
-- Checkpoint/rewind functionality
+## Error Handling Conventions
+- Prefer returning error tuples over raising: `{:error, reason, rest, state}`.
+- Strict mode:
+  - TokenStream stores error and returns it on subsequent `next/peek/peek_n` without mutating state.
+- Tolerant mode (to implement):
+  - Emit `{:error_token, meta, reason}` and advance to configured sync points (`:semicolon | :newline | :closer`).
+  - Preserve accurate metas and terminator stack during recovery.
 
-### 3. Incremental Lexing (Low Priority)
-**Goal**: Support range-based re-lexing for editors
+## Common Pitfalls
+- Infinite loops: always consume input or deferrals when progressing.
+- Position drift: ensure all emissions update end positions correctly; EOL coalescing must rewrite metas consistently.
+- Missing tokens: confirm `handle_tokenize_result/2` cases don’t drop emissions during deferral rewrites.
+- Interpolation: respect delimiter-specific newline handling for heredocs and sigils.
 
-**Tasks**:
-- Implement `slice/6` properly (currently stub)
-- Add `relex_range/4` functionality
-- Create offset↔position mapping
-- Support token splicing for incremental updates
+## Contributor Style
+- Prefer specific pattern matching over generic guards in driver/tokenizer clauses.
+- Keep changes minimal and localized; avoid broad refactors.
+- Maintain linearized token stream invariants (no nested lists).
+- Do not raise except for invariants/bugs (e.g., invalid context stack).
 
-### 4. Incremental Lexing (Low Priority)
-**Goal**: Support range-based re-lexing for editors
+## Next Steps Checklist
+- Implement tolerant error path end-to-end (driver + TokenStream integration).
+- Add recovery tests verifying metas, sync behavior, and continued progress.
+- Enhance `slice/6` and scaffold `relex_range/4` with tests.
+- Update PLAN.md/TODO.md once tolerant mode lands and incremental hooks start.
 
-**Not Started**:
-- Implement `slice/6` properly
-- Add `relex_range/4` functionality
-- Create offset↔position mapping
-- Support token splicing
-
-## Testing Strategy
-
-### Running Tests
-```bash
-# Run all tests
-mix test
-
-# Run specific test file
-mix test test/toxic_test.exs
-
-# Run with coverage
-mix test --cover
-```
-
-### Test Coverage
-- All valid Elixir code scenarios covered
-- Error cases need additional tests
-- Streaming-specific behaviors need validation
-
-### Adding Tests
-When implementing error handling:
-1. Create separate test files for error cases (e.g., `test/toxic_error_test.exs`)
-2. Test both strict and tolerant modes
-3. Verify position accuracy
-4. Check error recovery points
-
-## Common Patterns
-
-### Driver State Updates
-```elixir
-# Pattern for updating driver state
-%{state | 
-  line: new_line,
-  column: new_column,
-  scope: new_scope,
-  deferrals: updated_deferrals
-}
-```
-
-### Token Emission
-```elixir
-# Return token with state update
-return_token(token, rest, updated_state)
-
-# Defer token for later
-%{state | deferrals: [token | deferrals]}
-```
-
-### Context Management
-```elixir
-# Push interpolation context
-contexts: [{:interp, kind, allowed?, delim, parent_terms} | contexts]
-
-# Pop back to normal
-contexts: [:normal | rest_contexts]
-```
-
-## Debugging Tips
-
-### State Inspection
-Add IO.inspect calls to track:
-- Current contexts stack
-- Deferral queue contents
-- Terminator stack state
-- Buffer contents in TokenStream
-
-### Token Flow
-1. `TokenStream.next/1` → checks buffer
-2. Buffer empty → `fetch_tokens_from_driver/3`
-3. `Driver.next/2` → processes single token
-4. `Tokenizer.tokenize_single/5` → lexical analysis
-5. Token returned through chain
-
-### Common Issues
-- **Infinite loops**: Check deferral handling
-- **Position drift**: Verify column advancement
-- **Missing tokens**: Check filtering in `process_token/2`
-- **Wrong token type**: Review space-sensitive rewrites
-
-## Architecture Decisions
-
-### Why Deferrals?
-Some tokens need delayed emission:
-- EOL coalescing
-- Space-sensitive identifier rewrites
-- Operator lookahead requirements
-
-### Why Separate Contexts?
-- Normal mode: Regular tokenization
-- Interpolation mode: String content with escapes
-- Each mode has different rules
-
-### Why Buffer in TokenStream?
-- Amortize driver calls
-- Support efficient lookahead
-- Enable pushback operations
-
-## Code Style Guidelines
-
-### Naming Conventions
-- `tokenize_*` - Functions that consume input
-- `handle_*` - Event/result processors
-- `*_token` - Token manipulation
-- `*_with_*` - Composite operations
-
-### Pattern Matching
-```elixir
-# Prefer specific matches
-def next([?} | rest], %{contexts: [:normal, {:interp, ...}]} = state)
-
-# Over generic guards
-def next([c | rest], state) when c == ?}
-```
-
-### Error Handling
-```elixir
-# Return error tuples
-{:error, reason, rest, state}
-
-# Not exceptions (except for bugs)
-raise ArgumentError, "Invalid state"
-```
-
-## Next Session Recommendations
-
-When continuing development:
-
-1. **Start with error handling** - Most critical missing piece
-2. **Create error test suite** - Before implementing
-3. **Implement simple error cases first** - Unclosed strings, invalid chars
-4. **Then tackle recovery** - Sync points and continuation
-5. **Add comprehensive test coverage** - Edge cases and error scenarios
-
-## Summary of Actual Implementation
-
-After reviewing the source code (not the outdated design docs):
-
-### ✅ What's Actually Working
-- **Streaming tokenizer**: Full single-token streaming via `Driver.next/2`
-- **Interpolation streaming**: `Toxic.Interpolation.tokenize_single/7` returns events
-- **Token stability**: Deferrals handle all space-sensitive rewrites before emission
-- **Terminator tracking**: Available via `current_terminators/1` and `peek_missing_terminator/1`
-- **Test parity**: 472/472 tests passing for valid Elixir code
-
-### ❌ What's Actually Missing
-- **Error handling**: No error tokens, no recovery, assumes valid input
-- **Incremental lexing**: Stubs only for `slice/6` and `relex_range/4`
-- **Test coverage**: Missing tests for errors, edge cases, producer functions
-
-## Resources
-
-### Elixir Tokenizer Reference
-- Source: `elixir/lib/elixir/src/elixir_tokenizer.erl`
-- Compare error handling approaches
-- Study sync point strategies
-
-### Similar Projects
-- Erlang scanner for comparison
-- Other streaming tokenizers (Roslyn, Tree-sitter)
-- Language server protocol requirements
+## References
+- Elixir tokenizer reference: `elixir/lib/elixir/src/elixir_tokenizer.erl` (compare recovery behavior).
+- Related designs: Erlang scanner, Roslyn, Tree-sitter; LSP editor requirements.

@@ -48,22 +48,19 @@ Toxic is a streaming tokenizer for Elixir designed to support Pratt parsers with
 - **Elixir Integration**: TokenStream wrapper with buffering
 - **Position Tracking**: Accurate line/column tracking
 - **Terminator Stack**: Live exposure for error recovery
-- **Test Parity**: (100% compatibility on valid code)
+- **Test Parity**: (100% compatibility on valid code, high parity on error messages in strict mode)
 - **Source Types**: Binary, iolist, and producer function support (iolist, and producer function missing coverage)
 - **EOF Handling**: Complex EOF management with buffers and deferrals
-
-### 🚧 In Progress
-- **Error Handling**: Not implemented - no error token emission or recovery mechanisms
+- **Strict Error Handling**: Halt lexing on error in strict mode
 
 ### ❌ Not Implemented
 - **Error Recovery**: No sync point recovery or error token emission
 - **Incremental Lexing**: `slice/6` and `relex_range/4` are stubs
-- **EOL Embed Policy**: Tokens are not mutated after emission, but EOL handling could be improved
+- **Warnings and hints**: Commented out and not covered by tests
 
 ## Unresolved Issues
 
 ### 1. Error Handling Architecture
-- **Current**: No error handling implemented - tokenizer assumes valid input
 - **Needed**: Proper error token emission with recovery
 - **Challenge**: Maintaining position accuracy during recovery
 - **Note**: Terminator stack is available via `current_terminators/1` and `peek_missing_terminator/1`

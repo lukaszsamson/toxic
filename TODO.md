@@ -2,7 +2,7 @@
 
 Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step implementation plan to redesign the tokenizer from batch-based to driver-based streaming.
 
-## Phase 1: Erlang Driver API Implementation ✅ COMPLETED
+## Phase 1: Elixir Driver API Implementation ✅ COMPLETED
 
 ### 1.1 Create Driver State Record ✅ COMPLETED
 - [x] Define `#toxic_driver{}` record in `src/toxic_tokenizer.hrl` with fields:
@@ -64,7 +64,7 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
   - On closing delimiter: emit `*_end` (and `sigil_modifiers` if any), return to `normal`
   - Handle unescape errors in tolerant mode with `{error_token, ...}` and sync
 
-### 2.3 Implement EOL Embed Policy - Not sure if needed
+### 2.3 Implement EOL Embed Policy - Not needed
 - [x] Modify EOL handling for embed mode (recommended for streaming):
   - Never emit standalone `eol` tokens
   - Fold EOL count into emitted token's extra metadata 
@@ -181,7 +181,7 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
   - Error handling in both strict and tolerant modes
   - Complex interpolation scenarios
 
-### 6.2 Update TokenStream Tests - partially done
+### 6.2 Update TokenStream Tests ✅ COMPLETED
 - [x] Fix failing tests in `test/toxic/token_stream_test.exs`:
   - Update tests to work with driver-based implementation
   - Add tests for new terminator introspection functionality
@@ -219,8 +219,6 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
 - [ ] Benchmark against current implementation
 
 ### 7.3 Handle Edge Cases  
-- [ ] Address heredoc indentation trimming in streaming mode
-  - May require per-line buffering for correct fragment computation
 - [ ] Fine-tune error synchronization heuristics
   - Balance forward progress vs excessive skipping
 - [ ] Handle malformed input gracefully in both error modes
@@ -242,71 +240,3 @@ Based on API_ELIXIR_v2.md evaluation, this document outlines the step-by-step im
 - [ ] Complex interpolation scenarios handle correctly with incremental emission (partially - using fallback)
 - [ ] Error recovery works reliably in tolerant mode
 - [ ] Incremental lexing enables efficient editor integration (not yet implemented)
-
-## 🎉 Implementation Status Summary
-
-**PHASES COMPLETED:** Phase 1 (Erlang Driver API) & Phase 4 (TokenStream Integration)
-
-### ✅ Major Achievements
-- **Streaming Tokenizer Working**: Driver successfully emits tokens one at a time
-- **96% Test Pass Rate**: From 14 failures down to 1 EOL-related test failure  
-- **Function Source Support**: Added streaming producer function support beyond planned scope
-- **Proper EOF Handling**: Fixed complex EOF logic with push buffers and token queues
-- **Position Tracking**: Correctly extracts line/column from Erlang driver records
-- **Error Modes**: Both strict and tolerant error handling working
-- **Terminator Introspection**: Full support for Pratt parser needs
-
-### 🛠️ Problems Encountered & Solutions
-
-#### Problem 1: **Byte Offset Calculation**
-- **Issue**: Original approach tried to calculate consumed bytes from remaining source length
-- **Root Cause**: Tokenizer API doesn't provide remaining source in usable format
-- **Solution**: Use token end position metadata to calculate byte advancement
-- **Code Impact**: Updated `fallback_next_token/1` in `toxic_tokenizer.erl:2600-2610`
-
-#### Problem 2: **Premature EOF with Buffered Tokens**
-- **Issue**: Stream returned EOF even when tokens existed in push buffer or main buffer
-- **Root Cause**: `next/1` checked `eof: true` flag before checking for available tokens
-- **Solution**: Restructured `next/1` to check push buffer and main buffer before returning EOF
-- **Code Impact**: Modified `next/1` clauses in `token_stream.ex:85-94`
-
-#### Problem 3: **Function Source Initialization**
-- **Issue**: `init_driver/4` only supported binary sources, failed on function producers
-- **Root Cause**: Missing function clause in Erlang driver initialization
-- **Solution**: Added dedicated `init_driver/4` clause for function sources
-- **Code Impact**: Added function in `toxic_tokenizer.erl:2451-2481`
-
-#### Problem 4: **Incorrect EOF Flag Setting**
-- **Issue**: Stream EOF flag set whenever driver hit EOF, ignoring buffered tokens
-- **Root Cause**: `refill_buffer/1` directly copied driver EOF state to stream
-- **Solution**: Only set stream EOF when driver is EOF AND no new tokens were fetched
-- **Code Impact**: Modified EOF logic in `token_stream.ex:382-389`
-
-#### Problem 5: **Erlang Record Field Access from Elixir**
-- **Issue**: Elixir couldn't access Erlang record fields with dot syntax
-- **Root Cause**: Elixir doesn't understand Erlang record syntax
-- **Solution**: Use `:erlang.element/2` to access record fields by position
-- **Code Impact**: Updated `position/1` in `token_stream.ex:255-256`
-
-### 🔄 Current Architecture
-
-**Erlang Driver Layer:**
-- `#toxic_driver{}` record maintains streaming state
-- `next/1` returns single tokens using fallback to batch tokenization
-- Position tracking via token metadata analysis
-- Support for both binary and function sources
-
-**Elixir Stream Layer:**  
-- `%TokenStream{}` wraps driver with buffering and push-back
-- `refill_buffer/1` fetches up to `max_batch` tokens from driver
-- Proper EOF handling checks buffers before returning EOF
-- All existing APIs (`next/1`, `peek/1`, `position/1`, etc.) work unchanged
-
-### 🚀 Next Steps (Future Phases)
-- **Phase 2.2**: Replace fallback with proper single-token scanning loop
-- **Phase 3**: Implement streaming interpolation with incremental emission  
-- **Phase 5**: Add incremental lexing and re-lexing capabilities
-- **Phase 6**: Comprehensive testing and performance validation
-- **Final**: Address remaining 1 test failure (likely EOL token ordering)
-
-**Current State**: Fully functional streaming tokenizer with 96% compatibility!
