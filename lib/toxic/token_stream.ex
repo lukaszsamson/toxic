@@ -17,7 +17,6 @@ defmodule Toxic.TokenStream do
   @type options :: [
           {:unescape, boolean()}
           | {:max_batch, non_neg_integer()}
-          | {:eol_mode, :embed | :emit}
           | {:error_mode, :tolerant | :strict}
           | {:error_sync, [:semicolon | :newline | :closer]}
           | {:preserve_comments, false | (integer(), integer(), list(), list(), list() -> any())}
@@ -60,6 +59,8 @@ defmodule Toxic.TokenStream do
   @type source ::
           iodata() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof)
 
+  @type error() :: any()
+
   defstruct buffer: :queue.new(),
             push: [],
             driver: nil,
@@ -73,7 +74,6 @@ defmodule Toxic.TokenStream do
   @default_opts [
     unescape: true,
     max_batch: 256,
-    eol_mode: :emit,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer],
     elixir_compatibility: false,
@@ -87,10 +87,10 @@ defmodule Toxic.TokenStream do
   ## Options
   - `:unescape` - Whether to unescape string contents (default: true)
   - `:max_batch` - Maximum tokens to fetch in one batch (default: 256)
-  - `:eol_mode` - How to handle EOL tokens: `:embed` or `:emit` (default: :emit)
   - `:error_mode` - Error handling: `:tolerant` or `:strict` (default: :tolerant)
   - `:error_sync` - Sync points for error recovery (default: [:semicolon, :newline, :closer])
   """
+  # TODO: document options
   @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
     opts =
@@ -111,80 +111,35 @@ defmodule Toxic.TokenStream do
 
   Returns `{:ok, token, stream}` or `{:eof, stream}`.
   """
-  @spec next(t()) :: {:ok, token(), t()} | {:eof, t()}
-  def next(%__MODULE__{eof: true, push: [], buffer: buffer, error: error, opts: opts} = stream) do
-    cond do
-      error != nil and Keyword.get(opts, :error_mode, :tolerant) == :strict and
-          :queue.is_empty(buffer) ->
-        # TODO: no coverage
-        {:error, error, stream}
-
-      :queue.is_empty(buffer) ->
-        {:eof, stream}
-
-      true ->
-        do_next(stream)
-    end
-  end
-
-  def next(%__MODULE__{eof: true, push: [_ | _]} = stream) do
-    # EOF but still have pushed tokens
-    do_next(stream)
-  end
-
-  def next(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
-    # Check if we have buffered or pushed tokens to return first
-    if has_buffered_tokens?(stream) do
-      # Return buffered tokens first
-      do_next(stream)
-    else
-      # Only return error when no more buffered tokens
-      if Keyword.get(opts, :error_mode, :tolerant) == :strict do
-        {:error, error, stream}
-      else
-        # TODO: tolerant mode
-        do_next(stream)
-      end
-    end
-  end
-
-  def next(%__MODULE__{} = stream) do
-    do_next(stream)
-  end
-
-  defp do_next(%__MODULE__{push: [{token, _pre_terms, _pre_pos} | rest]} = stream) do
+  @spec next(t()) :: {:ok, token(), t()} | {:eof, t()} | {:error, error(), t()}
+  def next(%__MODULE__{push: [{token, _pre_terms, _pre_pos} | rest]} = stream) do
     {:ok, token, %{stream | push: rest}}
   end
 
-  defp do_next(%__MODULE__{buffer: buffer} = stream) do
+  def next(%__MODULE__{buffer: buffer} = stream) do
     case :queue.out(buffer) do
       {{:value, {token, _pre_terms, _pre_pos} = entry}, new_buffer} ->
         # Update last emitted entry for accurate pushback semantics
         stream = %{stream | buffer: new_buffer, last_emitted_entry: entry}
-        stream = maybe_refill_buffer(stream)
-        token = process_token(token, stream)
 
-        if token == nil do
-          # Skip nil tokens (e.g., filtered EOL)
-          do_next(stream)
-        else
-          {:ok, token, stream}
-        end
+        {:ok, token, stream}
 
       {:empty, _} ->
-        stream = refill_buffer(stream)
-
-        # Check if refill_buffer set an error, but only return error if no tokens were buffered
         cond do
-          stream.error != nil and Keyword.get(stream.opts, :error_mode, :tolerant) == :strict and
-              :queue.is_empty(stream.buffer) ->
-            {:error, stream.error, stream}
-
-          stream.eof and :queue.is_empty(stream.buffer) ->
+          stream.eof ->
             {:eof, stream}
 
+          stream.error ->
+            if Keyword.get(stream.opts, :error_mode, :tolerant) == :strict do
+              {:error, stream.error, stream}
+            else
+              # TODO: tolerant mode
+              :not_implemented
+            end
+
           true ->
-            do_next(stream)
+            stream = refill_buffer(stream)
+            next(stream)
         end
     end
   end
@@ -194,73 +149,32 @@ defmodule Toxic.TokenStream do
 
   Returns `{:ok, token, stream}` or `{:eof, stream}`.
   """
-  @spec peek(t()) :: {:ok, token(), t()} | {:eof, t()}
-  def peek(%__MODULE__{eof: true, push: [], buffer: buffer} = stream) do
-    case :queue.is_empty(buffer) do
-      true -> {:eof, stream}
-      false -> do_peek(stream)
-    end
-  end
-
-  def peek(%__MODULE__{eof: true, push: [_ | _]} = stream) do
-    # EOF but still have pushed tokens
-    do_peek(stream)
-  end
-
-  def peek(%__MODULE__{error: error, opts: opts} = stream) when error != nil do
-    # Check if we have buffered or pushed tokens to peek at first
-    if has_buffered_tokens?(stream) do
-      # Can peek at already buffered tokens
-      do_peek(stream)
-    else
-      # Only return error when no more buffered tokens to peek at
-      if Keyword.get(opts, :error_mode, :tolerant) == :strict do
-        # Return error, not EOF
-        {:error, error, stream}
-      else
-        # TODO: tolerant mode
-        do_peek(stream)
-      end
-    end
-  end
-
-  def peek(%__MODULE__{} = stream) do
-    do_peek(stream)
-  end
-
-  defp do_peek(%__MODULE__{push: [{token, _, _} | _]} = stream) do
+  @spec peek(t()) :: {:ok, token(), t()} | {:eof, t()} | {:error, error(), t()}
+  def peek(%__MODULE__{push: [{token, _, _} | _]} = stream) do
     {:ok, token, stream}
   end
 
-  defp do_peek(%__MODULE__{buffer: buffer} = stream) do
+  def peek(%__MODULE__{buffer: buffer} = stream) do
     case :queue.peek(buffer) do
       {:value, {token, _pre_terms, _pre_pos}} ->
-        token = process_token(token, stream)
-
-        if token == nil do
-          # Skip nil tokens and peek the next one
-          # We need to consume it temporarily
-          {{:value, _}, new_buffer} = :queue.out(buffer)
-          stream = %{stream | buffer: new_buffer}
-          do_peek(stream)
-        else
-          {:ok, token, stream}
-        end
+        {:ok, token, stream}
 
       :empty ->
-        stream = refill_buffer(stream)
-
         cond do
-          stream.error != nil and Keyword.get(stream.opts, :error_mode, :tolerant) == :strict ->
-            {:error, stream.error, stream}
-
-          stream.eof and :queue.is_empty(stream.buffer) ->
+          stream.eof ->
             {:eof, stream}
 
+          stream.error ->
+            if Keyword.get(stream.opts, :error_mode, :tolerant) == :strict do
+              {:error, stream.error, stream}
+            else
+              # TODO: tolerant mode
+              :not_implemented
+            end
+
           true ->
-            # Only return EOF if we're at EOF and the buffer is still empty.
-            # If the buffer received tokens, proceed to peek them even if EOF is set.
-            do_peek(stream)
+            stream = refill_buffer(stream)
+            peek(stream)
         end
     end
   end
@@ -270,85 +184,44 @@ defmodule Toxic.TokenStream do
 
   Returns `{:ok, tokens, stream}` or `{:eof, stream}`.
   """
-  @spec peek_n(t(), pos_integer()) :: {:ok, [token()], t()} | {:eof, t()}
-  def peek_n(stream, n) when n <= 0, do: {:ok, [], stream}
-
-  def peek_n(%__MODULE__{eof: true, push: [], buffer: buffer} = stream, n) do
-    case :queue.is_empty(buffer) do
-      true -> {:eof, stream}
-      # Still have buffered tokens
-      false ->
-        do_peek_n(stream, n)
-    end
-  end
-
-  def peek_n(%__MODULE__{eof: true, push: [_ | _]} = stream, n) do
-    # EOF but still have pushed tokens
-    do_peek_n(stream, n)
-  end
-
-  def peek_n(%__MODULE__{error: error, opts: opts} = stream, n) when error != nil do
-    # Return buffered tokens even with error set
-    if has_buffered_tokens?(stream) do
-      # Returns what's available
-      do_peek_n(stream, n)
-    else
-      # When no tokens available and in strict mode, return empty list
-      if Keyword.get(opts, :error_mode, :tolerant) == :strict do
-        # Empty list when no tokens available
-        {:ok, [], stream}
-      else
-        # TODO: tolerant mode
-        do_peek_n(stream, n)
-      end
-    end
+  @spec(
+    peek_n(t(), pos_integer()) :: {:ok, [token()], t()} | {:eof, [token()], t()},
+    {:error, error(), [token()], t()}
+  )
+  def peek_n(_stream, n) when n <= 0 do
+    raise ArgumentError, message: "n must be positive"
   end
 
   def peek_n(%__MODULE__{} = stream, n) do
-    do_peek_n(stream, n)
-  end
-
-  defp do_peek_n(%__MODULE__{} = stream, n) do
-    working_stream = ensure_buffer_size(stream, n)
-
-    # Don't try to refill if there's an error in strict mode, but still return available tokens
     push_tokens =
-      working_stream.push
-      |> Enum.map(fn {t, _, _} -> t end)
+      stream.push
       |> Enum.take(n)
+      |> Enum.map(fn {t, _, _} -> t end)
 
     needed = n - length(push_tokens)
 
-    tokens =
-      if needed > 0 do
-        buffer_tokens =
-          working_stream.buffer
-          |> :queue.to_list()
-          |> Enum.map(fn {t, _, _} -> t end)
-          |> Enum.take(needed)
+    if needed == 0 do
+      {:ok, push_tokens, stream}
+    else
+      stream = ensure_buffer_size(stream, needed)
 
-        push_tokens ++ buffer_tokens
+      buffer_tokens =
+        stream.buffer
+        |> :queue.to_list()
+        |> Enum.take(needed)
+        |> Enum.map(fn {t, _, _} -> t end)
+
+      not_filled = needed - length(buffer_tokens)
+
+      if not_filled == 0 do
+        {:ok, push_tokens ++ buffer_tokens, stream}
       else
-        push_tokens
+        if stream.eof do
+          {:eof, push_tokens ++ buffer_tokens, stream}
+        else
+          {:error, stream.error, push_tokens ++ buffer_tokens, stream}
+        end
       end
-
-    processed =
-      tokens
-      |> Enum.map(&process_token(&1, working_stream))
-      |> Enum.reject(&is_nil/1)
-
-    # Only preserve error state if one was discovered during buffer filling
-    # peek_n should not modify the stream unless an error occurred
-    result_stream =
-      if working_stream.error != nil and stream.error == nil do
-        %{stream | error: working_stream.error}
-      else
-        stream
-      end
-
-    case {processed, working_stream.eof} do
-      {[], true} -> {:eof, result_stream}
-      _ -> {:ok, processed, result_stream}
     end
   end
 
@@ -375,7 +248,12 @@ defmodule Toxic.TokenStream do
     ref = make_ref()
     # Store current state in process dictionary for simplicity
     # In production, might want a different approach
-    Process.put({__MODULE__, :checkpoint, ref}, {stream.push, stream.buffer, stream.driver})
+    Process.put(
+      {__MODULE__, :checkpoint, ref},
+      {stream.push, stream.buffer, stream.driver, stream.error, stream.eof,
+       stream.last_emitted_entry}
+    )
+
     {ref, stream}
   end
 
@@ -386,12 +264,20 @@ defmodule Toxic.TokenStream do
   @spec rewind_to(t(), reference(), boolean()) :: t()
   def rewind_to(%__MODULE__{} = stream, ref, delete_checkpoint? \\ true) do
     case Process.get({__MODULE__, :checkpoint, ref}) do
-      {push, buffer, driver} ->
+      {push, buffer, driver, error, eof, last_emitted_entry} ->
         if delete_checkpoint? do
           Process.delete({__MODULE__, :checkpoint, ref})
         end
 
-        %{stream | push: push, buffer: buffer, driver: driver}
+        %{
+          stream
+          | push: push,
+            buffer: buffer,
+            driver: driver,
+            error: error,
+            eof: eof,
+            last_emitted_entry: last_emitted_entry
+        }
 
       nil ->
         raise ArgumentError, "Invalid checkpoint reference"
@@ -407,8 +293,15 @@ defmodule Toxic.TokenStream do
       fn -> stream end,
       fn stream ->
         case next(stream) do
-          {:ok, token, new_stream} -> {[token], new_stream}
-          {:eof, _} -> {:halt, stream}
+          {:ok, token, new_stream} ->
+            {[token], new_stream}
+
+          {:eof, new_stream} ->
+            {:halt, new_stream}
+
+          {:error, _error, new_stream} ->
+            # TODO: is it ok to halt instead of erroring?
+            {:halt, new_stream}
         end
       end,
       fn _stream -> :ok end
@@ -474,28 +367,18 @@ defmodule Toxic.TokenStream do
   end
 
   # Compute terms at the logical current position (before next token)
-  defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]} = stream) do
-    cond do
-      is_list(pre_terms) ->
-        pre_terms
-
-      match?({:value, {_, _, _}}, :queue.peek(stream.buffer)) ->
-        case :queue.peek(stream.buffer) do
-          {:value, {_, buf_terms, _}} when is_list(buf_terms) -> buf_terms
-          _ ->
-            # TODO: no coverage
-            Toxic.Driver.current_terminators(stream.driver)
-        end
-
-      true ->
-        Toxic.Driver.current_terminators(stream.driver)
-    end
+  defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]})
+       when is_list(pre_terms) do
+    pre_terms
   end
 
   defp terms_at_current_position(%__MODULE__{buffer: buffer} = stream) do
     case :queue.peek(buffer) do
-      {:value, {_token, pre_terms, _}} when is_list(pre_terms) -> pre_terms
-      _ -> Toxic.Driver.current_terminators(stream.driver)
+      {:value, {_token, pre_terms, _}} when is_list(pre_terms) ->
+        pre_terms
+
+      _ ->
+        Toxic.Driver.current_terminators(stream.driver)
     end
   end
 
@@ -571,9 +454,7 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  defp refill_buffer(%__MODULE__{eof: true} = stream), do: stream
-
-  defp refill_buffer(%__MODULE__{opts: opts} = stream) do
+  defp refill_buffer(%__MODULE__{opts: opts, eof: false} = stream) do
     max_batch = Keyword.get(opts, :max_batch, 256)
 
     {tokens, source, new_driver, eof, error} = fetch_tokens_from_driver(stream, max_batch, opts)
@@ -622,26 +503,23 @@ defmodule Toxic.TokenStream do
 
       true ->
         # Ensure we have a head entry to accurately reflect the next-token start
-        stream = refill_buffer(stream)
-        position(stream)
-    end
-  end
-
-  defp maybe_refill_buffer(%__MODULE__{buffer: buffer, opts: opts} = stream) do
-    min_size = div(Keyword.get(opts, :max_batch, 256), 4)
-
-    if :queue.len(buffer) < min_size do
-      refill_buffer(stream)
-    else
-      stream
+        if strict_error?(stream) do
+          # TODO: tolerant mode
+          {{stream.driver.line, stream.driver.column}, stream}
+        else
+          stream = refill_buffer(stream)
+          position(stream)
+        end
     end
   end
 
   defp ensure_buffer_size(%__MODULE__{} = stream, needed) do
-    buffer_size = :queue.len(stream.buffer) + length(stream.push)
+    buffer_size = :queue.len(stream.buffer)
 
     strict_error? =
       stream.error != nil and Keyword.get(stream.opts, :error_mode, :tolerant) == :strict
+
+    # TODO: tolerant mode
 
     if buffer_size < needed and not stream.eof and not strict_error? do
       stream
@@ -650,32 +528,6 @@ defmodule Toxic.TokenStream do
     else
       stream
     end
-  end
-
-  # TODO: remove
-  defp process_token(token, %__MODULE__{opts: opts}) do
-    token =
-      if Keyword.get(opts, :eol_mode, :embed) == :embed do
-        filter_eol_token(token)
-      else
-        token
-      end
-
-    # Apply space-sensitive rewrites if needed
-    apply_rewrites(token)
-  end
-
-  # TODO: remove
-  defp filter_eol_token({:eol, _meta}), do: nil
-  defp filter_eol_token(token), do: token
-
-  # TODO: remove
-  defp apply_rewrites(nil), do: nil
-
-  defp apply_rewrites(token) do
-    # Space-sensitive rewrites would go here
-    # For now, just return the token as-is
-    token
   end
 
   defp extract_slice(source, start_offset, end_offset) when is_binary(source) do
@@ -695,7 +547,7 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  defp has_buffered_tokens?(%__MODULE__{push: push, buffer: buffer}) do
-    push != [] or not :queue.is_empty(buffer)
+  defp strict_error?(%__MODULE__{error: error, opts: opts}) do
+    error != nil and Keyword.get(opts, :error_mode, :tolerant) == :strict
   end
 end

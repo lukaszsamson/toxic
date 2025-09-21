@@ -16,8 +16,7 @@ defmodule Toxic.TokenStreamTest do
     end
 
     test "accepts options" do
-      stream = TokenStream.new("foo", 1, 1, eol_mode: :emit, max_batch: 10)
-      assert stream.opts[:eol_mode] == :emit
+      stream = TokenStream.new("foo", 1, 1, max_batch: 10)
       assert stream.opts[:max_batch] == 10
     end
 
@@ -161,9 +160,6 @@ defmodule Toxic.TokenStreamTest do
                {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
              ] = tokens
 
-      # Stream unchanged
-      assert stream == stream1
-
       # Can still get first token
       {:ok, token, _} = TokenStream.next(stream1)
       assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
@@ -172,7 +168,7 @@ defmodule Toxic.TokenStreamTest do
     test "returns fewer tokens at EOF" do
       stream = TokenStream.new("1 +")
 
-      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 5)
+      {:eof, tokens, _stream} = TokenStream.peek_n(stream, 5)
       assert length(tokens) == 2
     end
 
@@ -190,7 +186,7 @@ defmodule Toxic.TokenStreamTest do
       {:ok, tokens, stream} = TokenStream.peek_n(stream, 4)
       assert length(tokens) == 4
 
-      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 6)
+      {:eof, tokens, _stream} = TokenStream.peek_n(stream, 6)
       assert length(tokens) == 5
 
       stream = TokenStream.new("1 + 2 * 3", 1, 1, max_batch: 2)
@@ -205,14 +201,13 @@ defmodule Toxic.TokenStreamTest do
       {:ok, tokens, stream} = TokenStream.peek_n(stream, 5)
       assert length(tokens) == 5
 
-      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 6)
+      {:eof, tokens, _stream} = TokenStream.peek_n(stream, 6)
       assert length(tokens) == 5
     end
 
-    test "returns empty list for n <= 0" do
+    test "raises for n <= 0" do
       stream = TokenStream.new("1 + 2")
-      {:ok, tokens, _} = TokenStream.peek_n(stream, 0)
-      assert tokens == []
+      assert_raise ArgumentError, fn -> TokenStream.peek_n(stream, 0) end
     end
   end
 
@@ -340,7 +335,7 @@ defmodule Toxic.TokenStreamTest do
         |> TokenStream.pushback(fake_token1)
         |> TokenStream.pushback(fake_token2)
 
-      {:ok, [^fake_token2, ^fake_token1], _stream} = TokenStream.peek_n(stream, 3)
+      {:eof, [^fake_token2, ^fake_token1], _stream} = TokenStream.peek_n(stream, 3)
     end
 
     test "peek_n at eof, buffered token" do
@@ -348,7 +343,7 @@ defmodule Toxic.TokenStreamTest do
 
       {:ok, token, stream} = TokenStream.peek(stream)
 
-      {:ok, [^token], _stream} = TokenStream.peek_n(stream, 3)
+      {:eof, [^token], _stream} = TokenStream.peek_n(stream, 3)
     end
   end
 
@@ -612,7 +607,6 @@ defmodule Toxic.TokenStreamTest do
       assert {nil, _stream} = TokenStream.peek_missing_terminator(stream)
     end
 
-    # TODO: the tests here return terminators after a batch instead of on current token
     @simple_cases [
       {:"(", :")"},
       {:"{", :"}"},
@@ -925,23 +919,23 @@ defmodule Toxic.TokenStreamTest do
       assert stream_after.error != nil
 
       # should not peek past the error
-      assert {:ok, tokens, ^stream_after} = TokenStream.peek_n(stream_after, 4)
+      assert {:error, _reason, tokens, ^stream_after} = TokenStream.peek_n(stream_after, 4)
 
       assert length(tokens) == 3
     end
 
     test "strict peek_n/2 reports eof and never exposes buffered tokens" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
-      assert {:error, _reason, stream_after} = TokenStream.next(stream)
+      assert {:error, reason, stream_after} = TokenStream.next(stream)
 
-      assert {:ok, [], ^stream_after} = TokenStream.peek_n(stream_after, 3)
+      assert {:error, ^reason, [], ^stream_after} = TokenStream.peek_n(stream_after, 3)
     end
 
     test "strict peek_n/2 encounters an error, next still returns tokens" do
       stream = TokenStream.new("1 2 Ä", 1, 1, error_mode: :strict)
 
-      assert {:ok, tokens, stream_after} = TokenStream.peek_n(stream, 3)
-      # Should get at least the 2 valid tokens before error
+      assert {:error, _, tokens, stream_after} = TokenStream.peek_n(stream, 3)
+      # Should get the 2 valid tokens before error
       assert length(tokens) >= 2
 
       # Consume tokens until we get an error
@@ -972,52 +966,65 @@ defmodule Toxic.TokenStreamTest do
       assert {:error, ^reason, _} = TokenStream.next(stream_after_push)
       assert {:error, ^reason, _} = TokenStream.peek(stream_with_error)
     end
-  end
 
-  describe "EOL handling" do
-    # TODO: tests on operators, ;, dual_op, comment blocks
-    test "embed mode filters EOL tokens" do
-      stream = TokenStream.new("1\n2", 1, 1, eol_mode: :embed)
+    test "next/1 does not refill buffer after error" do
+      stream = TokenStream.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
 
-      {:ok, token1, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"1"} = token1
-
-      # No EOL token in embed mode
-      {:ok, token2, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"2"} = token2
-
-      assert {:eof, _} = TokenStream.next(stream)
+      assert {:ok, {:alias, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:., _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = TokenStream.next(stream)
+      assert {:error, _, _} = TokenStream.next(stream)
     end
 
-    test "embed mode filters EOL tokens in peek" do
-      stream = TokenStream.new("1\n2", 1, 1, eol_mode: :embed)
+    test "next/1 does not refill buffer after error - error after batch boundary" do
+      stream = TokenStream.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
 
-      {:ok, token1, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"1"} = token1
-
-      # No EOL token in embed mode
-      {:ok, token2, stream} = TokenStream.peek(stream)
-      assert {:int, _, ~c"2"} = token2
-
-      {:ok, token2, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"2"} = token2
-
-      assert {:eof, _} = TokenStream.next(stream)
+      assert {:ok, {:alias, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:., _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = TokenStream.next(stream)
+      assert {:error, _, _} = TokenStream.next(stream)
     end
 
-    test "emit mode includes EOL tokens" do
-      stream = TokenStream.new("1\n2", 1, 1, eol_mode: :emit)
+    test "peek/1 does not refill buffer after error" do
+      stream = TokenStream.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
 
-      {:ok, token1, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"1"} = token1
+      assert {:ok, {:alias, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:., _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = TokenStream.next(stream)
+      assert {:error, _, _} = TokenStream.peek(stream)
+    end
 
-      # EOL token present in emit mode
-      {:ok, token2, _stream} = TokenStream.next(stream)
+    test "peek/1 does not refill buffer after error - error after batch boundary" do
+      stream = TokenStream.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
 
-      case token2 do
-        {:eol, _} -> :ok
-        other -> flunk("Unexpected token: #{inspect(other)}")
-      end
+      assert {:ok, {:alias, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:., _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = TokenStream.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = TokenStream.next(stream)
+      assert {:error, _, _} = TokenStream.peek(stream)
+    end
+
+    test "to_stream/1 halts on error" do
+      stream = TokenStream.new("1 Ä", 1, 1, error_mode: :strict)
+
+      tokens =
+        stream
+        |> TokenStream.to_stream()
+        |> Enum.to_list()
+
+      assert length(tokens) == 1
+    end
+
+    test "position/0 returns driver position on error" do
+      stream = TokenStream.new("1 Ä", 1, 1, error_mode: :strict)
+
+      {:ok, _, stream} = TokenStream.next(stream)
+      {:error, _, stream} = TokenStream.next(stream)
+
+      assert {{1, 3}, _stream} = TokenStream.position(stream)
     end
   end
 
@@ -1049,20 +1056,17 @@ defmodule Toxic.TokenStreamTest do
       path = Enum.module_info()[:compile][:source] |> to_string()
       content = File.read!(path)
 
-      stream = TokenStream.new(content, 1, 1, max_batch: 3, eol_mode: :embed)
+      stream = TokenStream.new(content, 1, 1, max_batch: 3)
 
       # Repeatedly peek increasing amounts, then consume one token
       # to force multiple refills under a small batch cap
       {_, stream} =
         Enum.reduce(1..50, {0, stream}, fn k, {count, s} ->
           case TokenStream.peek_n(s, k) do
-            {:ok, tokens, s2} ->
+            {result, tokens, s2} when result in [:ok, :eof] ->
               assert length(tokens) >= 1
               {:ok, _t, s3} = TokenStream.next(s2)
               {count + 1, s3}
-
-            {:eof, _} ->
-              flunk("Unexpected EOF while peeking with k=#{k} at count=#{count}")
           end
         end)
 
@@ -1073,21 +1077,20 @@ defmodule Toxic.TokenStreamTest do
       # Peeking a large demand should still return some tokens (not EOF yet)
       case TokenStream.peek_n(stream, 100) do
         {:ok, tokens, _} -> assert length(tokens) > 0
-        {:eof, _} -> flunk("Unexpected EOF after partial consumption")
       end
     end
 
     test "peek_n returns EOF only after full consumption" do
       path = Enum.module_info()[:compile][:source] |> to_string()
       content = File.read!(path)
-      stream = TokenStream.new(content, 1, 1, max_batch: 4, eol_mode: :embed)
+      stream = TokenStream.new(content, 1, 1, max_batch: 4)
 
       # Consume all tokens
       {_total, stream} = consume_all(stream)
 
       # Now peeking for any positive N should yield EOF
-      assert {:eof, _} = TokenStream.peek_n(stream, 1)
-      assert {:eof, _} = TokenStream.peek_n(stream, 10)
+      assert {:eof, [], _} = TokenStream.peek_n(stream, 1)
+      assert {:eof, [], _} = TokenStream.peek_n(stream, 10)
     end
 
     test "max_batch does not affect produced tokens" do
@@ -1095,7 +1098,7 @@ defmodule Toxic.TokenStreamTest do
       content = File.read!(path)
 
       # tokenize with big batch size
-      stream = TokenStream.new(content, 1, 1, max_batch: 256_000, eol_mode: :embed)
+      stream = TokenStream.new(content, 1, 1, max_batch: 256_000)
 
       # Consume all tokens
       {big_batch_total, _stream} = consume_all(stream)
@@ -1106,7 +1109,7 @@ defmodule Toxic.TokenStreamTest do
             20613
           ] do
         # tokenize with small batch size
-        stream = TokenStream.new(content, 1, 1, max_batch: max_batch, eol_mode: :embed)
+        stream = TokenStream.new(content, 1, 1, max_batch: max_batch)
 
         # Consume all tokens
         {total, _stream} = consume_all(stream)
@@ -1118,10 +1121,10 @@ defmodule Toxic.TokenStreamTest do
 
   describe "peek near EOF" do
     test "peek_n returns available tokens then EOF once consumed" do
-      stream = TokenStream.new("1 +", 1, 1, eol_mode: :embed)
+      stream = TokenStream.new("1 +", 1, 1)
 
-      # Demand more than available; should get fewer, not EOF
-      {:ok, tokens, stream} = TokenStream.peek_n(stream, 5)
+      # Demand more than available; should get fewer, signal EOF
+      {:eof, tokens, stream} = TokenStream.peek_n(stream, 5)
       assert length(tokens) == 2
 
       # Consume both tokens
@@ -1129,47 +1132,12 @@ defmodule Toxic.TokenStreamTest do
       {:ok, _t2, stream} = TokenStream.next(stream)
 
       # Now peeking any N should return EOF
-      assert {:eof, _} = TokenStream.peek_n(stream, 5)
+      assert {:eof, [], _} = TokenStream.peek_n(stream, 5)
     end
 
     test "peek_n on empty input returns EOF" do
       stream = TokenStream.new("")
-      assert {:eof, _} = TokenStream.peek_n(stream, 3)
-    end
-  end
-
-  describe "defaults" do
-    test "default eol_mode is :emit" do
-      stream = TokenStream.new("1\n2")
-
-      {:ok, token1, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"1"} = token1
-
-      {:ok, token2, _stream} = TokenStream.next(stream)
-      assert {:eol, _} = token2
-    end
-  end
-
-  describe "peek_n/2 with EOL filtering" do
-    test "returns fewer tokens when intermediate EOLs are filtered" do
-      stream = TokenStream.new("1\n\n2", 1, 1, eol_mode: :embed)
-
-      {:ok, tokens, stream1} = TokenStream.peek_n(stream, 3)
-
-      assert [
-               {:int, _, ~c"1"},
-               {:int, _, ~c"2"}
-             ] = tokens
-
-      # Stream remains unchanged after peek
-      assert stream == stream1
-
-      # Ensure normal consumption still works
-      {:ok, t1, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"1"} = t1
-      {:ok, t2, stream} = TokenStream.next(stream)
-      assert {:int, _, ~c"2"} = t2
-      assert {:eof, _} = TokenStream.next(stream)
+      assert {:eof, [], _} = TokenStream.peek_n(stream, 3)
     end
   end
 end
