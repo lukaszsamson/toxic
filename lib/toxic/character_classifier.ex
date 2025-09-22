@@ -32,4 +32,8 @@ defmodule Toxic.CharacterClassifier do
                   0x202C,
                   0x2069
                 ]
+
+  # Unsupported newlines
+  # https://www.unicode.org/reports/tr55/
+  defguard break(c) when c in [0x000B, 0x000C, 0x0085, 0x2028, 0x2029]
 end

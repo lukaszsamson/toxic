@@ -10,9 +10,13 @@ defmodule Toxic.Dot do
     case strip_horizontal_space(t, 0) do
       {[?# | r], _} ->
         case tokenize_comment(r, [?#]) do
-          {:error, _char} ->
-            # error_comment(Char, [?# | R], line, column, scope, tokens)
-            {:error, :comment_bidi_error}
+          {:error, char, reason_str} ->
+            token = :io_lib.format("\\u~4.16.0B", [char])
+
+            reason =
+              {[line: line, column: column], reason_str, token}
+
+            {:error, reason}
 
           {rest, comment} ->
             Toxic.Tokenizer.preserve_comments(line, column, tokens, comment, rest, scope)

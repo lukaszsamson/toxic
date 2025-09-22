@@ -46,12 +46,11 @@ defmodule Toxic.Tokenizer do
 
   def tokenize_single([?# | string], line, column, scope, tokens) do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
-      {:error, char} ->
+      {:error, char, reason_str} ->
         token = :io_lib.format("\\u~4.16.0B", [char])
 
         reason =
-          {[line: line, column: column],
-           ~c"invalid bidirectional formatting character in comment: ", token}
+          {[line: line, column: column], reason_str, token}
 
         {:error, reason}
 

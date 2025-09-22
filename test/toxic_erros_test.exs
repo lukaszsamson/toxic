@@ -54,9 +54,9 @@ defmodule ToxicErrorsTest do
     )
   end
 
-  defp normalize_message({prefix, suffix}) do
+  defp normalize_message({prefix, suffix}, token) do
     try do
-      IO.iodata_to_binary(prefix) <> IO.iodata_to_binary(suffix)
+      IO.iodata_to_binary(prefix) <> token <> IO.iodata_to_binary(suffix)
     rescue
       ArgumentError ->
         # Fallback for invalid iodata
@@ -64,7 +64,7 @@ defmodule ToxicErrorsTest do
     end
   end
 
-  defp normalize_message(message) do
+  defp normalize_message(message, _token) do
     try do
       IO.iodata_to_binary(message)
     rescue
@@ -84,7 +84,7 @@ defmodule ToxicErrorsTest do
           inspect(token)
       end
 
-    {position, normalize_message(message), normalized_token}
+    {position, normalize_message(message, normalized_token), normalized_token}
   end
 
   defp collect_all_tokens(stream, acc) do
@@ -134,7 +134,11 @@ defmodule ToxicErrorsTest do
 
   # Tokenizer errors - Comments
   test "invalid bidi character in comment" do
-    tokenize_and_compare_error("#" <> <<0x202E::utf8>>)
+    tokenize_and_compare_error("#\u202E")
+  end
+
+  test "invalid line break character in comment" do
+    tokenize_and_compare_error("#\u2028")
   end
 
   test "unexpected token null byte" do
@@ -380,31 +384,26 @@ defmodule ToxicErrorsTest do
 
   # Dot handling
   test "invalid bidi character in dot comment" do
-    tokenize_and_compare_error(".#" <> <<0x202E::utf8>>,
-      assert: fn elixir_reason, toxic_reason ->
-        assert toxic_reason == :comment_bidi_error
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "invalid bidirectional formatting character in comment"
-        assert token == "\\u202E"
-      end
-    )
+    tokenize_and_compare_error(".#\u202E")
+  end
+
+  test "invalid line break character in dot comment" do
+    tokenize_and_compare_error(".#\u2028")
   end
 
   # Interpolation errors
   test "invalid bidi character in string" do
-    tokenize_and_compare_error("\"" <> <<0x202E::utf8>> <> "\"",
-      assert: fn elixir_reason, toxic_reason ->
-        {_position, toxic_message, _token} = toxic_reason
-
-        assert IO.iodata_to_binary(toxic_message) =~
-                 "invalid bidirectional formatting character in string"
-
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "invalid bidirectional formatting character in string"
-        assert token == "\\u202E"
-      end
-    )
+    tokenize_and_compare_error("\"\u202E\"")
+    tokenize_and_compare_error("\"\\\u202E\"")
   end
+
+  test "invalid line break character in string" do
+    tokenize_and_compare_error("\"\u2028\"")
+
+    tokenize_and_compare_error("\"\\\u2028\"")
+  end
+
+  # TODO: cover charlist etc
 
   test "interpolation in quoted identifier" do
     tokenize_and_compare_error(~S|foo."bar#{baz}"()|)
