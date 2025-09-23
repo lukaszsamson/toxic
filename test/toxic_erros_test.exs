@@ -8,7 +8,13 @@ defmodule ToxicErrorsTest do
     elixir_result = :elixir_tokenizer.tokenize(charlist, 1, 1, [])
 
     # Expected format: {:error, {position, msg1, msg2}, rest, warnings, tokens}
-    {:error, {elixir_position, elixir_msg, elixir_token}, _rest, _, _} = elixir_result
+    elixir_reason =
+      if Keyword.get(opts, :elixir_error, true) do
+        {:error, elixir_reason, _rest, _, _} = elixir_result
+        elixir_reason
+      else
+        :fake
+      end
 
     assert_fn = Keyword.get(opts, :assert, &default_assert/2)
 
@@ -23,7 +29,7 @@ defmodule ToxicErrorsTest do
     # Get error from Toxic tokenizer
     case collect_all_tokens(stream, []) do
       {:error, toxic_reason} ->
-        assert_fn.({elixir_position, elixir_msg, elixir_token}, toxic_reason)
+        assert_fn.(elixir_reason, toxic_reason)
         :ok
 
       {tokens, _final_stream} ->
@@ -90,7 +96,6 @@ defmodule ToxicErrorsTest do
   defp collect_all_tokens(stream, acc) do
     case Toxic.TokenStream.next(stream) do
       {:ok, token, new_stream} ->
-        IO.inspect(token)
         collect_all_tokens(new_stream, [token | acc])
 
       {:error, reason, _final_stream} ->
@@ -138,7 +143,11 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid line break character in comment" do
-    tokenize_and_compare_error("#\u2028")
+    if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+      tokenize_and_compare_error("#\u2028")
+    else
+      tokenize_and_compare_error("#\u2028", assert: fn _, _ -> :ok end, elixir_error: false)
+    end
   end
 
   test "unexpected token null byte" do
@@ -314,7 +323,11 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid line break character in dot comment" do
-    tokenize_and_compare_error(".#\u2028")
+    if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+      tokenize_and_compare_error(".#\u2028")
+    else
+      tokenize_and_compare_error(".#\u2028", assert: fn _, _ -> :ok end, elixir_error: false)
+    end
   end
 
   # Interpolation errors
@@ -324,22 +337,26 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid line break character in string" do
-    tokenize_and_compare_error("\"\u2028\"")
+    if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+      tokenize_and_compare_error("\"\u2028\"")
 
-    tokenize_and_compare_error("\"\\\u2028\"")
+      tokenize_and_compare_error("\"\\\u2028\"")
 
-    tokenize_and_compare_error("'\u2028'")
-    tokenize_and_compare_error(":\"\u2028\"")
-    tokenize_and_compare_error(":'\u2028'")
-    tokenize_and_compare_error("\"\"\"\n\u2028\n\"\"\"")
-    tokenize_and_compare_error("'''\n\u2028\n'''")
-    tokenize_and_compare_error("'''\n\n  \u2028\n  '''")
-    tokenize_and_compare_error("~s\"\u2028\"")
-    tokenize_and_compare_error("~s'''\n\u2028\n'''")
-    tokenize_and_compare_error("\"\u2028\": 1")
-    tokenize_and_compare_error("'\u2028': 1")
-    tokenize_and_compare_error("D.\"\u2028\"")
-    tokenize_and_compare_error("D.'\u2028'")
+      tokenize_and_compare_error("'\u2028'")
+      tokenize_and_compare_error(":\"\u2028\"")
+      tokenize_and_compare_error(":'\u2028'")
+      tokenize_and_compare_error("\"\"\"\n\u2028\n\"\"\"")
+      tokenize_and_compare_error("'''\n\u2028\n'''")
+      tokenize_and_compare_error("'''\n\n  \u2028\n  '''")
+      tokenize_and_compare_error("~s\"\u2028\"")
+      tokenize_and_compare_error("~s'''\n\u2028\n'''")
+      tokenize_and_compare_error("\"\u2028\": 1")
+      tokenize_and_compare_error("'\u2028': 1")
+      tokenize_and_compare_error("D.\"\u2028\"")
+      tokenize_and_compare_error("D.'\u2028'")
+    else
+      tokenize_and_compare_error("\"\u2028\"", assert: fn _, _ -> :ok end, elixir_error: false)
+    end
   end
 
   test "interpolation in quoted identifier" do
