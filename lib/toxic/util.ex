@@ -80,36 +80,7 @@ defmodule Toxic.Util do
     {:ok, List.to_atom(list)}
   end
 
-  def unescape_tokens(tokens, _line, _column, scope(unescape: true)) do
-    case Toxic.Unescape.unescape_tokens(tokens) do
-      {:ok, result} ->
-        {:ok, result}
-
-      {:error, _message, _token} ->
-        {:error, :syntax_error}
-        # {error, {?LOC(Line, Column), Message ++ ". Syntax error after: ", Token}}
-    end
-  end
-
-  def unescape_tokens(tokens, _line, _column, scope(unescape: false)) do
-    try do
-      {:ok, tokens_to_binary(tokens)}
-    rescue
-      UnicodeConversionError ->
-        # {error, {?LOC(Line, Column), "invalid encoding in tokens: ", toxic_utils:characters_to_list(Message)}}
-        {:error, :invalid_encoding}
-    end
-  end
-
-  defp tokens_to_binary(tokens) do
-    for token <- tokens do
-      if is_list(token), do: characters_to_binary(token), else: token
-    end
-  end
-
-  def characters_to_binary(data) when is_binary(data), do: data
-
-  def characters_to_binary(data) do
+  def characters_to_binary(data) when is_list(data) do
     case :unicode.characters_to_binary(data) do
       result when is_binary(result) -> result
       {:error, encoded, rest} -> conversion_error(:invalid, encoded, rest)
