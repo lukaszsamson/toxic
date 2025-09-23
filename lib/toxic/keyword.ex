@@ -82,7 +82,7 @@ defmodule Toxic.Keyword do
           ~c". In case you wanted to write a \"do\" expression, you must either use do-blocks or separate the keyword argument with comma. For example, you should either write:\n\n    if some_condition? do\n      :this\n    else\n      :that\n    end\n\nor the equivalent construct:\n\n    if(some_condition?, do: :this, else: :that)\n\nwhere \"some_condition?\" is the first argument and the second argument is a keyword list.\n\nYou may see this error if you forget a trailing comma before the \"do\" in a \"do\" block"
 
         {:error,
-         {[line: line, column: column], ~c"unexpected reserved word: " ++ help_message, ~c"do"}}
+         {[line: line, column: column], {~c"unexpected reserved word: ", help_message}, ~c"do"}}
     end
   end
 
