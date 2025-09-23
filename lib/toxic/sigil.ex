@@ -21,6 +21,8 @@ defmodule Toxic.Sigil do
     tokenize_upper_sigil_name(t, [s], line, column + 1, scope, tokens)
   end
 
+  @sigil_name_error ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: "
+
   def tokenize_lower_sigil_name(
         [s | _t] = original,
         [_ | _] = name_acc,
@@ -36,7 +38,7 @@ defmodule Toxic.Sigil do
 
     {:error,
      {[line: line, column: error_column],
-      ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: ",
+      @sigil_name_error,
       sigil_name}}
   end
 
@@ -66,7 +68,7 @@ defmodule Toxic.Sigil do
 
     reason =
       {[line: line, column: error_column],
-       ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: ",
+       @sigil_name_error,
        sigil_name}
 
     {:error, reason}
@@ -76,10 +78,6 @@ defmodule Toxic.Sigil do
   def tokenize_upper_sigil_name(t, name_acc, line, column, scope, tokens) do
     {:ok, Enum.reverse(name_acc), t, line, column, scope, tokens}
   end
-
-  # # sigil_name_error() ->
-  # #   "invalid sigil name, it should be either a one-letter lowercase letter or an " ++
-  # #   "uppercase letter optionally followed by uppercase letters and digits, got: ".
 
   def tokenize_sigil_contents(
         [h, h, h | t] = _original,
@@ -108,8 +106,6 @@ defmodule Toxic.Sigil do
         error_column = column + 3
         reason = {[line: line, column: error_column], message, [h, h, h]}
         {:error, reason}
-
-        # error({make_meta_len(line, column - 1 - length(sigil_name), 1, nil, scope), "heredoc allows only whitespace characters followed by a new line after opening ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
     end
   end
 
@@ -132,13 +128,13 @@ defmodule Toxic.Sigil do
      column + 1, scope}
   end
 
-  def tokenize_sigil_contents([h | _] = original, sigil_name, line, column, _scope, _tokens) do
+  def tokenize_sigil_contents([h | _] = _original, sigil_name, line, column, _scope, _tokens) do
     start_column = column - length(sigil_name) - 1
     char_hex = String.upcase(Integer.to_string(h, 16))
     char_hex_padded = String.pad_leading(char_hex, 4, "0")
 
-    message =
-      ~c"invalid sigil delimiter: \"" ++
+    message_detail =
+      ~c"\"" ++
         [h] ++
         ~c"\" (column " ++
         Integer.to_charlist(column) ++
@@ -146,15 +142,9 @@ defmodule Toxic.Sigil do
         String.to_charlist(char_hex_padded) ++
         ~c"). The available delimiters are: //, ||, \"\", '', (), [], {}, <>"
 
-    token = [?~ | sigil_name] ++ original
-    reason = {[line: line, column: start_column], message, token}
+    token = message_detail
+    reason = {[line: line, column: start_column], ~c"invalid sigil delimiter: ", token}
     {:error, reason}
-    #   # MessageString =
-    #   #   "\"~ts\" (column ~p, code point U+~4.16.0B). The available delimiters are: "
-    #   #   "//, ||, \"\", '', (), [], {}, <>"
-    #   # Message = io_lib:format(MessageString, [[H], column, H])
-    #   # Errorcolumn = column - 1 - length(sigil_name)
-    #   # error({make_meta_len(line, Errorcolumn, 1, nil, scope), "invalid sigil delimiter: ", Message}, [$~] ++ sigil_name ++ original, scope, tokens)
   end
 
   # Incomplete sigil.
