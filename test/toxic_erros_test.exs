@@ -309,14 +309,7 @@ defmodule ToxicErrorsTest do
 
   # Identifier errors
   test "identifier exceeding atom length limit" do
-    tokenize_and_compare_error(String.duplicate("a", 256),
-      assert: fn elixir_reason, toxic_reason ->
-        assert toxic_reason == :atom_length_system_limit
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "atom length must be less than system limit"
-        assert String.length(token) == 256
-      end
-    )
+    tokenize_and_compare_error(String.duplicate("a", 256))
   end
 
   test "mixed script identifier" do

@@ -45,12 +45,11 @@ defmodule Toxic.Util do
   def previous_was_dot?(_), do: false
 
   # TODO: port fixes form main
-  def unsafe_to_atom(part, _line, _column, _scope)
+  def unsafe_to_atom(part, line, column, _scope)
       when (is_binary(part) and byte_size(part) > 255) or
              (is_list(part) and length(part) > 255) do
-    {:error, :atom_length_system_limit}
-
-    # {error, {?LOC(line, column), "atom length must be less than system limit: ", elixir_utils:characters_to_list(part)}}
+    part_as_charlist = if is_binary(part), do: String.to_charlist(part), else: part
+    {:error, {[line: line, column: column], ~c"atom length must be less than system limit: ", part_as_charlist}}
   end
 
   # def unsafe_to_atom(part, line, column, #elixir_tokenizer{static_atoms_encoder=StaticAtomsEncoder}) when
