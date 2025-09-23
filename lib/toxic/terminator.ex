@@ -31,7 +31,6 @@ defmodule Toxic.Terminator do
       {:error, reason} ->
         {:error, reason}
 
-      # error(Reason, atom_to_list(element(1, Token)) ++ rest, scope, tokens);
       {:ok, new_scope} ->
         emit(token, rest, line, column, new_scope)
     end
@@ -106,7 +105,8 @@ defmodule Toxic.Terminator do
 
   def check_terminator({:end, meta}, [], _scope) do
     {{line, column}, _, _} = meta
-    {:error, {[line: line, column: column], ~c"unexpected reserved word: ", ~c"end"}}
+    {:error, {[line: line, column: column], {~c"unexpected reserved word: ", []}, ~c"end"}}
+    # TODO: hints required for full parity
     # Suffix =
     #   case lists:keyfind('end', 1, Hints) of
     #     {'end', Hintline, _Indentation} ->
