@@ -4939,24 +4939,7 @@ defmodule ToxicTest do
       """
 
       # Turn off validation to see the actual tokens
-      assert {:ok, toxic_tokens, _} = tokenize(source, must_match_elixir: false)
-
-      # Also get elixir tokens for comparison
-      charlist = to_charlist(source)
-      {:ok, _, _, _, elixir_tokens, _remaining} = :elixir_tokenizer.tokenize(charlist, 1, 1, [])
-      elixir_tokens_reversed = Enum.reverse(elixir_tokens)
-
-      IO.puts("\n=== TOXIC TOKENS ===")
-      toxic_legacy = Toxic.Legacy.ranges_to_legacy(toxic_tokens)
-      IO.inspect(toxic_legacy, limit: :infinity)
-
-      IO.puts("\n=== ELIXIR TOKENS ===")
-      IO.inspect(elixir_tokens_reversed, limit: :infinity)
-
-      # Fail if they don't match so we can see the difference
-      if toxic_legacy != elixir_tokens_reversed do
-        flunk("Tokens don't match - see output above")
-      end
+      assert {:ok, _toxic_tokens, _} = tokenize(source)
     end
 
     test "minimal reproduction - in_match_op precedence bug" do
