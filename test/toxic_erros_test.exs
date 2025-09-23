@@ -167,26 +167,7 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid float number" do
-    tokenize_and_compare_error("1.0e309",
-      assert: fn elixir_reason, toxic_reason ->
-        case toxic_reason do
-          {_, _, _} = tuple_reason ->
-            default_assert(elixir_reason, tuple_reason)
-
-          {:invalid_float, original} ->
-            flunk(
-              "Expected Toxic tokenizer to return Elixir-style error tuple for invalid float. " <>
-                "Elixir returned #{inspect(elixir_reason)}, toxic returned {:invalid_float, #{inspect(original)}}"
-            )
-
-          other ->
-            flunk(
-              "Unexpected Toxic tokenizer result for invalid float. " <>
-                "Elixir returned #{inspect(elixir_reason)}, toxic returned #{inspect(other)}"
-            )
-        end
-      end
-    )
+    tokenize_and_compare_error("1.0e309")
   end
 
   # Tokenizer errors - Reserved tokens
@@ -209,30 +190,19 @@ defmodule ToxicErrorsTest do
 
   # Terminator errors
   test "unexpected closing parenthesis" do
-    tokenize_and_compare_error(")",
-      assert: fn _elixir_reason, _toxic_reason ->
-        # Just test that we get an error
-        :ok
-      end
-    )
+    tokenize_and_compare_error(")")
   end
 
   test "unexpected closing bracket" do
-    tokenize_and_compare_error("]",
-      assert: fn _elixir_reason, _toxic_reason ->
-        # Just test that we get an error
-        :ok
-      end
-    )
+    tokenize_and_compare_error("]")
   end
 
   test "unexpected closing brace" do
-    tokenize_and_compare_error("}",
-      assert: fn _elixir_reason, _toxic_reason ->
-        # Just test that we get an error
-        :ok
-      end
-    )
+    tokenize_and_compare_error("}")
+  end
+
+  test "unexpected closing bitstring" do
+    tokenize_and_compare_error(">>")
   end
 
   test "unexpected token after alias" do
@@ -241,6 +211,10 @@ defmodule ToxicErrorsTest do
 
   test "mismatched closing terminator" do
     tokenize_and_compare_error("([)")
+  end
+
+  test "mismatched closing terminator - end" do
+    tokenize_and_compare_error("([end")
   end
 
   test "unexpected reserved word end" do
@@ -253,40 +227,15 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid uppercase sigil name" do
-    tokenize_and_compare_error("~Ab/foo/",
-      assert: fn elixir_reason, toxic_reason ->
-        {_position, toxic_message, _token} = toxic_reason
-        assert IO.iodata_to_binary(toxic_message) =~ "invalid sigil name"
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "invalid sigil name"
-        assert token |> to_string() |> String.starts_with?("~A")
-      end
-    )
+    tokenize_and_compare_error("~Ab/foo/")
   end
 
   test "invalid char after sigil heredoc open" do
-    tokenize_and_compare_error("~S\"\"\"foo\"\"\"",
-      assert: fn elixir_reason, toxic_reason ->
-        {_position, toxic_message, _token} = toxic_reason
-        assert IO.iodata_to_binary(toxic_message) =~ "heredoc allows only whitespace"
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "heredoc allows only whitespace"
-        assert token == "\"\"\""
-      end
-    )
+    tokenize_and_compare_error("~S\"\"\"foo\"\"\"")
   end
 
   test "invalid sigil delimiter" do
-    tokenize_and_compare_error("~s!foo!",
-      assert: fn elixir_reason, toxic_reason ->
-        {_position, toxic_message, _token} = toxic_reason
-        assert IO.iodata_to_binary(toxic_message) =~ "invalid sigil delimiter"
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "invalid sigil delimiter"
-        assert token =~ "code point U+0021"
-        assert token =~ "The available delimiters are:"
-      end
-    )
+    tokenize_and_compare_error("~s!foo!")
   end
 
   # Alias errors
@@ -294,9 +243,7 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("Foo.Bär")
   end
 
-  # Additional coverage - these have some format differences but demonstrate error handling
   test "fn followed by do" do
-    # Message format differs (elixir has extended help text)
     tokenize_and_compare_error("fn do")
   end
 
@@ -380,9 +327,19 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error("\"\u2028\"")
 
     tokenize_and_compare_error("\"\\\u2028\"")
-  end
 
-  # TODO: cover charlist etc
+    tokenize_and_compare_error("'\u2028'")
+    tokenize_and_compare_error(":\"\u2028\"")
+    tokenize_and_compare_error(":'\u2028'")
+    tokenize_and_compare_error("\"\"\"\n\u2028\n\"\"\"")
+    tokenize_and_compare_error("'''\n\u2028\n'''")
+    tokenize_and_compare_error("~s\"\u2028\"")
+    tokenize_and_compare_error("~s'''\n\u2028\n'''")
+    tokenize_and_compare_error("\"\u2028\": 1")
+    tokenize_and_compare_error("'\u2028': 1")
+    tokenize_and_compare_error("D.\"\u2028\"")
+    tokenize_and_compare_error("D.'\u2028'")
+  end
 
   test "interpolation in quoted identifier" do
     tokenize_and_compare_error(~S|foo."bar#{baz}"()|)
