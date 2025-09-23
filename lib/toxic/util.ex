@@ -44,7 +44,6 @@ defmodule Toxic.Util do
   def previous_was_dot?([{:., _} | _]), do: true
   def previous_was_dot?(_), do: false
 
-  # TODO: port fixes form main
   def unsafe_to_atom(part, line, column, _scope)
       when (is_binary(part) and byte_size(part) > 255) or
              (is_list(part) and length(part) > 255) do
@@ -54,6 +53,8 @@ defmodule Toxic.Util do
      {[line: line, column: column], ~c"atom length must be less than system limit: ",
       part_as_charlist}}
   end
+
+  # TODO: static_atoms_encoder
 
   # def unsafe_to_atom(part, line, column, #elixir_tokenizer{static_atoms_encoder=StaticAtomsEncoder}) when
   #     is_function(StaticAtomsEncoder) do
@@ -65,24 +66,16 @@ defmodule Toxic.Util do
   #       {error, {?LOC(line, column), elixir_utils:characters_to_list(Reason) ++ ": ", elixir_utils:characters_to_list(part)}}
   #   end
   # end
-  # def unsafe_to_atom(Binary, line, column, #elixir_tokenizer{existing_atoms_only=true}) when is_binary(Binary) do
-  #   try
-  #     {ok, binary_to_existing_atom(Binary, utf8)}
-  #   catch
-  #     error:badarg -> {error, {?LOC(line, column), "unsafe atom does not exist: ", elixir_utils:characters_to_list(Binary)}}
-  #   end
-  # end
-  def unsafe_to_atom(binary, _line, _column, _scope) when is_binary(binary) do
-    {:ok, String.to_atom(binary)}
+
+  def unsafe_to_atom(list, line, column, scope(existing_atoms_only: true)) when is_list(list) do
+    try do
+      {:ok, List.to_existing_atom(list)}
+    rescue
+      ArgumentError ->
+        {:error, {[line: line, column: column], "unsafe atom does not exist: ", list}}
+    end
   end
 
-  # def unsafe_to_atom(list, line, column, #elixir_tokenizer{existing_atoms_only=true}) when is_list(list) do
-  #   try
-  #     {ok, list_to_existing_atom(list)}
-  #   catch
-  #     error:badarg -> {error, {?LOC(line, column), "unsafe atom does not exist: ", list}}
-  #   end
-  # end
   def unsafe_to_atom(list, _line, _column, _scope) when is_list(list) do
     {:ok, List.to_atom(list)}
   end

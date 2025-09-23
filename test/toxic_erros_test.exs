@@ -3,13 +3,15 @@ defmodule ToxicErrorsTest do
 
   defp tokenize_and_compare_error(string, opts \\ []) do
     charlist = to_charlist(string)
-
-    # Get error from Elixir tokenizer
-    elixir_result = :elixir_tokenizer.tokenize(charlist, 1, 1, [])
+    existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
 
     # Expected format: {:error, {position, msg1, msg2}, rest, warnings, tokens}
     elixir_reason =
       if Keyword.get(opts, :elixir_error, true) do
+        # Get error from Elixir tokenizer
+        elixir_result =
+          :elixir_tokenizer.tokenize(charlist, 1, 1, existing_atoms_only: existing_atoms_only)
+
         {:error, elixir_reason, _rest, _, _} = elixir_result
         elixir_reason
       else
@@ -23,6 +25,7 @@ defmodule ToxicErrorsTest do
       Toxic.TokenStream.new(string, 1, 1,
         elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
         preserve_comments: Keyword.get(opts, :preserve_comments, false),
+        existing_atoms_only: existing_atoms_only,
         error_mode: :strict
       )
 
@@ -424,5 +427,12 @@ defmodule ToxicErrorsTest do
 
   test "consecutive semicolons" do
     tokenize_and_compare_error(";;")
+  end
+
+  test "not existing atom identifier" do
+    tokenize_and_compare_error(
+      "x0m18d7h0fd2s098d" <> to_string(Enum.random(11223..3_249_953)) <> ": 1",
+      existing_atoms_only: true
+    )
   end
 end
