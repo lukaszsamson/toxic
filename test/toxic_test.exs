@@ -2015,6 +2015,7 @@ defmodule ToxicTest do
 
     test "token after char with raw LF" do
       must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
+
       assert tokenize("?\n1", must_match_elixir: must_match_elixir) ==
                {:ok,
                 [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
@@ -2061,6 +2062,7 @@ defmodule ToxicTest do
 
     test "token after escaped LF" do
       must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
+
       assert tokenize("?\\\n1", must_match_elixir: must_match_elixir) ==
                {:ok,
                 [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}],

@@ -8,13 +8,13 @@ defmodule Toxic.Terminator do
 
     reason =
       "unexpected ( after alias #{alias}. Function names and identifiers in Elixir " <>
-      "start with lowercase characters or underscore. For example:\n\n" <>
-      "    hello_world()\n" <>
-      "    _starting_with_underscore()\n" <>
-      "    numb3rs_are_allowed()\n" <>
-      "    may_finish_with_question_mark?()\n" <>
-      "    may_finish_with_exclamation_mark!()\n\n" <>
-      "Unexpected token: "
+        "start with lowercase characters or underscore. For example:\n\n" <>
+        "    hello_world()\n" <>
+        "    _starting_with_underscore()\n" <>
+        "    numb3rs_are_allowed()\n" <>
+        "    may_finish_with_question_mark?()\n" <>
+        "    may_finish_with_exclamation_mark!()\n\n" <>
+        "Unexpected token: "
 
     {:error, {[line: line, column: column], String.to_charlist(reason), [~c"("]}}
   end
@@ -99,7 +99,8 @@ defmodule Toxic.Terminator do
           expected_delimiter: expected_end
         ]
 
-        {:error, {meta, unexpected_token_or_reserved(end_token), [String.to_charlist("#{end_token}")]}}
+        {:error,
+         {meta, unexpected_token_or_reserved(end_token), [String.to_charlist("#{end_token}")]}}
     end
   end
 

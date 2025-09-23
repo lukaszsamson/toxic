@@ -36,10 +36,7 @@ defmodule Toxic.Sigil do
     # Error position should be at the start of the sigil (~)
     error_column = column - length(name_acc) - 1
 
-    {:error,
-     {[line: line, column: error_column],
-      @sigil_name_error,
-      sigil_name}}
+    {:error, {[line: line, column: error_column], @sigil_name_error, sigil_name}}
   end
 
   def tokenize_lower_sigil_name(t, name_acc, line, column, scope, tokens) do
@@ -67,9 +64,7 @@ defmodule Toxic.Sigil do
     error_column = column - length(name_acc) - 1
 
     reason =
-      {[line: line, column: error_column],
-       @sigil_name_error,
-       sigil_name}
+      {[line: line, column: error_column], @sigil_name_error, sigil_name}
 
     {:error, reason}
   end
