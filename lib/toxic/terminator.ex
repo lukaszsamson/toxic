@@ -76,8 +76,8 @@ defmodule Toxic.Terminator do
   end
 
   def check_terminator(
-        {end_token, _end_meta},
-        [{start_token, _start_meta, _} | terminators],
+        {end_token, end_meta},
+        [{start_token, start_meta, _} | terminators],
         scope
       )
       when end_token in ~w|end ) ] } >>|a do
@@ -85,19 +85,22 @@ defmodule Toxic.Terminator do
       ^end_token ->
         {:ok, scope(scope, terminators: terminators)}
 
-      _expected_end ->
-        {:error, :unexpected_token_or_reserved}
-        #   Meta = [
-        #     {line, Startline},
-        #     {column, Startcolumn},
-        #     {end_line, Endline},
-        #     {end_column, Endcolumn},
-        #     {error_type, mismatched_delimiter},
-        #     {opening_delimiter, Start},
-        #     {closing_delimiter, End},
-        #     {expected_delimiter, ExpectedEnd}
-        #  ],
-        #  {error, {Meta, unexpected_token_or_reserved(End), [atom_to_list(End)]}}
+      expected_end ->
+        {{start_line, start_column}, _, _} = start_meta
+        {{end_line, end_column}, _, _} = end_meta
+
+        meta = [
+          line: start_line,
+          column: start_column,
+          end_line: end_line,
+          end_column: end_column,
+          error_type: :mismatched_delimiter,
+          opening_delimiter: start_token,
+          closing_delimiter: end_token,
+          expected_delimiter: expected_end
+        ]
+
+        {:error, {meta, unexpected_token_or_reserved(end_token), [String.to_charlist("#{end_token}")]}}
     end
   end
 
@@ -132,4 +135,7 @@ defmodule Toxic.Terminator do
   defp terminator(:"["), do: :"]"
   defp terminator(:"{"), do: :"}"
   defp terminator(:"<<"), do: :">>"
+
+  defp unexpected_token_or_reserved(:end), do: ~c"unexpected reserved word: "
+  defp unexpected_token_or_reserved(_), do: ~c"unexpected token: "
 end

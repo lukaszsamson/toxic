@@ -240,14 +240,7 @@ defmodule ToxicErrorsTest do
   end
 
   test "mismatched closing terminator" do
-    tokenize_and_compare_error("([)",
-      assert: fn elixir_reason, toxic_reason ->
-        assert toxic_reason == :unexpected_token_or_reserved
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "unexpected token:"
-        assert token == ")"
-      end
-    )
+    tokenize_and_compare_error("([)")
   end
 
   test "unexpected reserved word end" do
