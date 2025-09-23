@@ -236,14 +236,7 @@ defmodule ToxicErrorsTest do
   end
 
   test "unexpected token after alias" do
-    tokenize_and_compare_error("Foo(",
-      assert: fn elixir_reason, toxic_reason ->
-        assert toxic_reason == :unexpected_token_after_alias
-        {_position, message, token} = normalize_reason(elixir_reason)
-        assert message =~ "unexpected ( after alias"
-        assert token == "("
-      end
-    )
+    tokenize_and_compare_error("Foo(")
   end
 
   test "mismatched closing terminator" do

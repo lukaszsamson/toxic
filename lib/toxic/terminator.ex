@@ -2,23 +2,21 @@ defmodule Toxic.Terminator do
   import Toxic.Scope
   import Toxic.Util
 
-  def handle_terminator(_rest, _, _, _scope, {:"(", _meta}, [{:alias, _, alias} | _tokens])
+  def handle_terminator(_rest, _, _, _scope, {:"(", meta}, [{:alias, _, alias} | _tokens])
       when is_atom(alias) do
-    {:error, :unexpected_token_after_alias}
-    # Reason =
-    #   io_lib:format(
-    #     "unexpected ( after alias ~ts. Function names and identifiers in Elixir "
-    #     "start with lowercase characters or underscore. For example:\n\n"
-    #     "    hello_world()\n"
-    #     "    _starting_with_underscore()\n"
-    #     "    numb3rs_are_allowed()\n"
-    #     "    may_finish_with_question_mark?()\n"
-    #     "    may_finish_with_exclamation_mark!()\n\n"
-    #     "Unexpected token: ",
-    #     [Alias]
-    #   ),
+    {{line, column}, _, _} = meta
 
-    # error({?LOC(line, column), Reason, ["("]}, atom_to_list(Alias) ++ [$( | rest], scope, tokens)
+    reason =
+      "unexpected ( after alias #{alias}. Function names and identifiers in Elixir " <>
+      "start with lowercase characters or underscore. For example:\n\n" <>
+      "    hello_world()\n" <>
+      "    _starting_with_underscore()\n" <>
+      "    numb3rs_are_allowed()\n" <>
+      "    may_finish_with_question_mark?()\n" <>
+      "    may_finish_with_exclamation_mark!()\n\n" <>
+      "Unexpected token: "
+
+    {:error, {[line: line, column: column], String.to_charlist(reason), [~c"("]}}
   end
 
   # In elixir_tokenizer this clause is used only in eex
