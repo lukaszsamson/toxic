@@ -333,6 +333,7 @@ defmodule ToxicErrorsTest do
     tokenize_and_compare_error(":'\u2028'")
     tokenize_and_compare_error("\"\"\"\n\u2028\n\"\"\"")
     tokenize_and_compare_error("'''\n\u2028\n'''")
+    tokenize_and_compare_error("'''\n\n  \u2028\n  '''")
     tokenize_and_compare_error("~s\"\u2028\"")
     tokenize_and_compare_error("~s'''\n\u2028\n'''")
     tokenize_and_compare_error("\"\u2028\": 1")
