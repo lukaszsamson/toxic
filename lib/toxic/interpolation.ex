@@ -66,7 +66,7 @@ defmodule Toxic.Interpolation do
         _interpol,
         last
       ) do
-    {:done, meta(line, column, 1, nil), rest, line, column + 1, scope}
+    {:done, meta(line, column, 1, nil), nil, rest, line, column + 1, scope}
   end
 
   def tokenize_single(

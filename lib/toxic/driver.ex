@@ -231,32 +231,7 @@ defmodule Toxic.Driver do
           }
         )
 
-      # Sigil completion (no indentation)
-      {:done, meta, rest, line, column, scope} when kind == :sigil ->
-        # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
-        end_token = {:sigil_end, meta, delim, nil}
-
-        {rest, modifiers} = Toxic.Sigil.collect_modifiers(rest)
-        modifiers_length = length(modifiers)
-
-        output =
-          if modifiers_length != 0 do
-            [{:sigil_modifiers, meta(line, column, modifiers_length, nil), modifiers}]
-          else
-            []
-          end
-
-        return_token(end_token, rest, %{
-          state
-          | line: line,
-            column: column + modifiers_length,
-            scope: scope(scope, terminators: parent_terminators),
-            contexts: contexts_rest,
-            output: output
-        })
-
       {:done, meta, indent, rest, line, column, scope} when kind == :sigil ->
-        # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
         end_token = {:sigil_end, meta, delim, indent}
 
         {rest, modifiers} = Toxic.Sigil.collect_modifiers(rest)
@@ -278,7 +253,6 @@ defmodule Toxic.Driver do
             output: output
         })
 
-      # TODO: refactor - add indent in other clauses
       {:done, meta, indent, rest, line, column, scope}
       when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type =
@@ -308,7 +282,7 @@ defmodule Toxic.Driver do
             contexts: contexts_rest
         })
 
-      {:done, meta, rest, line, column, scope} when kind == :quoted_identifier ->
+      {:done, meta, nil, rest, line, column, scope} when kind == :quoted_identifier ->
         end_token_type =
           case rest do
             [?( | _] -> :quoted_paren_identifier_end
@@ -357,7 +331,7 @@ defmodule Toxic.Driver do
           })
         end
 
-      {:done, meta, rest, line, column, scope} ->
+      {:done, meta, nil, rest, line, column, scope} ->
         case rest do
           [?:, ws | tail] when is_space(ws) ->
             {{sl, sc}, {el, ec}, extra} = meta
