@@ -174,7 +174,10 @@ defmodule Toxic.Tokenizer do
       Toxic.Scope.prepend_warning(
         line,
         column,
-        ~c"single-quoted string represent charlists. Use ~c' if you indeed want a charlist or use \" instead",
+        ~c"using single-quoted strings to represent charlists is deprecated.\n" ++
+          ~c"Use ~c\"\" if you indeed want a charlist or use \"\" instead.\n" ++
+          ~c"You may run \"mix format --migrate\" to change all single-quoted\n" ++
+          ~c"strings to use the ~c sigil and fix this warning.",
         scope
       )
 
@@ -216,7 +219,7 @@ defmodule Toxic.Tokenizer do
   # Two Token Operators
 
   def tokenize_single([?:, ?:, ?: | rest], line, column, scope, _tokens) do
-    message = ~c"atom ::: must be written between quotes, as in :\\\":::\\\", to avoid ambiguity"
+    message = ~c"atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity"
     new_scope = Toxic.Scope.prepend_warning(line, column, message, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
@@ -846,19 +849,20 @@ defmodule Toxic.Tokenizer do
       end
 
     case List.last(identifier) do
-      ?! ->
+      last when last == ?! or last == ?? ->
         msg =
           :io_lib.format(
-            ~c"It is unclear if you mean \"~ts ~ts=\" or \"~ts =\". Please add " ++
+            ~c"found ~ts \"~ts\", ending with \"~ts\", followed by =. " ++
+              ~c"It is unclear if you mean \"~ts ~ts=\" or \"~ts =\". Please add " ++
               ~c"a space before or after ~ts to remove the ambiguity",
             [
               what,
               identifier,
-              [?!],
+              [last],
               :lists.droplast(identifier),
-              [?!],
+              [last],
               identifier,
-              [?!]
+              [last]
             ]
           )
 
