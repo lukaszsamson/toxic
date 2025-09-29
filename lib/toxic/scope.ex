@@ -44,4 +44,13 @@ defmodule Toxic.Scope do
 
   def track_ascii(true, scope), do: scope
   def track_ascii(false, scope), do: scope(scope, ascii_identifiers_only: false)
+
+  @doc """
+  Prepends a warning to the scope's warning list.
+  Warnings are stored as `{{line, column}, message}` tuples.
+  """
+  def prepend_warning(line, column, message, scope) do
+    warnings = scope(scope, :warnings)
+    scope(scope, warnings: [{{line, column}, message} | warnings])
+  end
 end

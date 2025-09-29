@@ -366,6 +366,18 @@ defmodule Toxic.TokenStream do
     {closer, stream}
   end
 
+  @doc """
+  Get accumulated warnings from the tokenizer.
+
+  Returns a list of warnings in the format `{{line, column}, message}`.
+  """
+  @spec warnings(t()) :: {[{{pos_integer(), pos_integer()}, charlist()}], t()}
+  def warnings(%__MODULE__{driver: driver} = stream) do
+    require Toxic.Scope
+    warnings = Toxic.Scope.scope(driver.scope, :warnings)
+    {warnings, stream}
+  end
+
   # Compute terms at the logical current position (before next token)
   defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]})
        when is_list(pre_terms) do

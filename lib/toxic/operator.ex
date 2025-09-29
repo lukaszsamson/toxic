@@ -114,26 +114,25 @@ defmodule Toxic.Operator do
         emit(token, remaining, line, column + length + extra, scope)
 
       {remaining, extra} ->
-        # TODO: warn
-        new_scope = scope
-        #       NewScope =
-        #         %% TODO: Remove these deprecations on Elixir v2.0
-        #         case Op of
-        #           '^^^' ->
-        #             Msg = "^^^ is deprecated. It is typically used as xor but it has the wrong precedence, use Bitwise.bxor/2 instead",
-        #             prepend_warning(Line, Column, Msg, Scope);
+        new_scope =
+          case op do
+            :"^^^" ->
+              msg =
+                ~c"^^^ is deprecated. It is typically used as xor but it has the wrong precedence, use Bitwise.bxor/2 instead"
 
-        #           '~~~' ->
-        #             Msg = "~~~ is deprecated. Use Bitwise.bnot/1 instead for clarity",
-        #             prepend_warning(Line, Column, Msg, Scope);
+              Toxic.Scope.prepend_warning(line, column, msg, scope)
 
-        #           '<|>' ->
-        #             Msg = "<|> is deprecated. Use another pipe-like operator",
-        #             prepend_warning(Line, Column, Msg, Scope);
+            :"~~~" ->
+              msg = ~c"~~~ is deprecated. Use Bitwise.bnot/1 instead for clarity"
+              Toxic.Scope.prepend_warning(line, column, msg, scope)
 
-        #           _ ->
-        #             Scope
-        #         end,
+            :"<|>" ->
+              msg = ~c"<|> is deprecated. Use another pipe-like operator"
+              Toxic.Scope.prepend_warning(line, column, msg, scope)
+
+            _ ->
+              scope
+          end
 
         token = {kind, meta(line, column, length, previous_was_eol(tokens)), op}
         emit_with_eol(token, remaining, line, column + length + extra, new_scope)

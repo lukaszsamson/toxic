@@ -64,14 +64,17 @@ defmodule Toxic.Dot do
   end
 
   defp handle_dot([?., h | t], line, column, dot_info, base_scope, _tokens) when is_quote(h) do
-    # TODO: warning
-    scope = base_scope
-    # scope = case H == $' of
-    #   true ->
-    #     prepend_warning(line, column, "single quotes around calls are deprecated. Use double quotes instead", Basescope);
-    #   false ->
-    #     Basescope
-    # end,
+    scope =
+      if h == ?' do
+        Toxic.Scope.prepend_warning(
+          line,
+          column,
+          ~c"single quotes around calls are deprecated. Use double quotes instead",
+          base_scope
+        )
+      else
+        base_scope
+      end
 
     dot_token = dot_token(dot_info)
     start_tok = {:quoted_identifier_start, meta(line, column, line, 1, nil), h}

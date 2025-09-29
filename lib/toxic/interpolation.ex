@@ -147,17 +147,18 @@ defmodule Toxic.Interpolation do
         interpol,
         last
       ) do
-    new_scope = scope
-    # TODO: warn
-    #   NewScope =
-    #     %% TODO: Remove this on Elixir v2.0
-    #     case Interpol of
-    #       true ->
-    #         Scope;
-    #       false ->
-    #         Msg = "using \\~ts to escape the closing of an uppercase sigil is deprecated, please use another delimiter or a lowercase sigil instead",
-    #         prepend_warning(Line, Column, io_lib:format(Msg, [[Last]]), Scope)
-    #     end,
+    new_scope =
+      if not interpol do
+        msg =
+          :io_lib.format(
+            ~c"using \\~ts to escape the closing of an uppercase sigil is deprecated, please use another delimiter or a lowercase sigil instead",
+            [[last]]
+          )
+
+        Toxic.Scope.prepend_warning(line, column, msg, scope)
+      else
+        scope
+      end
 
     tokenize_single(
       rest,

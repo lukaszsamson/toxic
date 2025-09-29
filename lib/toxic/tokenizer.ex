@@ -76,26 +76,28 @@ defmodule Toxic.Tokenizer do
   def tokenize_single([??, ?\\, h | t], line, column, scope, _tokens) do
     char = Toxic.Unescape.unescape_map(h)
 
-    # TODO: warn
-    new_scope = scope
-    # new_scope = if
-    #   H =:= Char, H =/= $\\ ->
-    #     case handle_char(Char) of
-    #       {Escape, Name} ->
-    #         Msg = io_lib:format("found ?\\ followed by code point 0x~.16B (~ts), please use ?~ts instead",
-    #                             [Char, Name, Escape]),
-    #         prepend_warning(line, column, Msg, scope);
+    new_scope =
+      if h == char and h != ?\\ do
+        case handle_char(char) do
+          {escape, name} ->
+            msg =
+              :io_lib.format(
+                ~c"found ?\\ followed by code point 0x~.16B (~ts), please use ?~ts instead",
+                [char, name, escape]
+              )
 
-    #       false when ?is_downcase(H); ?is_upcase(H) ->
-    #         Msg = io_lib:format("unknown escape sequence ?\\~tc, use ?~tc instead", [H, H]),
-    #         prepend_warning(line, column, Msg, scope);
+            Toxic.Scope.prepend_warning(line, column, msg, scope)
 
-    #       false ->
-    #         scope
-    #     end;
-    #   true ->
-    #     scope
-    # end,
+          false when is_downcase(h) or is_upcase(h) ->
+            msg = :io_lib.format(~c"unknown escape sequence ?\\~tc, use ?~tc instead", [h, h])
+            Toxic.Scope.prepend_warning(line, column, msg, scope)
+
+          false ->
+            scope
+        end
+      else
+        scope
+      end
 
     # Check if we have a literal newline after the escape
     {token, rest, new_line, new_column} =
@@ -113,16 +115,20 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([??, char | t], line, column, scope, _tokens) do
-    # TODO: warn
-    new_scope = scope
-    # new_scope = case handle_char(Char) of
-    #   {Escape, Name} ->
-    #     Msg = io_lib:format("found ? followed by code point 0x~.16B (~ts), please use ?~ts instead",
-    #                         [Char, Name, Escape]),
-    #     prepend_warning(line, column, Msg, scope);
-    #   false ->
-    #     scope
-    # end,
+    new_scope =
+      case handle_char(char) do
+        {escape, name} ->
+          msg =
+            :io_lib.format(
+              ~c"found ? followed by code point 0x~.16B (~ts), please use ?~ts instead",
+              [char, name, escape]
+            )
+
+          Toxic.Scope.prepend_warning(line, column, msg, scope)
+
+        false ->
+          scope
+      end
 
     # Check if the char is a newline
     {token, rest, new_line, new_column} =
@@ -146,10 +152,14 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?', ?', ?' | t], line, column, scope, tokens) do
-    # TODO: warn
-    new_scope = scope
+    new_scope =
+      Toxic.Scope.prepend_warning(
+        line,
+        column,
+        ~c"single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead",
+        scope
+      )
 
-    # new_scope = prepend_warning(line, column, "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"),
     Toxic.String.handle_heredocs(t, line, column, ?', new_scope, tokens)
   end
 
@@ -160,8 +170,14 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?' | t], line, column, scope, tokens) do
-    # TODO: warn
-    new_scope = scope
+    new_scope =
+      Toxic.Scope.prepend_warning(
+        line,
+        column,
+        ~c"single-quoted string represent charlists. Use ~c' if you indeed want a charlist or use \" instead",
+        scope
+      )
+
     Toxic.String.handle_strings(t, line, column + 1, ?', new_scope, tokens)
   end
 
@@ -200,10 +216,8 @@ defmodule Toxic.Tokenizer do
   # Two Token Operators
 
   def tokenize_single([?:, ?:, ?: | rest], line, column, scope, _tokens) do
-    # TODO: warn
-    new_scope = scope
-    # Message = "atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity",
-    # new_scope = prepend_warning(line, column, Message),
+    message = ~c"atom ::: must be written between quotes, as in :\\\":::\\\", to avoid ambiguity"
+    new_scope = Toxic.Scope.prepend_warning(line, column, message, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
   end
@@ -258,12 +272,10 @@ defmodule Toxic.Tokenizer do
         :handle_op
       end
 
-    # TODO: warn
-    # and_op3 or_op3 xor_op3 concat_op3
-    # new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope),
-
     def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
         when unquote(token)(t1, t2, t3) do
+      new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope)
+
       unquote(call)(
         rest,
         line,
@@ -271,7 +283,7 @@ defmodule Toxic.Tokenizer do
         unquote(token_name),
         3,
         List.to_atom([t1, t2, t3]),
-        scope,
+        new_scope,
         tokens
       )
     end
@@ -379,12 +391,18 @@ defmodule Toxic.Tokenizer do
         _tokens
       )
       when is_quote(h) do
-    scope = base_scope
-    # TODO: warn
-    # Scope = case H == $' of
-    #   true -> prepend_warning(Line, Column, "single quotes around atoms are deprecated. Use double quotes instead", BaseScope);
-    #   false -> BaseScope
-    # end,
+    scope =
+      if h == ?' do
+        Toxic.Scope.prepend_warning(
+          line,
+          column,
+          ~c"single quotes around atoms are deprecated. Use double quotes instead",
+          base_scope
+        )
+      else
+        base_scope
+      end
+
     {kind, start_type} =
       if(existing_atoms_only,
         do: {:atom_safe, :atom_safe_start},
@@ -404,10 +422,9 @@ defmodule Toxic.Tokenizer do
       ) do
     case Toxic.Identifier.tokenize_identifier(string, line, column, scope, false) do
       {_kind, unencoded, atom, rest, length, ascii?, _special} ->
-        # TODO: warn
-        new_scope = scope
+        new_scope =
+          maybe_warn_for_ambiguous_bang_before_equals(:atom, unencoded, rest, line, column, scope)
 
-        # NewScope = maybe_warn_for_ambiguous_bang_before_equals(atom, Unencoded, Rest, Line, Column, Scope),
         tracked_scope = track_ascii(ascii?, new_scope)
         token = {:atom, meta(line, column, length + 1, unencoded), atom}
         emit(token, rest, line, column + 1 + length, tracked_scope)
@@ -633,10 +650,16 @@ defmodule Toxic.Tokenizer do
             )
 
           _ when kind == :identifier ->
-            # TODO: warn
-            new_scope = scope
+            new_scope =
+              maybe_warn_for_ambiguous_bang_before_equals(
+                :identifier,
+                unencoded,
+                rest,
+                line,
+                column,
+                scope
+              )
 
-            # new_scope = maybe_warn_for_ambiguous_bang_before_equals(:identifier, unencoded, rest, line, column, scope)
             token =
               Toxic.Identifier.check_call_identifier(line, column, length, unencoded, atom, rest)
 
@@ -789,4 +812,70 @@ defmodule Toxic.Tokenizer do
   def preserve_comments(_line, _column, _tokens, _comment, _rest, _scope) do
     :ok
   end
+
+  # Warning helper functions
+
+  @doc """
+  Warns if three identical characters are followed by another of the same character.
+  Used to catch potentially confusing patterns like `&&&&` or `||||`.
+  """
+  def maybe_warn_too_many_of_same_char([t | _] = token, [t | _], line, column, scope) do
+    token_str = List.to_string(token)
+    char_str = List.to_string([t])
+
+    message =
+      :io_lib.format(
+        ~c"found \"~ts\" followed by \"~ts\", please use a space between \"~ts\" and the next \"~ts\"",
+        [token_str, char_str, token_str, char_str]
+      )
+
+    Toxic.Scope.prepend_warning(line, column, message, scope)
+  end
+
+  def maybe_warn_too_many_of_same_char(_token, _rest, _line, _column, scope), do: scope
+
+  @doc """
+  Warns about ambiguous bang-before-equals patterns like `foo!=` which could be
+  confused with `foo !=`.
+  """
+  def maybe_warn_for_ambiguous_bang_before_equals(kind, unencoded, [?= | _], line, column, scope) do
+    {what, identifier} =
+      case kind do
+        :atom -> {~c"atom", [?: | unencoded]}
+        :identifier -> {~c"identifier", unencoded}
+      end
+
+    case List.last(identifier) do
+      ?! ->
+        msg =
+          :io_lib.format(
+            ~c"It is unclear if you mean \"~ts ~ts=\" or \"~ts =\". Please add " ++
+              ~c"a space before or after ~ts to remove the ambiguity",
+            [
+              what,
+              identifier,
+              [?!],
+              :lists.droplast(identifier),
+              [?!],
+              identifier,
+              [?!]
+            ]
+          )
+
+        Toxic.Scope.prepend_warning(line, column, msg, scope)
+
+      _ ->
+        scope
+    end
+  end
+
+  def maybe_warn_for_ambiguous_bang_before_equals(
+        _kind,
+        _unencoded,
+        _rest,
+        _line,
+        _column,
+        scope
+      ),
+      do: scope
 end

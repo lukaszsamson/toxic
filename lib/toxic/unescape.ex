@@ -73,42 +73,63 @@ defmodule Toxic.Unescape do
 
   # Support deprecated single-hex format for compatibility with Elixir
   defp unescape_hex(<<a, rest::binary>>, map_fun, acc) when is_hex(a) do
-    IO.warn("\\xH inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\xH inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a], acc, 16)
   end
 
   # Support deprecated \x{H*} formats for compatibility with Elixir
   defp unescape_hex(<<?{, a, ?}, rest::binary>>, map_fun, acc) when is_hex(a) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a], acc, 16)
   end
 
   defp unescape_hex(<<?{, a, b, ?}, rest::binary>>, map_fun, acc) when is_hex(a) and is_hex(b) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a, b], acc, 16)
   end
 
   defp unescape_hex(<<?{, a, b, c, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a, b, c], acc, 16)
   end
 
   defp unescape_hex(<<?{, a, b, c, d, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a, b, c, d], acc, 16)
   end
 
   defp unescape_hex(<<?{, a, b, c, d, e, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a, b, c, d, e], acc, 16)
   end
 
   defp unescape_hex(<<?{, a, b, c, d, e, f, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) and is_hex(f) do
-    IO.warn("\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead")
+    IO.warn(
+      "\\x{H*} inside strings/sigils/chars is deprecated, please use \\xHH (byte) or \\uHHHH (code point) instead"
+    )
+
     append_codepoint(rest, map_fun, [a, b, c, d, e, f], acc, 16)
   end
 
