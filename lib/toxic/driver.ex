@@ -474,13 +474,17 @@ defmodule Toxic.Driver do
                        scope
                      ) do
                   {true, content} ->
-                    # For atoms, start_info.column already points to the : position
+                    # For atoms, extract the token start column from the start_token meta
+                    # The start_token has the : position, but start_info.column points to the delimiter
+                    {{_start_line, token_start_col}, {_end_line, _end_col}, _extra} =
+                      elem(start_info.token, 1)
+
                     __MODULE__.maybe_warn_unnecessary_quote(
                       kind,
                       content,
                       delim,
                       start_info.line,
-                      start_info.column,
+                      token_start_col,
                       scope
                     )
 
@@ -706,12 +710,27 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp compute_start_info(start_token, _delimiter, _line, _column) do
-    {{meta_start_line, meta_start_column}, {_meta_end_line, _meta_end_column}, _extra} =
+  defp compute_start_info(start_token, delimiter, line, column) do
+    {{_meta_start_line, meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
       elem(start_token, 1)
 
-    # Use the start column from the token's meta, which is the opening delimiter position
-    %{line: meta_start_line, column: meta_start_column, token: start_token}
+    delimiter_length = delimiter_length(delimiter)
+
+    cond do
+      line == meta_end_line and column - delimiter_length >= 1 ->
+        %{line: meta_end_line, column: column - delimiter_length, token: start_token}
+
+      true ->
+        base_column =
+          if meta_end_column > meta_start_column do
+            meta_end_column - delimiter_length
+          else
+            # TODO: no coverage, not possible?
+            meta_start_column
+          end
+
+        %{line: meta_end_line, column: max(base_column, 1), token: start_token}
+    end
   end
 
   defp pending_error(%__MODULE__{contexts: contexts, scope: scope} = _state) do
