@@ -55,31 +55,6 @@ defmodule Toxic.Driver do
     }
   end
 
-  # TODO: remove? no longer needed
-  def next_with_validation(string, state) do
-    result = next(string, state)
-    state = result |> Tuple.to_list() |> List.last()
-    ensure_state_valid(state)
-    result
-  end
-
-  defp ensure_state_valid(%__MODULE__{contexts: contexts} = state) do
-    case contexts do
-      [] ->
-        raise ArgumentError, message: "contexts is empty"
-
-      [mode] when mode != :normal ->
-        raise ArgumentError, message: "contexts contains invalid top mode #{inspect(mode)}"
-
-      list when is_list(list) ->
-        if List.last(list) != :normal do
-          raise ArgumentError, message: "contexts contains invalid top entry #{inspect(contexts)}"
-        end
-    end
-
-    state
-  end
-
   def next(rest, %__MODULE__{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end
@@ -655,25 +630,20 @@ defmodule Toxic.Driver do
   end
 
   defp compute_start_info(start_token, delimiter, line, column) do
-    {{_meta_start_line, meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
+    {{_meta_start_line, _meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
       elem(start_token, 1)
 
     delimiter_length = delimiter_length(delimiter)
 
     cond do
+      # TODO: this seems too complicated
       line == meta_end_line and column - delimiter_length >= 1 ->
         %{line: meta_end_line, column: column - delimiter_length, token: start_token}
 
       true ->
-        base_column =
-          if meta_end_column > meta_start_column do
-            meta_end_column - delimiter_length
-          else
-            # TODO: no coverage, not possible?
-            meta_start_column
-          end
+        base_column = meta_end_column - delimiter_length
 
-        %{line: meta_end_line, column: max(base_column, 1), token: start_token}
+        %{line: meta_end_line, column: base_column, token: start_token}
     end
   end
 
@@ -953,20 +923,6 @@ defmodule Toxic.Driver do
       end)
 
     current_terms ++ context_terms
-  end
-
-  @doc """
-  Suggest a missing closing terminator based on the current stack.
-
-  Returns the closer atom (e.g., :")", :"]", :"}", :">>", :end) or nil if none.
-  """
-  # TODO: remove? not used
-  @spec peek_missing_terminator(t()) :: atom() | nil
-  def peek_missing_terminator(%__MODULE__{} = driver) do
-    case current_terminators(driver) do
-      [{start, _meta, _indent} | _] -> closing_for(start)
-      [] -> nil
-    end
   end
 
   def closing_for(:fn), do: :end

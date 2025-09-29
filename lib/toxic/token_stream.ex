@@ -441,7 +441,7 @@ defmodule Toxic.TokenStream do
   end
 
   defp fetch_tokens_from_driver(driver, source_string, max_batch, acc, count, opts) do
-    case Toxic.Driver.next_with_validation(source_string, driver) do
+    case Toxic.Driver.next(source_string, driver) do
       {:ok, token, new_source_string, new_driver} ->
         # Snapshot terminators and starting position of the token
         pre_terms = Toxic.Driver.current_terminators(driver)
