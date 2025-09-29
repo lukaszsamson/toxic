@@ -66,7 +66,7 @@ defmodule Toxic.Interpolation do
         _interpol,
         last
       ) do
-    {:done, meta(line, column, 1, nil), [], rest, line, column + 1, scope}
+    {:done, meta(line, column, 1, nil), rest, line, column + 1, scope}
   end
 
   def tokenize_single(
@@ -80,7 +80,7 @@ defmodule Toxic.Interpolation do
         _interpol,
         [last, last, last]
       ) do
-    {:done, meta(line, column, 3, nil), [], column - 1, rest, line, column + 3, scope}
+    {:done, meta(line, column, 3, nil), column - 1, rest, line, column + 3, scope}
   end
 
   # Going through the string
@@ -249,7 +249,7 @@ defmodule Toxic.Interpolation do
         true,
         _last
       ) do
-    {:begin_interpolation, meta(line, column, 2, nil), :string, rest, line, column + 2, scope}
+    {:begin_interpolation, meta(line, column, 2, nil), rest, line, column + 2, scope}
   end
 
   def tokenize_single(

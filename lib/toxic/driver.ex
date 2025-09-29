@@ -152,35 +152,6 @@ defmodule Toxic.Driver do
     next(rest, new_state)
   end
 
-  # TODO: no coverage, not possible?
-  # def next(
-  #       [?} | rest],
-  #       %__MODULE__{
-  #         contexts: [
-  #           :normal,
-  #           {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
-  #         ],
-  #         deferrals: deferrals,
-  #         scope: scope(terminators: [{start, _meta, _indent} | _])
-  #       } =
-  #         state
-  #     )
-  #     when start != :"{" do
-  #   meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
-
-  #   new_state = %{
-  #     state
-  #     | column: state.column + 1,
-  #       contexts: [
-  #         {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
-  #       ],
-  #       output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
-  #       deferrals: []
-  #   }
-
-  #   next(rest, new_state)
-  # end
-
   def next(string, %__MODULE__{contexts: [:normal | _] = _contexts} = state) do
     carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
 
@@ -261,7 +232,7 @@ defmodule Toxic.Driver do
         )
 
       # Sigil completion (no indentation)
-      {:done, meta, _binary_part, rest, line, column, scope} when kind == :sigil ->
+      {:done, meta, rest, line, column, scope} when kind == :sigil ->
         # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
         end_token = {:sigil_end, meta, delim, nil}
 
@@ -284,7 +255,7 @@ defmodule Toxic.Driver do
             output: output
         })
 
-      {:done, meta, _binary_part, indent, rest, line, column, scope} when kind == :sigil ->
+      {:done, meta, indent, rest, line, column, scope} when kind == :sigil ->
         # {sigil_atom, start_delim} = sigil_from_interp(interpolation)
         end_token = {:sigil_end, meta, delim, indent}
 
@@ -308,7 +279,7 @@ defmodule Toxic.Driver do
         })
 
       # TODO: refactor - add indent in other clauses
-      {:done, meta, _binary_part, indent, rest, line, column, scope}
+      {:done, meta, indent, rest, line, column, scope}
       when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type =
           case kind do
@@ -337,7 +308,7 @@ defmodule Toxic.Driver do
             contexts: contexts_rest
         })
 
-      {:done, meta, _binary_part, rest, line, column, scope} when kind == :quoted_identifier ->
+      {:done, meta, rest, line, column, scope} when kind == :quoted_identifier ->
         end_token_type =
           case rest do
             [?( | _] -> :quoted_paren_identifier_end
@@ -386,8 +357,7 @@ defmodule Toxic.Driver do
           })
         end
 
-      {:done, meta, _binary_part, rest, line, column, scope} ->
-        # TODO: why binary_part?
+      {:done, meta, rest, line, column, scope} ->
         case rest do
           [?:, ws | tail] when is_space(ws) ->
             {{sl, sc}, {el, ec}, extra} = meta
@@ -517,7 +487,7 @@ defmodule Toxic.Driver do
             })
         end
 
-      {:begin_interpolation, meta, _kind, rest, line, column, scope} ->
+      {:begin_interpolation, meta, rest, line, column, scope} ->
         if kind == :quoted_identifier do
           {:error,
            interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim),
