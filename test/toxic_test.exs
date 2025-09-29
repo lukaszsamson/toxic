@@ -40,6 +40,7 @@ defmodule ToxicTest do
           find_first_difference(toxic_tokens, elixir_tokens_reversed, 0)
 
         dbg(toxic_tokens_with_ranges, limit: :infinity)
+        dbg(toxic_tokens_with_ranges_orig, limit: :infinity)
 
         IO.puts("\n=== FIRST DIFFERING TOKEN (index #{index}) ===")
         IO.puts("TOXIC:  #{inspect(toxic_diff)}")
@@ -6043,5 +6044,15 @@ defmodule ToxicTest do
     """
 
     assert {:ok, _, _} = tokenize(code, existing_atoms_only: true)
+  end
+
+  test "deprecated hex escape sequences" do
+    assert {:ok, _, _} = tokenize("\"\\x8\"")
+    assert {:ok, _, _} = tokenize("\"\\x{8}\"")
+    assert {:ok, _, _} = tokenize("\"\\x{88}\"")
+    assert {:ok, _, _} = tokenize("\"\\x{888}\"")
+    assert {:ok, _, _} = tokenize("\"\\x{8888}\"")
+    assert {:ok, _, _} = tokenize("\"\\x{88888}\"")
+    assert {:ok, _, _} = tokenize("\"\\x{088888}\"")
   end
 end
