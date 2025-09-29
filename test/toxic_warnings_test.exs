@@ -86,7 +86,7 @@ defmodule ToxicWarningsTest do
 
   # Charlist deprecation warnings
   test "single-quoted heredoc charlist" do
-    tokenize_and_compare_warning("'''\nhello'''")
+    tokenize_and_compare_warning("'''\nhello\n'''")
   end
 
   test "single-quoted string charlist" do
@@ -99,36 +99,21 @@ defmodule ToxicWarningsTest do
   end
 
   test "single quotes around atoms deprecated" do
-    # Elixir generates 2 warnings: one for deprecation, one for unnecessary quotes
-    # Toxic currently only generates the deprecation warning
-    tokenize_and_compare_warning(":'hello'",
-      assert: &assert_has_atom_deprecation_warning/2
-    )
+    tokenize_and_compare_warning(":'1hello'")
   end
 
-  defp assert_has_atom_deprecation_warning(elixir_warnings, toxic_warnings) do
-    # Must have at least the deprecation warning
-    assert length(toxic_warnings) >= 1, "Expected at least 1 warning"
+  test "unnecessary quotes around atoms" do
+    tokenize_and_compare_warning(":'hello'")
+    tokenize_and_compare_warning(":\"hello\"")
+  end
 
-    toxic_normalized = normalize_warnings(toxic_warnings)
-    elixir_normalized = normalize_warnings(elixir_warnings)
+  test "single quotes around keyword identifier deprecated" do
+    tokenize_and_compare_warning("'1hello': 1")
+  end
 
-    # Find the deprecation warning in Elixir's list
-    deprecation_warning =
-      Enum.find(elixir_normalized, fn {_pos, msg} ->
-        String.contains?(msg, "single quotes around atoms are deprecated")
-      end)
-
-    assert deprecation_warning != nil, "Elixir should have deprecation warning"
-
-    # Check Toxic has the deprecation warning
-    {{toxic_line, toxic_col}, toxic_msg} = hd(toxic_normalized)
-    {{elixir_line, elixir_col}, elixir_msg} = deprecation_warning
-
-    assert {toxic_line, toxic_col} == {elixir_line, elixir_col},
-           "Position mismatch"
-
-    assert toxic_msg == elixir_msg, "Message mismatch"
+  test "unnecessary quotes around keyword identifier" do
+    tokenize_and_compare_warning("'hello': 1")
+    tokenize_and_compare_warning("\"hello\": 1")
   end
 
   # Repeated character operator warnings
@@ -176,38 +161,16 @@ defmodule ToxicWarningsTest do
 
   # Dot syntax warnings
   test "single quotes around calls deprecated" do
-    # Elixir generates 2 warnings: one for deprecation, one for unnecessary quotes
-    # Toxic currently only generates the deprecation warning
-    # Accept either 1 or 2 warnings for now
-    tokenize_and_compare_warning("Foo.'bar'",
-      assert: &assert_has_deprecation_warning/2
-    )
+    tokenize_and_compare_warning("Foo.'1bar'")
   end
 
-  defp assert_has_deprecation_warning(elixir_warnings, toxic_warnings) do
-    # Must have at least the deprecation warning
-    assert length(toxic_warnings) >= 1, "Expected at least 1 warning"
-
-    # Check that Toxic's warning matches Elixir's first deprecation warning
-    toxic_normalized = normalize_warnings(toxic_warnings)
-    elixir_normalized = normalize_warnings(elixir_warnings)
-
-    # Find the deprecation warning in Elixir's list
-    deprecation_warning =
-      Enum.find(elixir_normalized, fn {_pos, msg} ->
-        String.contains?(msg, "single quotes around calls are deprecated")
-      end)
-
-    assert deprecation_warning != nil, "Elixir should have deprecation warning"
-
-    # Check Toxic has the deprecation warning
-    {{toxic_line, toxic_col}, toxic_msg} = hd(toxic_normalized)
-    {{elixir_line, elixir_col}, elixir_msg} = deprecation_warning
-
-    assert {toxic_line, toxic_col} == {elixir_line, elixir_col},
-           "Position mismatch"
-
-    assert toxic_msg == elixir_msg, "Message mismatch"
+  test "unnecessary quotes around calls" do
+    tokenize_and_compare_warning("Foo.'bar'")
+    tokenize_and_compare_warning("Foo.\"bar\"")
+    tokenize_and_compare_warning("Foo.\"bar\"()")
+    tokenize_and_compare_warning("Foo.\"bar\"[]")
+    tokenize_and_compare_warning("Foo.\"bar\" +1")
+    tokenize_and_compare_warning("Foo.\"bar\" do\n:ok\nend")
   end
 
   # Sigil escape warnings - uppercase sigil

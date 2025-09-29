@@ -27,7 +27,7 @@ defmodule Toxic.Driver do
             list(
               :normal
               | {:interp, interp_kind(), boolean(), interp_delim(), terminators(),
-                 %{line: pos_integer(), column: pos_integer(), token: tuple()}}
+                 %{line: pos_integer(), column: pos_integer(), token: tuple()}, list(), boolean()}
             ),
           deferrals: list(),
           output: list(),
@@ -109,7 +109,8 @@ defmodule Toxic.Driver do
         %__MODULE__{
           contexts: [
             :normal,
-            {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info}
+            {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info, _fragments,
+             _saw_interp}
             | _contexts_rest
           ],
           scope: scope(terminators: [{start_token, _meta, _indent} = entry | _])
@@ -125,7 +126,9 @@ defmodule Toxic.Driver do
         %__MODULE__{
           contexts: [
             :normal,
-            {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+            {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+             saw_interp}
+            | contexts_rest
           ],
           deferrals: deferrals,
           scope: scope(terminators: [])
@@ -138,7 +141,9 @@ defmodule Toxic.Driver do
       state
       | column: state.column + 1,
         contexts: [
-          {:interp, kind, interpolation, delim, parent_terminators, start_info} | contexts_rest
+          {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+           saw_interp}
+          | contexts_rest
         ],
         output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
         deferrals: []
@@ -200,12 +205,11 @@ defmodule Toxic.Driver do
   def next(
         string,
         %__MODULE__{
-          contexts:
-            [
-              {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info}
-              | contexts_rest
-            ] =
-              contexts
+          contexts: [
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, saw_interp}
+            | contexts_rest
+          ]
         } =
           state
       ) do
@@ -236,6 +240,13 @@ defmodule Toxic.Driver do
               {binary_part, line}
           end
 
+        # Update context to accumulate this fragment
+        updated_contexts = [
+          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+           [binary_part | fragments], saw_interp}
+          | contexts_rest
+        ]
+
         return_token(
           {:string_fragment, meta(start_line, start_column, line, end_column, extra),
            binary_part},
@@ -244,7 +255,8 @@ defmodule Toxic.Driver do
             state
             | line: line,
               column: column,
-              scope: scope
+              scope: scope,
+              contexts: updated_contexts
           }
         )
 
@@ -320,12 +332,34 @@ defmodule Toxic.Driver do
             _ -> :quoted_identifier_end
           end
 
+        # Check for unnecessary quotes on calls
+        updated_scope =
+          case __MODULE__.is_unnecessary_quote(
+                 Enum.reverse(fragments),
+                 saw_interp,
+                 :quoted_identifier,
+                 scope
+               ) do
+            {true, content} ->
+              __MODULE__.maybe_warn_unnecessary_quote(
+                :quoted_identifier,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                scope
+              )
+
+            false ->
+              scope
+          end
+
         if end_token_type == :quoted_identifier_end do
           next(rest, %{
             state
             | line: line,
               column: column,
-              scope: scope(scope, terminators: parent_terminators),
+              scope: scope(updated_scope, terminators: parent_terminators),
               contexts: contexts_rest,
               deferrals: [{end_token_type, meta, delim}]
           })
@@ -334,7 +368,7 @@ defmodule Toxic.Driver do
             state
             | line: line,
               column: column,
-              scope: scope(scope, terminators: parent_terminators),
+              scope: scope(updated_scope, terminators: parent_terminators),
               contexts: contexts_rest
           })
         end
@@ -355,12 +389,35 @@ defmodule Toxic.Driver do
                   :kw_identifier_unsafe_end
               end
 
+            # Check for unnecessary quotes on keywords
+            updated_scope =
+              case __MODULE__.is_unnecessary_quote(
+                     Enum.reverse(fragments),
+                     saw_interp,
+                     end_token_type,
+                     scope
+                   ) do
+                {true, content} ->
+                  # For keywords, column - 1 to point to the : before the quote
+                  __MODULE__.maybe_warn_unnecessary_quote(
+                    end_token_type,
+                    content,
+                    delim,
+                    start_info.line,
+                    start_info.column - 1,
+                    scope
+                  )
+
+                false ->
+                  scope
+              end
+
             {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
              %{
                state
                | line: line,
                  column: column + 1,
-                 scope: scope(scope, terminators: parent_terminators),
+                 scope: scope(updated_scope, terminators: parent_terminators),
                  contexts: contexts_rest
              }}
 
@@ -381,11 +438,38 @@ defmodule Toxic.Driver do
                   :bin_string_end
               end
 
+            # Check for unnecessary quotes on atoms
+            updated_scope =
+              if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
+                case __MODULE__.is_unnecessary_quote(
+                       Enum.reverse(fragments),
+                       saw_interp,
+                       kind,
+                       scope
+                     ) do
+                  {true, content} ->
+                    # For atoms, column - 1 to point to the : before the quote
+                    __MODULE__.maybe_warn_unnecessary_quote(
+                      kind,
+                      content,
+                      delim,
+                      start_info.line,
+                      start_info.column - 1,
+                      scope
+                    )
+
+                  false ->
+                    scope
+                end
+              else
+                scope
+              end
+
             return_token({end_token_type, meta, delim}, rest, %{
               state
               | line: line,
                 column: column,
-                scope: scope(scope, terminators: parent_terminators),
+                scope: scope(updated_scope, terminators: parent_terminators),
                 contexts: contexts_rest
             })
         end
@@ -396,12 +480,17 @@ defmodule Toxic.Driver do
            interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim),
            rest, state}
         else
+          # Mark that we saw interpolation in the parent context
+          updated_parent_context =
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, true}
+
           updated = %{
             state
             | line: line,
               column: column,
               scope: scope,
-              contexts: [:normal | contexts]
+              contexts: [:normal, updated_parent_context | contexts_rest]
           }
 
           return_token({:begin_interpolation, meta, kind}, rest, updated)
@@ -560,7 +649,8 @@ defmodule Toxic.Driver do
 
         contexts =
           [
-            {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info}
+            {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info, [],
+             false}
             | contexts
           ]
 
@@ -616,11 +706,13 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp find_missing_interpolation([:normal, {:interp, _, _, _, _, _} = interp | _]), do: interp
+  defp find_missing_interpolation([:normal, {:interp, _, _, _, _, _, _, _} = interp | _]),
+    do: interp
+
   defp find_missing_interpolation([_ | rest]), do: find_missing_interpolation(rest)
   defp find_missing_interpolation(_), do: nil
 
-  defp find_missing_context([{:interp, _, _, _, _, _} = interp | _]), do: interp
+  defp find_missing_context([{:interp, _, _, _, _, _, _, _} = interp | _]), do: interp
   defp find_missing_context([_ | rest]), do: find_missing_context(rest)
   defp find_missing_context(_), do: nil
 
@@ -631,8 +723,7 @@ defmodule Toxic.Driver do
 
   defp missing_terminator_reason(
          {:interp, kind, _allowed?, delim, _parents,
-          %{line: start_line, column: start_column} =
-            start_info},
+          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
          %__MODULE__{line: end_line, column: end_column}
        ) do
     delim_chars = delimiter_charlist(delim)
@@ -664,8 +755,7 @@ defmodule Toxic.Driver do
 
   defp missing_interpolation_reason(
          {:interp, kind, _allowed?, delim, _parents,
-          %{line: start_line, column: start_column} =
-            start_info},
+          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
          %__MODULE__{line: end_line, column: end_column}
        ) do
     delim_chars = delimiter_charlist(delim)
@@ -852,7 +942,8 @@ defmodule Toxic.Driver do
           # Add the interpolation brace terminator
           [{:"{", nil, 0}]
 
-        {{:interp, _kind, _allowed?, delim, parent_terms, _start_info}, _index} ->
+        {{:interp, _kind, _allowed?, delim, parent_terms, _start_info, _fragments, _saw_interp},
+         _index} ->
           # Get parent terminators
           parent_terms =
             case parent_terms do
@@ -901,5 +992,95 @@ defmodule Toxic.Driver do
   # Handle string-like delimiters - the delimiter is already converted to atom in current_terminators
   def closing_for(delimiter) when is_atom(delimiter) do
     delimiter
+  end
+
+  # Helper functions for unnecessary quote warning
+
+  @doc false
+  def is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope) when saw_interpolation?,
+    do: false
+
+  def is_unnecessary_quote(fragments, false, kind, scope) do
+    case fragments do
+      [single_fragment] ->
+        # We have exactly one fragment, check if it's a valid identifier
+        content = IO.iodata_to_binary(single_fragment)
+        check_identifier_validity(content, kind, scope)
+
+      _ ->
+        # Multiple fragments or no fragments
+        false
+    end
+  end
+
+  defp check_identifier_validity(content, kind, scope) do
+    charlist = String.to_charlist(content)
+
+    case Toxic.Identifier.tokenize_identifier(charlist, 1, 1, scope, false) do
+      {:identifier, ^charlist, _atom, [], _length, true, special} ->
+        # Valid identifier, ASCII, no remaining input
+        # For atoms, check that @ is not in special markers
+        case kind do
+          k when k in [:atom_safe, :atom_unsafe] ->
+            if :at in special, do: false, else: {true, content}
+
+          _ ->
+            {true, content}
+        end
+
+      {:identifier, ^charlist, _atom, [], _length, false, _special} ->
+        # Valid identifier but not ASCII - still valid for calls
+        case kind do
+          :quoted_identifier ->
+            {true, content}
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  @doc false
+  def maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
+    msg =
+      case kind do
+        k when k in [:atom_safe, :atom_unsafe] ->
+          :io_lib.format(
+            ~c"found quoted atom \"~ts\" but the quotes are not required. " ++
+              ~c"Atoms made exclusively of ASCII letters, numbers, underscores, " ++
+              ~c"beginning with a letter or underscore, and optionally ending with ! or ? " ++
+              ~c"do not require quotes",
+            [content]
+          )
+
+        k
+        when k in [
+               :kw_identifier_safe,
+               :kw_identifier_unsafe,
+               :kw_identifier_safe_end,
+               :kw_identifier_unsafe_end
+             ] ->
+          :io_lib.format(
+            ~c"found quoted keyword \"~ts\" but the quotes are not required. " ++
+              ~c"Note that keywords are always atoms, even when quoted. " ++
+              ~c"Similar to atoms, keywords made exclusively of ASCII " ++
+              ~c"letters, numbers, and underscores and not beginning with a " ++
+              ~c"number do not require quotes",
+            [content]
+          )
+
+        :quoted_identifier ->
+          :io_lib.format(
+            ~c"found quoted call \"~ts\" but the quotes are not required. " ++
+              ~c"Calls made exclusively of Unicode letters, numbers, and underscores " ++
+              ~c"and not beginning with a number do not require quotes",
+            [content]
+          )
+      end
+
+    Toxic.Scope.prepend_warning(line, column, msg, scope)
   end
 end
