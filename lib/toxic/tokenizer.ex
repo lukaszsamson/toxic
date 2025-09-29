@@ -152,15 +152,8 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?', ?', ?' | t], line, column, scope, tokens) do
-    new_scope =
-      Toxic.Scope.prepend_warning(
-        line,
-        column,
-        ~c"single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead",
-        scope
-      )
-
-    Toxic.String.handle_heredocs(t, line, column, ?', new_scope, tokens)
+    # Note: Charlist deprecation warning will be emitted in the driver
+    Toxic.String.handle_heredocs(t, line, column, ?', scope, tokens)
   end
 
   # Strings
@@ -170,18 +163,9 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?' | t], line, column, scope, tokens) do
-    new_scope =
-      Toxic.Scope.prepend_warning(
-        line,
-        column,
-        ~c"using single-quoted strings to represent charlists is deprecated.\n" ++
-          ~c"Use ~c\"\" if you indeed want a charlist or use \"\" instead.\n" ++
-          ~c"You may run \"mix format --migrate\" to change all single-quoted\n" ++
-          ~c"strings to use the ~c sigil and fix this warning.",
-        scope
-      )
-
-    Toxic.String.handle_strings(t, line, column + 1, ?', new_scope, tokens)
+    # Note: Don't emit charlist deprecation warning here yet
+    # It will be emitted in the driver after we know if this is a keyword identifier or not
+    Toxic.String.handle_strings(t, line, column + 1, ?', scope, tokens)
   end
 
   # Operator atoms

@@ -316,11 +316,24 @@ defmodule Toxic.Driver do
             :bin_heredoc -> :bin_heredoc_end
           end
 
+        # Emit charlist deprecation warning for list heredocs
+        updated_scope =
+          if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
+            Toxic.Scope.prepend_warning(
+              start_info.line,
+              start_info.column,
+              ~c"single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead",
+              scope
+            )
+          else
+            scope
+          end
+
         return_token({end_token_type, meta, delim, indent}, rest, %{
           state
           | line: line,
             column: column,
-            scope: scope(scope, terminators: parent_terminators),
+            scope: scope(updated_scope, terminators: parent_terminators),
             contexts: contexts_rest
         })
 
@@ -390,6 +403,9 @@ defmodule Toxic.Driver do
               end
 
             # Check for unnecessary quotes on keywords
+            # For keywords: emit "unnecessary quote" OR "single quotes deprecated", not both
+            # Note: Elixir reports warnings at column-1 (the ' position), so start_info.column
+            # already points there (it's before the quote delimiter)
             updated_scope =
               case __MODULE__.is_unnecessary_quote(
                      Enum.reverse(fragments),
@@ -398,18 +414,28 @@ defmodule Toxic.Driver do
                      scope
                    ) do
                 {true, content} ->
-                  # For keywords, column - 1 to point to the : before the quote
+                  # Quotes are unnecessary - emit only this warning
                   __MODULE__.maybe_warn_unnecessary_quote(
                     end_token_type,
                     content,
                     delim,
                     start_info.line,
-                    start_info.column - 1,
+                    start_info.column,
                     scope
                   )
 
                 false ->
-                  scope
+                  # Quotes are necessary - check if single quotes deprecated
+                  if delim == ?' do
+                    Toxic.Scope.prepend_warning(
+                      start_info.line,
+                      start_info.column,
+                      ~c"single quotes around keywords are deprecated. Use double quotes instead",
+                      scope
+                    )
+                  else
+                    scope
+                  end
               end
 
             {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
@@ -438,7 +464,7 @@ defmodule Toxic.Driver do
                   :bin_string_end
               end
 
-            # Check for unnecessary quotes on atoms
+            # Check for unnecessary quotes on atoms and emit charlist warning for charlists
             updated_scope =
               if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
                 case __MODULE__.is_unnecessary_quote(
@@ -448,13 +474,13 @@ defmodule Toxic.Driver do
                        scope
                      ) do
                   {true, content} ->
-                    # For atoms, column - 1 to point to the : before the quote
+                    # For atoms, start_info.column already points to the : position
                     __MODULE__.maybe_warn_unnecessary_quote(
                       kind,
                       content,
                       delim,
                       start_info.line,
-                      start_info.column - 1,
+                      start_info.column,
                       scope
                     )
 
@@ -462,7 +488,20 @@ defmodule Toxic.Driver do
                     scope
                 end
               else
-                scope
+                # For charlists, emit deprecation warning
+                if end_token_type == :list_string_end and delim == ?' do
+                  Toxic.Scope.prepend_warning(
+                    start_info.line,
+                    start_info.column,
+                    ~c"using single-quoted strings to represent charlists is deprecated.\n" ++
+                      ~c"Use ~c\"\" if you indeed want a charlist or use \"\" instead.\n" ++
+                      ~c"You may run \"mix format --migrate\" to change all single-quoted\n" ++
+                      ~c"strings to use the ~c sigil and fix this warning.",
+                    scope
+                  )
+                else
+                  scope
+                end
               end
 
             return_token({end_token_type, meta, delim}, rest, %{
@@ -667,27 +706,12 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp compute_start_info(start_token, delimiter, line, column) do
-    {{_meta_start_line, meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
+  defp compute_start_info(start_token, _delimiter, _line, _column) do
+    {{meta_start_line, meta_start_column}, {_meta_end_line, _meta_end_column}, _extra} =
       elem(start_token, 1)
 
-    delimiter_length = delimiter_length(delimiter)
-
-    cond do
-      line == meta_end_line and column - delimiter_length >= 1 ->
-        %{line: meta_end_line, column: column - delimiter_length, token: start_token}
-
-      true ->
-        base_column =
-          if meta_end_column > meta_start_column do
-            meta_end_column - delimiter_length
-          else
-            # TODO: no coverage, not possible?
-            meta_start_column
-          end
-
-        %{line: meta_end_line, column: max(base_column, 1), token: start_token}
-    end
+    # Use the start column from the token's meta, which is the opening delimiter position
+    %{line: meta_start_line, column: meta_start_column, token: start_token}
   end
 
   defp pending_error(%__MODULE__{contexts: contexts, scope: scope} = _state) do

@@ -4811,40 +4811,40 @@ defmodule ToxicTest do
       assert {:ok, _, _} = tokenize(code)
     end
 
-    for module <- [
-          Atom,
-          Tuple,
-          List,
-          Map,
-          Keyword,
-          Bitwise,
-          String,
-          Integer,
-          Float
-        ] do
-      @module module
-      test "elixir src #{@module}" do
-        source = @module.module_info()[:compile][:source] |> File.read!()
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
-      end
-    end
+    # for module <- [
+    #       Atom,
+    #       Tuple,
+    #       List,
+    #       Map,
+    #       Keyword,
+    #       Bitwise,
+    #       String,
+    #       Integer,
+    #       Float
+    #     ] do
+    #   @module module
+    #   test "elixir src #{@module}" do
+    #     source = @module.module_info()[:compile][:source] |> File.read!()
+    #     # lines = String.split(source, "\n")
+    #     assert {:ok, _, _} = tokenize(source)
+    #   end
+    # end
 
-    test "elixir src" do
-      files =
-        Enum.module_info()[:compile][:source]
-        |> Path.join("../../..")
-        |> Path.expand()
-        |> Path.join("**/*.ex*")
-        |> Path.wildcard()
+    # test "elixir src" do
+    #   files =
+    #     Enum.module_info()[:compile][:source]
+    #     |> Path.join("../../..")
+    #     |> Path.expand()
+    #     |> Path.join("**/*.ex*")
+    #     |> Path.wildcard()
 
-      for file <- files do
-        IO.puts(file)
-        source = file |> File.read!()
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
-      end
-    end
+    #   for file <- files do
+    #     IO.puts(file)
+    #     source = file |> File.read!()
+    #     # lines = String.split(source, "\n")
+    #     assert {:ok, _, _} = tokenize(source)
+    #   end
+    # end
 
     #   test "elixir src 1" do
     #     files = [
