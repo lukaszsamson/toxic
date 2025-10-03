@@ -7,6 +7,11 @@ defmodule Toxic.Driver do
             column: 1,
             scope: nil,
             contexts: [:normal],
+            # Error-tolerant mode controls
+            error_mode: :tolerant,
+            error_sync: [:semicolon, :newline, :closer, :comma],
+            error_max_skip: 4096,
+            insert_structural_closers: false,
             # New: prioritized deferral list for delayed emissions
             # Entries: {:emit_next, token, consume_len, after_action | nil}
             #  - consume_len: non-neg integer to consume from input and advance column
@@ -29,6 +34,10 @@ defmodule Toxic.Driver do
               | {:interp, interp_kind(), boolean(), interp_delim(), terminators(),
                  %{line: pos_integer(), column: pos_integer(), token: tuple()}, list(), boolean()}
             ),
+          error_mode: :tolerant | :strict,
+          error_sync: [:semicolon | :newline | :closer | :comma],
+          error_max_skip: non_neg_integer(),
+          insert_structural_closers: boolean(),
           deferrals: list(),
           output: list(),
           recent_token: any(),
@@ -41,10 +50,18 @@ defmodule Toxic.Driver do
     existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
+    error_mode = Keyword.get(opts, :error_mode, :tolerant)
+    error_sync = Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer, :comma])
+    error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
+    insert_structural_closers = Keyword.get(opts, :insert_structural_closers, false)
 
     %__MODULE__{
       line: line,
       column: column,
+      error_mode: error_mode,
+      error_sync: error_sync,
+      error_max_skip: error_max_skip,
+      insert_structural_closers: insert_structural_closers,
       scope:
         scope(
           identifier_tokenizer: String.Tokenizer,
@@ -141,7 +158,10 @@ defmodule Toxic.Driver do
 
     case handle_tokenize_result(state, result) do
       {:error, reason, state} ->
-        {:error, reason, string, state}
+        case state.error_mode do
+          :strict -> {:error, reason, string, state}
+          :tolerant -> emit_error_and_advance(reason, string, state)
+        end
 
       {rest, state} ->
         next(rest, state)
@@ -168,7 +188,10 @@ defmodule Toxic.Driver do
            delim
          ) do
       {:error, reason} ->
-        {:error, reason, string, state}
+        case state.error_mode do
+          :strict -> {:error, reason, string, state}
+          :tolerant -> emit_error_and_advance(reason, string, state)
+        end
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
        line, column, scope} ->
@@ -877,6 +900,107 @@ defmodule Toxic.Driver do
   defp return_token(token, rest, state) do
     {:ok, token, rest, %{state | recent_token: token}}
   end
+
+  # Phase 1 tolerant mode helpers
+  defp emit_error_and_advance(reason, rest, state) do
+    {new_rest, new_line, new_column} = scan_to_sync(rest, state)
+
+    # Always make progress
+    {new_rest, new_line, new_column} =
+      if new_line == state.line and new_column == state.column do
+        consume_one(rest, state)
+      else
+        {new_rest, new_line, new_column}
+      end
+
+    error_meta = meta(state.line, state.column, new_line, new_column, nil)
+    error_token = {:error_token, error_meta, reason}
+
+    # Flush deferrals BEFORE error to preserve ordering
+    new_output = state.output ++ Enum.reverse(state.deferrals) ++ [error_token]
+    new_state = %{state | line: new_line, column: new_column, deferrals: [], output: new_output}
+
+    # Return next token in output (could be a flushed deferral, then error token)
+    next(new_rest, new_state)
+  end
+
+  defp consume_one([h | t], state) do
+    {t, advance_pos(h, state.line, state.column)}
+  end
+
+  defp consume_one([], state), do: {[], state.line, state.column}
+
+  defp scan_to_sync(rest, state) do
+    do_scan_to_sync(rest, state, 0)
+  end
+
+  defp do_scan_to_sync(rest, state, scanned) when scanned >= state.error_max_skip do
+    # Fallback: consume a single codepoint
+    consume_one(rest, state)
+  end
+
+  defp do_scan_to_sync([], state, _scanned), do: {[], state.line, state.column}
+
+  defp do_scan_to_sync([h | t] = full, state, scanned) do
+    # Compute stop conditions
+    stop? =
+      stop_at_semicolon?(h, state) or stop_at_newline?(full) or stop_at_comma?(h, state) or
+        stop_at_comment?(h) or stop_at_closer?(full, state)
+
+    if stop? do
+      {full, state.line, state.column}
+    else
+      # advance by one and continue
+      {next_line, next_col} = advance_pos(h, state.line, state.column)
+      do_scan_to_sync(t, %{state | line: next_line, column: next_col}, scanned + 1)
+    end
+  end
+
+  defp advance_pos(?\n, line, _col), do: {line + 1, 1}
+  defp advance_pos(_ch, line, col), do: {line, col + 1}
+
+  defp stop_at_semicolon?(ch, %__MODULE__{error_sync: sync}) do
+    :semicolon in sync and ch == ?;
+  end
+
+  defp stop_at_comma?(ch, %__MODULE__{error_sync: sync}) do
+    :comma in sync and ch == ?,
+  end
+
+  defp stop_at_comment?(ch), do: ch == ?#
+
+  defp stop_at_newline?([?\n | _]), do: true
+  defp stop_at_newline?([?\r, ?\n | _]), do: true
+  defp stop_at_newline?(_), do: false
+
+  defp stop_at_closer?(rest, %__MODULE__{error_sync: sync} = state) do
+    if :closer in sync do
+      case current_terminators(state) do
+        [{start_token, _meta, _indent} | _] ->
+          expected = closing_for(start_token)
+          closer_starts_with?(rest, expected)
+
+        _ ->
+          false
+      end
+    else
+      false
+    end
+  end
+
+  defp closer_starts_with?(list, :")"), do: starts_with_char?(list, ?))
+  defp closer_starts_with?(list, :"]"), do: starts_with_char?(list, ?])
+  defp closer_starts_with?(list, :"}"), do: starts_with_char?(list, ?})
+  defp closer_starts_with?(list, :">>"), do: starts_with_list?(list, [?>, ?>])
+  defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
+  defp closer_starts_with?(_list, _other), do: false
+
+  defp starts_with_char?([h | _], ch), do: h == ch
+  defp starts_with_char?(_, _), do: false
+
+  defp starts_with_list?(list, []), do: true
+  defp starts_with_list?([h | t1], [h | t2]), do: starts_with_list?(t1, t2)
+  defp starts_with_list?(_, _), do: false
 
   @doc """
   Get the current terminator stack.
