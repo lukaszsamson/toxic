@@ -38,6 +38,7 @@ defmodule Toxic.Keyword do
         emit(token, rest, line, column + length, scope)
 
       _ ->
+        info = meta(line, column, length, previous_was_eol(tokens))
         case {kind, tokens} do
           {:in_op,
            [
@@ -45,11 +46,11 @@ defmodule Toxic.Keyword do
              | _t
            ]} ->
             not_info_meta = meta(start_line, start_column, line, column + length, extra)
-            token = {:in_op, not_info_meta, :"not in"}
+            token = {:in_op, not_info_meta, :"not in", info}
             multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)
 
           {_, _} ->
-            token = {kind, meta(line, column, length, previous_was_eol(tokens)), atom}
+            token = {kind, info, atom}
             emit_with_eol(token, rest, line, column + length, scope)
         end
     end

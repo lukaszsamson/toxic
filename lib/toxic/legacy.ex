@@ -67,6 +67,10 @@ defmodule Toxic.Legacy do
      delimiter}
   end
 
+  defp ranges_token_to_legacy({:in_op, meta, :"not in", info}) do
+    {:in_op, legacy_meta(meta), :"not in", legacy_meta(info)}
+  end
+
   defp legacy_meta({{line, column}, _end_meta, extra}), do: {line, column, extra}
   defp legacy_meta({line, column, extra}), do: {line, column, extra}
 

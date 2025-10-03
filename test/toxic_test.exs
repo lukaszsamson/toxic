@@ -3312,8 +3312,8 @@ defmodule ToxicTest do
     end
 
     test "not in" do
-      assert tokenize("not in") == {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in"}], ""}
-      assert tokenize("not  in") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in"}], ""}
+      assert tokenize("not in") == {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in", {{1, 5}, {1, 7}, nil}}], ""}
+      assert tokenize("not  in") == {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in", {{1, 6}, {1, 8}, nil}}], ""}
       # TODO: report to elixir - this is unexpected
       assert tokenize("not\nin") == {
                :ok,
@@ -3324,7 +3324,7 @@ defmodule ToxicTest do
                ""
              }
 
-      assert tokenize("not\\\nin") == {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, :"not in"}], ""}
+      assert tokenize("not\\\nin") == {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, :"not in", {{2, 1}, {2, 3}, nil}}], ""}
     end
 
     test "in" do
@@ -3387,7 +3387,7 @@ defmodule ToxicTest do
                 ], ""}
 
       assert tokenize("\nin") == {:ok, [{:in_op, {{2, 1}, {2, 3}, 1}, :in}], ""}
-      assert tokenize("\nnot in") == {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, :"not in"}], ""}
+      assert tokenize("\nnot in") == {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, :"not in", {{2, 5}, {2, 7}, nil}}], ""}
 
       assert tokenize("\ncatch") ==
                {:ok,
