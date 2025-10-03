@@ -81,14 +81,20 @@ defmodule Toxic.Driver do
       nil ->
         {:eof, state}
 
-      {:missing_interpolation, interp_context} ->
-        {:error, missing_interpolation_reason(interp_context, state), [], state}
+      error when state.error_mode == :strict ->
+        case error do
+          {:missing_interpolation, interp_context} ->
+            {:error, missing_interpolation_reason(interp_context, state), [], state}
 
-      {:missing_context, interp_context} ->
-        {:error, missing_terminator_reason(interp_context, state), [], state}
+          {:missing_context, interp_context} ->
+            {:error, missing_terminator_reason(interp_context, state), [], state}
 
-      {:missing_scope, entry} ->
-        {:error, missing_scope_terminator_reason(entry, state), [], state}
+          {:missing_scope, entry} ->
+            {:error, missing_scope_terminator_reason(entry, state), [], state}
+        end
+
+      error when state.error_mode == :tolerant ->
+        emit_pending_error(error, state)
     end
   end
 
@@ -901,6 +907,51 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
+  defp emit_pending_error({:missing_interpolation, interp_context}, state) do
+    reason = missing_interpolation_reason(interp_context, state)
+    emit_eof_error_and_pop_context(reason, state)
+  end
+
+  defp emit_pending_error({:missing_context, interp_context}, state) do
+    reason = missing_terminator_reason(interp_context, state)
+    emit_eof_error_and_pop_context(reason, state)
+  end
+
+  defp emit_pending_error({:missing_scope, _entry} = error, state) do
+    {start_meta, reason} =
+      case error do
+        {:missing_scope, entry} ->
+          {entry, missing_scope_terminator_reason(entry, state)}
+      end
+
+    # Pop one scope terminator
+    scope(terminators: terms) = state.scope
+
+    new_terms =
+      case terms do
+        [] -> []
+        [_ | rest] -> rest
+      end
+
+    new_scope = scope(state.scope, terminators: new_terms)
+
+    error_meta = meta(state.line, state.column, state.line, state.column, nil)
+    token = {:error_token, error_meta, reason}
+    return_token(token, [], %{state | scope: new_scope})
+  end
+
+  defp emit_eof_error_and_pop_context(reason, state) do
+    error_meta = meta(state.line, state.column, state.line, state.column, nil)
+    token = {:error_token, error_meta, reason}
+
+    new_contexts = drop_first_interp(state.contexts)
+    return_token(token, [], %{state | contexts: new_contexts})
+  end
+
+  defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
+  defp drop_first_interp([head | tail]), do: [head | drop_first_interp(tail)]
+  defp drop_first_interp([]), do: []
+
   # Phase 1 tolerant mode helpers
   defp emit_error_and_advance(reason, rest, state) do
     {new_rest, new_line, new_column} = scan_to_sync(rest, state)
@@ -924,11 +975,18 @@ defmodule Toxic.Driver do
     next(new_rest, new_state)
   end
 
-  defp consume_one([h | t], state) do
-    {t, advance_pos(h, state.line, state.column)}
-  end
+  defp consume_one(rest, state) do
+    case :unicode_util.gc(rest) do
+      [cluster | new_rest] when is_list(cluster) ->
+        {new_rest, advance_pos_cluster(cluster, state.line, state.column)}
 
-  defp consume_one([], state), do: {[], state.line, state.column}
+      [codepoint | new_rest] when is_integer(codepoint) ->
+        {new_rest, advance_pos(codepoint, state.line, state.column)}
+
+      [] ->
+        {[], state.line, state.column}
+    end
+  end
 
   defp scan_to_sync(rest, state) do
     do_scan_to_sync(rest, state, 0)
@@ -941,23 +999,41 @@ defmodule Toxic.Driver do
 
   defp do_scan_to_sync([], state, _scanned), do: {[], state.line, state.column}
 
-  defp do_scan_to_sync([h | t] = full, state, scanned) do
+  defp do_scan_to_sync(list = [h | t], state, scanned) do
     # Compute stop conditions
     stop? =
-      stop_at_semicolon?(h, state) or stop_at_newline?(full) or stop_at_comma?(h, state) or
-        stop_at_comment?(h) or stop_at_closer?(full, state)
+      stop_at_semicolon?(h, state) or stop_at_newline?(list) or stop_at_comma?(h, state) or
+        stop_at_comment?(h) or stop_at_whitespace?(h) or stop_at_closer?(list, state)
 
     if stop? do
-      {full, state.line, state.column}
+      {list, state.line, state.column}
     else
-      # advance by one and continue
-      {next_line, next_col} = advance_pos(h, state.line, state.column)
-      do_scan_to_sync(t, %{state | line: next_line, column: next_col}, scanned + 1)
+      # advance by one grapheme cluster and continue
+      case :unicode_util.gc(list) do
+        [cluster | rest2] when is_list(cluster) ->
+          {next_line, next_col} = advance_pos_cluster(cluster, state.line, state.column)
+          do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
+
+        [codepoint | rest2] when is_integer(codepoint) ->
+          {next_line, next_col} = advance_pos(codepoint, state.line, state.column)
+          do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
+
+        [] ->
+          {[], state.line, state.column}
+      end
     end
   end
 
   defp advance_pos(?\n, line, _col), do: {line + 1, 1}
   defp advance_pos(_ch, line, col), do: {line, col + 1}
+
+  defp advance_pos_cluster(cluster, line, col) do
+    if Enum.any?(cluster, &(&1 == ?\n)) do
+      {line + 1, 1}
+    else
+      {line, col + 1}
+    end
+  end
 
   defp stop_at_semicolon?(ch, %__MODULE__{error_sync: sync}) do
     :semicolon in sync and ch == ?;
@@ -968,6 +1044,8 @@ defmodule Toxic.Driver do
   end
 
   defp stop_at_comment?(ch), do: ch == ?#
+
+  defp stop_at_whitespace?(h), do: is_horizontal_space(h)
 
   defp stop_at_newline?([?\n | _]), do: true
   defp stop_at_newline?([?\r, ?\n | _]), do: true
@@ -998,7 +1076,7 @@ defmodule Toxic.Driver do
   defp starts_with_char?([h | _], ch), do: h == ch
   defp starts_with_char?(_, _), do: false
 
-  defp starts_with_list?(list, []), do: true
+  defp starts_with_list?(_list, []), do: true
   defp starts_with_list?([h | t1], [h | t2]), do: starts_with_list?(t1, t2)
   defp starts_with_list?(_, _), do: false
 
