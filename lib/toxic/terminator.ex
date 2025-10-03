@@ -43,35 +43,36 @@ defmodule Toxic.Terminator do
   end
 
   def check_terminator({start, meta}, terminators, scope) when start in [:fn, :do] do
-    scope(indentation: indentation) = scope
-    # TODO: hints
-    # Newscope =
-    #   case Terminators of
-    #     %% If the do is indented equally or less than the previous do, it may be a missing end error!
-    #     [{Start, _, PreviousIndentation} = Previous | _] when Indentation =< PreviousIndentation ->
-    #       scope#elixir_tokenizer{mismatch_hints=[Previous | scope#elixir_tokenizer.mismatch_hints]};
+    scope(indentation: indentation, mismatch_hints: mismatch_hints) = scope
 
-    #     _ ->
-    #       scope
-    #   end,
+    # If the do/fn is indented equally or less than the previous do/fn, it may be a missing end error!
+    new_scope =
+      case terminators do
+        [{^start, _, previous_indentation} = previous | _]
+        when indentation <= previous_indentation ->
+          scope(scope, mismatch_hints: [previous | mismatch_hints])
 
-    {:ok, scope(scope, terminators: [{start, meta, indentation} | terminators])}
+        _ ->
+          scope
+      end
+
+    {:ok, scope(new_scope, terminators: [{start, meta, indentation} | terminators])}
   end
 
-  def check_terminator({:end, _end_meta}, [{:do, _, _indentation} | terminators], scope) do
-    # TODO: hints
-    # Newscope =
-    #   %% If the end is more indented than the do, it may be a missing do error!
-    #   case scope#elixir_tokenizer.indentation > Indentation of
-    #     true ->
-    #       Hint = {'end', Endline, scope#elixir_tokenizer.indentation},
-    #       scope#elixir_tokenizer{mismatch_hints=[Hint | scope#elixir_tokenizer.mismatch_hints]};
+  def check_terminator({:end, end_meta}, [{:do, _, do_indentation} | terminators], scope) do
+    scope(indentation: current_indentation, mismatch_hints: mismatch_hints) = scope
+    {{end_line, _end_column}, _, _} = end_meta
 
-    #     false ->
-    #       scope
-    #   end,
+    # If the end is more indented than the do, it may be a missing do error!
+    new_scope =
+      if current_indentation > do_indentation do
+        hint = {:end, end_line, current_indentation}
+        scope(scope, mismatch_hints: [hint | mismatch_hints])
+      else
+        scope
+      end
 
-    {:ok, scope(scope, terminators: terminators)}
+    {:ok, scope(new_scope, terminators: terminators)}
   end
 
   def check_terminator(
@@ -104,20 +105,25 @@ defmodule Toxic.Terminator do
     end
   end
 
-  def check_terminator({:end, meta}, [], _scope) do
+  def check_terminator({:end, meta}, [], scope) do
     {{line, column}, _, _} = meta
-    {:error, {[line: line, column: column], {~c"unexpected reserved word: ", []}, ~c"end"}}
-    # TODO: hints required for full parity
-    # Suffix =
-    #   case lists:keyfind('end', 1, Hints) of
-    #     {'end', Hintline, _Indentation} ->
-    #       io_lib:format("\n~ts the \"end\" on line ~B may not have a matching \"do\" "
-    #                     "defined before it (based on indentation)", [elixir_errors:prefix(hint), Hintline]);
-    #     false ->
-    #       ""
-    #   end,
+    scope(mismatch_hints: mismatch_hints) = scope
 
-    # {error, {?LOC(line, column), {"unexpected reserved word: ", Suffix}, "end"}}
+    # Check for hint about mismatched end based on indentation
+    suffix =
+      case :lists.keyfind(:end, 1, mismatch_hints) do
+        {:end, hint_line, _indentation} ->
+          :io_lib.format(
+            ~c"\nhint: the \"end\" on line ~B may not have a matching \"do\" " ++
+              ~c"defined before it (based on indentation)",
+            [hint_line]
+          )
+
+        false ->
+          []
+      end
+
+    {:error, {[line: line, column: column], {~c"unexpected reserved word: ", suffix}, ~c"end"}}
   end
 
   def check_terminator({end_token, meta}, [], _scope)

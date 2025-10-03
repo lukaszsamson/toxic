@@ -856,8 +856,22 @@ defmodule Toxic.Driver do
   end
 
   defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: [])), do: []
-  # TODO: no coverage, not possible?
-  # defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: _)), do: []
+
+  defp missing_scope_hint({start, _meta, _indent}, closing, scope(mismatch_hints: mismatch_hints)) do
+    # Check for hint about mismatched terminator based on indentation
+    case :lists.keyfind(start, 1, mismatch_hints) do
+      {^start, hint_meta, _indentation} ->
+        {{hint_line, _hint_column}, _, _} = hint_meta
+
+        :io_lib.format(
+          ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
+          [Atom.to_string(start), hint_line, Atom.to_string(closing)]
+        )
+
+      false ->
+        []
+    end
+  end
 
   # Helper to return a token and update recent_token in state
   defp return_token(token, rest, state) do

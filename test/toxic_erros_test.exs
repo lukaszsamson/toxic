@@ -435,4 +435,20 @@ defmodule ToxicErrorsTest do
       existing_atoms_only: true
     )
   end
+
+  # Indentation hint tests
+  test "missing terminator with indentation hint" do
+    # When a do is at the same indentation as a previous do, it suggests the first do is missing an end
+    tokenize_and_compare_error("do\ndo\n  :ok\nend")
+  end
+
+  test "unexpected end with indentation hint" do
+    # When an end is more indented than its matching do, followed by another end at wrong indentation
+    tokenize_and_compare_error("do\n    :ok\n  end\nend")
+  end
+
+  test "unexpected end without hint" do
+    # Baseline case - unexpected end with no hint
+    tokenize_and_compare_error("end")
+  end
 end
