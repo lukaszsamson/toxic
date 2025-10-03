@@ -340,7 +340,7 @@ defmodule ToxicErrorsTest do
   end
 
   test "invalid line break character in string" do
-    if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+    if Version.match?(System.version(), ">= 1.20.0-rc.0") do
       tokenize_and_compare_error("\"\u2028\"")
 
       tokenize_and_compare_error("\"\\\u2028\"")

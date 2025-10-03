@@ -39,6 +39,7 @@ defmodule Toxic.Keyword do
 
       _ ->
         info = meta(line, column, length, previous_was_eol(tokens))
+
         case {kind, tokens} do
           {:in_op,
            [
