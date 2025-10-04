@@ -692,14 +692,17 @@ defmodule Toxic.Driver do
 
   defp pending_error(%__MODULE__{contexts: contexts, scope: scope} = _state) do
     cond do
+      # Drain innermost structural scopes first (e.g., missing ")" from an open "(")
+      entry = find_missing_scope_terminator(scope) ->
+        {:missing_scope, entry}
+
+      # Then close any open interpolation braces
       interp = find_missing_interpolation(contexts) ->
         {:missing_interpolation, interp}
 
+      # Finally, close the surrounding string/sigil/quoted identifier contexts
       context = find_missing_context(contexts) ->
         {:missing_context, context}
-
-      entry = find_missing_scope_terminator(scope) ->
-        {:missing_scope, entry}
 
       true ->
         nil
@@ -928,7 +931,10 @@ defmodule Toxic.Driver do
 
     inserted = if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
 
-    new_contexts = drop_first_interp(state.contexts)
+    # Pop the leading :normal that represents being inside interpolation, but
+    # keep the parent {:interp, ...} context so we can subsequently emit the
+    # missing string/sigil/atom terminator on the next pending error.
+    new_contexts = drop_first_normal_before_interp(state.contexts)
     new_output = state.output ++ [error_token | inserted]
     {:ok, hd(new_output), [], %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}}
   end
@@ -966,6 +972,17 @@ defmodule Toxic.Driver do
   defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
   defp drop_first_interp([head | tail]), do: [head | drop_first_interp(tail)]
   defp drop_first_interp([]), do: []
+
+  # Drop the first :normal that immediately precedes an interpolation frame,
+  # preserving the interpolation frame itself. This mirrors how a real '}'
+  # would pop the :normal frame and keep the parent {:interp, ...} on stack.
+  defp drop_first_normal_before_interp([:normal, {:interp, _, _, _, _, _, _, _} = interp | rest]),
+    do: [interp | rest]
+
+  defp drop_first_normal_before_interp([head | tail]),
+    do: [head | drop_first_normal_before_interp(tail)]
+
+  defp drop_first_normal_before_interp(list), do: list
 
   defp synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
   defp synthesize_end_for_kind(:bin_heredoc, delim, meta), do: {:bin_heredoc_end, meta, delim, 0}
