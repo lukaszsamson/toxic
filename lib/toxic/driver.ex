@@ -1019,6 +1019,10 @@ defmodule Toxic.Driver do
   defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
        when is_list(message) and is_list(token_chars) do
     cond do
+      ternary_missing_slash?(rest) ->
+        meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
+        op_token = {:identifier, meta_op, :..//}
+        {Enum.drop(rest, 4), state.line, state.column + 4, [op_token], state.scope}
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
         {tl(rest), state.line, state.column + 1, [], state.scope}
@@ -1060,6 +1064,17 @@ defmodule Toxic.Driver do
     # token_chars from Terminator is usually [~c"("]
     match_paren = (token_chars == [~c"("])
     match_paren and :lists.prefix(~c"unexpected ( after alias", message)
+  end
+
+  defp ternary_missing_slash?(rest) do
+    case rest do
+      [?. , ?., ?/, ?/ | tail] ->
+        case tail do
+          [?/ | _] -> false
+          _ -> true
+        end
+      _ -> false
+    end
   end
 
   defp consume_one(rest, state) do

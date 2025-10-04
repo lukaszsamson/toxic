@@ -157,7 +157,7 @@ defmodule ToxicTolerantModeTest do
 
       valid = valid_tokens(tokens)
       assert {:dual_op, _, :+} = Enum.at(valid, 0)
-      assert {:int, _, 456} = Enum.at(valid, 1)
+      assert {:int, _, ~c'456'} = Enum.at(valid, 1)
 
       # Error should cover "123abc"
       {:error_token, meta, _reason} = Enum.at(tokens, 0)
@@ -171,7 +171,7 @@ defmodule ToxicTolerantModeTest do
       assert [:error_token, :dual_op, :flt] = token_types(tokens)
 
       valid = valid_tokens(tokens)
-      assert {:flt, _, 3.4} = Enum.at(valid, 1)
+      assert {:flt, _, ~c'3.4'} = Enum.at(valid, 1)
     end
 
     test "float overflow with continuation" do
