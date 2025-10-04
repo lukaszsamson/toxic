@@ -21,6 +21,7 @@ defmodule Toxic.TokenStream do
           | {:error_sync, [:semicolon | :newline | :closer | :comma]}
           | {:error_max_skip, non_neg_integer()}
           | {:insert_structural_closers, boolean()}
+          | {:insert_identifier_sanitization, boolean()}
           | {:preserve_comments, false | (integer(), integer(), list(), list(), list() -> any())}
           | {:existing_atoms_only, boolean()}
         ]
@@ -80,6 +81,7 @@ defmodule Toxic.TokenStream do
     error_sync: [:semicolon, :newline, :closer, :comma],
     error_max_skip: 4096,
     insert_structural_closers: true,
+    insert_identifier_sanitization: true,
     elixir_compatibility: false,
     preserve_comments: false,
     existing_atoms_only: false

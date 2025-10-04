@@ -12,6 +12,7 @@ defmodule Toxic.Driver do
             error_sync: [:semicolon, :newline, :closer, :comma],
             error_max_skip: 4096,
             insert_structural_closers: true,
+            insert_identifier_sanitization: true,
             # New: prioritized deferral list for delayed emissions
             # Entries: {:emit_next, token, consume_len, after_action | nil}
             #  - consume_len: non-neg integer to consume from input and advance column
@@ -38,6 +39,7 @@ defmodule Toxic.Driver do
           error_sync: [:semicolon | :newline | :closer | :comma],
           error_max_skip: non_neg_integer(),
           insert_structural_closers: boolean(),
+          insert_identifier_sanitization: boolean(),
           deferrals: list(),
           output: list(),
           recent_token: any(),
@@ -54,6 +56,7 @@ defmodule Toxic.Driver do
     error_sync = Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer, :comma])
     error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
     insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
+    insert_identifier_sanitization = Keyword.get(opts, :insert_identifier_sanitization, true)
 
     %__MODULE__{
       line: line,
@@ -62,6 +65,7 @@ defmodule Toxic.Driver do
       error_sync: error_sync,
       error_max_skip: error_max_skip,
       insert_structural_closers: insert_structural_closers,
+      insert_identifier_sanitization: insert_identifier_sanitization,
       scope:
         scope(
           identifier_tokenizer: String.Tokenizer,
@@ -1023,6 +1027,10 @@ defmodule Toxic.Driver do
         meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
         op_token = {:identifier, meta_op, :..//}
         {Enum.drop(rest, 4), state.line, state.column + 4, [op_token], state.scope}
+
+      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
+        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
+        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
         {tl(rest), state.line, state.column + 1, [], state.scope}
@@ -1074,6 +1082,72 @@ defmodule Toxic.Driver do
     match_paren and :lists.prefix(~c"unexpected ( after alias", message)
   end
 
+  defp identifier_sanitization_candidate?(message, rest) do
+    # Heuristic: identifier-like error message or next char is not space/delimiter
+    msg = IO.iodata_to_binary(message)
+    starts_with_id_error =
+      String.starts_with?(msg, "unexpected token:") or
+        String.contains?(msg, "mixed script") or
+        String.contains?(msg, "confusable") or
+        String.contains?(msg, "NFKC") or
+        String.contains?(msg, "atom length must be less")
+
+    case rest do
+      [] -> starts_with_id_error
+      [h | _] -> starts_with_id_error or not is_delimiter_or_space(h)
+    end
+  end
+
+  defp is_delimiter_or_space(ch) when ch in '()[]{};,:.#%~?"' do
+    true
+  end
+  defp is_delimiter_or_space(ch) when ch in [32, ?\t, ?\n, ?\r], do: true
+  defp is_delimiter_or_space(_), do: false
+
+  defp sanitize_identifier(rest, line, col) do
+    # Capture a chunk up to space/delimiter
+    {chunk, consumed} = take_until_boundary(rest, 0)
+    # Normalize and build ASCII-friendly skeleton if possible
+    bin = Toxic.Util.characters_to_binary(chunk)
+    skeleton = try do
+      String.Tokenizer.Security.confusable_skeleton(bin)
+    rescue
+      _ -> bin
+    end
+
+    nfkc = :unicode.characters_to_nfkc_list(skeleton)
+    filtered =
+      nfkc
+      |> Enum.map(fn c -> if allowed_ident_char?(c), do: c, else: ?_ end)
+      |> Enum.take(255)
+      |> ensure_ident_start()
+
+    meta_id = meta(line, col, line, col + length(filtered), filtered)
+    id_atom = List.to_atom(filtered)
+    {{:identifier, meta_id, id_atom}, consumed, line, col + length(filtered)}
+  end
+
+  defp take_until_boundary([h | t], n) do
+    if is_delimiter_or_space(h) do
+      {[], n}
+    else
+      {rest, consumed} = take_until_boundary(t, n + 1)
+      {[h | rest], consumed}
+    end
+  end
+
+  defp take_until_boundary([], n), do: {[], n}
+
+  defp allowed_ident_char?(c) when c in ?0..?9, do: true
+  defp allowed_ident_char?(c) when c in ?A..?Z, do: true
+  defp allowed_ident_char?(c) when c in ?a..?z, do: true
+  defp allowed_ident_char?(?_ ), do: true
+  defp allowed_ident_char?(_), do: false
+
+  defp ensure_ident_start([]), do: [?x]
+  defp ensure_ident_start([h | _] = list) when h in ?A..?Z or h in ?a..?z or h == ?_, do: list
+  defp ensure_ident_start(list), do: [?_ | list]
+
   defp ternary_missing_slash?(rest) do
     case rest do
       [?. , ?., ?/, ?/ | tail] ->
@@ -1092,7 +1166,7 @@ defmodule Toxic.Driver do
     consume_leading_spaces(rest, line, column, 0)
   end
 
-  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\s, ?\t] do
+  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\t, ?\f, 32] do
     consume_leading_spaces(tail, line, column + 1, count + 1)
   end
 
