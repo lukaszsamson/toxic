@@ -918,10 +918,9 @@ defmodule Toxic.Driver do
   end
 
   defp emit_pending_error({:missing_scope, _entry} = error, state) do
-    {start_meta, reason} =
+    reason =
       case error do
-        {:missing_scope, entry} ->
-          {entry, missing_scope_terminator_reason(entry, state)}
+        {:missing_scope, entry} -> missing_scope_terminator_reason(entry, state)
       end
 
     # Pop one scope terminator

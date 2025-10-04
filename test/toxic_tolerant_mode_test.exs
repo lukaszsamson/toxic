@@ -3,14 +3,17 @@ defmodule ToxicTolerantModeTest do
 
   # Helper to tokenize in tolerant mode
   defp tokenize_tolerant(string, opts \\ []) do
-    stream =
-      Toxic.TokenStream.new(string, 1, 1,
+    stream_opts =
+      [
         error_mode: :tolerant,
         elixir_compatibility: false,
         preserve_comments: false
-      )
+      ]
+      |> Keyword.merge(Keyword.take(opts, [:existing_atoms_only]))
 
-    opts = Keyword.merge([include_errors: true], opts)
+    stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+
+    opts = Keyword.put_new(opts, :include_errors, true)
     collect_all_tokens(stream, [], opts)
   end
 
@@ -388,6 +391,345 @@ defmodule ToxicTolerantModeTest do
   end
 
   # ============================================================================
+  # Additional Coverage: Reserved tokens, alias, sigil, identifier variants
+  # ============================================================================
+
+  describe "Reserved tokens and alias errors" do
+    test "reserved token __aliases__" do
+      tokens = tokenize_tolerant("__aliases__ + Foo")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :dual_op))
+      assert Enum.any?(token_types(tokens), &(&1 == :alias))
+    end
+
+    test "reserved token __block__" do
+      tokens = tokenize_tolerant("__block__ + Bar")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :dual_op))
+      assert Enum.any?(token_types(tokens), &(&1 == :alias))
+    end
+
+    test "unexpected token after alias" do
+      tokens = tokenize_tolerant("Foo(1 + 2)")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "fn followed by do" do
+      tokens = tokenize_tolerant("fn do\n:ok")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :atom))
+    end
+
+    test "mismatched closing terminator - end" do
+      tokens = tokenize_tolerant("([end + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "Sigil errors" do
+    test "invalid uppercase sigil name" do
+      tokens = tokenize_tolerant("~Ab/foo/ + world")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :dual_op))
+      assert Enum.any?(token_types(tokens), &(&1 == :identifier))
+    end
+
+    test "invalid char after sigil heredoc open" do
+      tokens = tokenize_tolerant("~S\"\"\"foo\"\"\" + :ok")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :atom))
+    end
+
+    test "invalid sigil delimiter" do
+      tokens = tokenize_tolerant("~s!foo! + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "Identifier variants" do
+    test "identifier exceeding atom length limit" do
+      tokens = tokenize_tolerant(String.duplicate("a", 256) <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "mixed script identifier" do
+      tokens = tokenize_tolerant("foo" <> <<0x03B1::utf8>> <> "bar + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "mixed script identifier without suggestion" do
+      tokens = tokenize_tolerant("foo" <> <<0x0402::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "identifier confusable suggestion" do
+      tokens = tokenize_tolerant("foO" <> <<0x1D6B3::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "identifier nfkc suggestion" do
+      tokens = tokenize_tolerant("foo" <> <<0x06CC::utf8>> <> <<0x1D6B3::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "unexpected token in identifier" do
+      tokens = tokenize_tolerant(<<0x3164::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "unexpected token identifier control char" do
+      tokens = tokenize_tolerant("foo" <> <<0x0080::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "unexpected token identifier control char in atom" do
+      tokens = tokenize_tolerant(":foo" <> <<0x0080::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "unexpected token fallback" do
+      tokens = tokenize_tolerant(<<0x03A9::utf8>> <> " + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "After-colon identifier errors" do
+    test "unexpected token after colon" do
+      tokens = tokenize_tolerant(":" <> <<0x200B::utf8>> <> " => 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 in [:assoc_op, :int]))
+    end
+
+    test "unexpected token after colon with zero width joiner" do
+      tokens = tokenize_tolerant(":" <> <<0x200C::utf8>> <> " => 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 in [:assoc_op, :int]))
+    end
+
+    test "unexpected token after colon confusable suggestion" do
+      tokens = tokenize_tolerant(":" <> "foO" <> <<0x1D6B3::utf8>> <> " => 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 in [:assoc_op, :int]))
+    end
+
+    test "unexpected token after colon control char" do
+      tokens = tokenize_tolerant(":" <> <<0x0080::utf8>> <> " => 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 in [:assoc_op, :int]))
+    end
+  end
+
+  describe "Comment and dot comment errors" do
+    test "invalid bidi character in comment" do
+      tokens = tokenize_tolerant("#" <> <<0x202E::utf8>> <> "\nfoo")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :identifier))
+    end
+
+    test "invalid line break character in comment" do
+      tokens = tokenize_tolerant("#" <> <<0x2028::utf8>> <> "foo\nbar")
+
+      if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+
+      assert Enum.any?(token_types(tokens), &(&1 == :identifier))
+    end
+
+    test "invalid bidi character in dot comment" do
+      tokens = tokenize_tolerant(".#" <> <<0x202E::utf8>> <> "\nfoo")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :identifier))
+    end
+
+    test "invalid line break character in dot comment" do
+      tokens = tokenize_tolerant(".#" <> <<0x2028::utf8>> <> "\nfoo")
+
+      if Version.match?(System.version(), ">= 1.19.0-rc.0") do
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+
+      assert Enum.any?(token_types(tokens), &(&1 == :identifier))
+    end
+  end
+
+  describe "String and interpolation character errors" do
+    test "invalid bidi character in string" do
+      tokens = tokenize_tolerant("\"\u202E\" + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "invalid line break character in string" do
+      tokens = tokenize_tolerant("\"\u2028\" + 1")
+
+      if Version.match?(System.version(), ">= 1.20.0-rc.0") do
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "invalid line break character in single quoted string" do
+      tokens = tokenize_tolerant("'\u2028' + 1")
+
+      if Version.match?(System.version(), ">= 1.20.0-rc.0") do
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "interpolation in quoted identifier" do
+      tokens = tokenize_tolerant(~S|foo."bar#{baz}"() + 1|)
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "invalid char after string heredoc open" do
+      tokens = tokenize_tolerant("\"\"\"foo\"\"\" + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "Missing terminators" do
+    test "missing string terminator" do
+      for input <- ["\"foo + 1", "'foo + 1"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing heredoc terminator" do
+      for input <- ["\"\"\"foo\nbar\n + 1", "\"\"\"foo\n", "'''foo\n", "'''foo\nbar"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing quoted atom terminator" do
+      for input <- [":\"foo + 1", ":'foo + 1"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing quoted identifier terminator" do
+      for input <- ["K.\"foo + 1", "K.'foo + 1"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing sigil terminator" do
+      for input <- ["~s\"foo + 1", "~S\"\"\"foo\nbar"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing interpolation terminator" do
+      tokens = tokenize_tolerant("\"\#{foo + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+    end
+
+    test "missing terminator inside interpolation" do
+      for input <- ["\"\#{foo(}\" + 1", "\"\#{foo[}\" + 1"] do
+        tokens = tokenize_tolerant(input)
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+        assert Enum.any?(token_types(tokens), &(&1 == :int))
+      end
+    end
+
+    test "missing terminator base cases" do
+      for input <- ["foo(", "foo[", "(", "[", "{", "<<", "a do\n", "fn -> "] do
+        tokens = tokenize_tolerant(input <> "1")
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+
+    test "missing invalid character inside interpolation" do
+      tokens = tokenize_tolerant("\"\#{\r}\" + 1")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+
+    test "other invalid characters inside interpolation" do
+      for expr <- ["\"\#{\\}\"", "\"\#{\\n}\"", "\"\#{;;}\""] do
+        tokens = tokenize_tolerant(expr <> " + 1")
+        assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      end
+    end
+  end
+
+  describe "Existing atoms only" do
+    test "not existing atom identifier" do
+      input = "x0m18d7h0fd2s098d" <> to_string(Enum.random(11223..3_249_953)) <> ": 1"
+      tokens = tokenize_tolerant(input, existing_atoms_only: true)
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "Indentation hint errors" do
+    test "missing terminator with indentation hint" do
+      tokens = tokenize_tolerant("do\ndo\n  :ok\nend")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :atom))
+    end
+
+    test "unexpected end without hint" do
+      tokens = tokenize_tolerant("end \n:ok")
+
+      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
+      assert Enum.any?(token_types(tokens), &(&1 == :atom))
+    end
+  end
+
+  # ============================================================================
   # Forward Progress and Position Tests
   # ============================================================================
 
@@ -529,7 +871,7 @@ defmodule ToxicTolerantModeTest do
 
       # bar should be tokenized
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 2) == :bar end)
+      assert Enum.any?(valid, fn t when elem(t, 2) == :bar -> true; _ -> false end)
     end
 
     test "sync to closer when in context" do
