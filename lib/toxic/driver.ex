@@ -974,7 +974,11 @@ defmodule Toxic.Driver do
 
   # Phase 1 tolerant mode helpers
   defp emit_error_and_advance(reason, rest, state) do
-    {new_rest, new_line, new_column} = scan_to_sync(rest, state)
+    {def_rest, def_line, def_col} = scan_to_sync(rest, state)
+
+    # Phase 4: Context-specific minimal recovery (override default scan)
+    {new_rest, new_line, new_column, pre_inserted, scope_after_pre} =
+      adjust_recovery(reason, rest, state, def_rest, def_line, def_col)
 
     # Always make progress
     {new_rest, new_line, new_column} =
@@ -988,15 +992,16 @@ defmodule Toxic.Driver do
     error_token = {:error_token, error_meta, reason}
 
     # Optionally synthesize structural tokens for delimiter errors
-    {inserted, scope_after_insert} =
+    {inserted_struct, scope_after_insert} =
       if state.insert_structural_closers do
-        synthesize_from_reason(reason, state)
+        synthesize_from_reason(reason, %{state | scope: scope_after_pre})
       else
-        {[], state.scope}
+        {[], scope_after_pre}
       end
 
-    # Flush deferrals BEFORE error to preserve ordering; enqueue inserted structurals after error
-    new_output = state.output ++ Enum.reverse(state.deferrals) ++ [error_token | inserted]
+    # Flush deferrals BEFORE error to preserve ordering; enqueue inserted tokens after error
+    new_output =
+      state.output ++ Enum.reverse(state.deferrals) ++ [error_token | pre_inserted ++ inserted_struct]
     new_state = %{
       state
       | line: new_line,
@@ -1008,6 +1013,53 @@ defmodule Toxic.Driver do
 
     # Return next token in output (could be a flushed deferral, then error token)
     next(new_rest, new_state)
+  end
+
+  # Phase 4: adjust scan target and optionally insert context-specific tokens
+  defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
+       when is_list(message) and is_list(token_chars) do
+    cond do
+      keyword_no_space?(message) and match?([?: | _], rest) ->
+        # Consume only ':' so the following identifier is preserved
+        {tl(rest), state.line, state.column + 1, [], state.scope}
+
+      map_expected_error?(message, token_chars) and match?([?% | _], rest) ->
+        # Emit standalone '%' and consume it
+        meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
+        percent_token = {:%, meta_percent}
+        {tl(rest), state.line, state.column + 1, [percent_token], state.scope}
+
+      alias_after_paren?(message, token_chars) and match?([?( | _], rest) ->
+        # Insert '(' opener and consume it, updating the terminator stack
+        case synthesize_opening(:"(", state) do
+          {:ok, tok, new_scope} ->
+            {tl(rest), state.line, state.column + 1, [tok], new_scope}
+          _ ->
+            {tl(rest), state.line, state.column + 1, [], state.scope}
+        end
+
+      true ->
+        {def_rest, def_line, def_col, [], state.scope}
+    end
+  end
+
+  defp adjust_recovery(_reason, _rest, state, def_rest, def_line, def_col) do
+    {def_rest, def_line, def_col, [], state.scope}
+  end
+
+  defp keyword_no_space?(message) do
+    prefix = ~c"keyword argument must be followed by space"
+    :lists.prefix(prefix, message)
+  end
+
+  defp map_expected_error?(_message, token_chars) do
+    token_chars == [?%, ?(] or token_chars == [?%, ?[]
+  end
+
+  defp alias_after_paren?(message, token_chars) do
+    # token_chars from Terminator is usually [~c"("]
+    match_paren = (token_chars == [~c"("])
+    match_paren and :lists.prefix(~c"unexpected ( after alias", message)
   end
 
   defp consume_one(rest, state) do
@@ -1036,7 +1088,7 @@ defmodule Toxic.Driver do
 
   defp do_scan_to_sync([], state, _scanned), do: {[], state.line, state.column}
 
-  defp do_scan_to_sync(list = [h | t], state, scanned) do
+  defp do_scan_to_sync(list = [h | _t], state, scanned) do
     # Compute stop conditions
     stop? =
       stop_at_semicolon?(h, state) or stop_at_newline?(list) or stop_at_comma?(h, state) or
