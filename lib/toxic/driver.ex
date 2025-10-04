@@ -1028,9 +1028,6 @@ defmodule Toxic.Driver do
         op_token = {:identifier, meta_op, :..//}
         {Enum.drop(rest, 4), state.line, state.column + 4, [op_token], state.scope}
 
-      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
-        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
-        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
         {tl(rest), state.line, state.column + 1, [], state.scope}
@@ -1056,6 +1053,10 @@ defmodule Toxic.Driver do
         meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
         semi_token = {:";", meta_semi}
         {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
+
+      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
+        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
+        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
 
       true ->
         {def_rest, def_line, def_col, [], state.scope}
@@ -1083,22 +1084,35 @@ defmodule Toxic.Driver do
   end
 
   defp identifier_sanitization_candidate?(message, rest) do
-    # Heuristic: identifier-like error message or next char is not space/delimiter
-    msg = IO.iodata_to_binary(message)
-    starts_with_id_error =
-      String.starts_with?(msg, "unexpected token:") or
-        String.contains?(msg, "mixed script") or
+    # Only sanitize for explicit identifier/atom errors
+    # Message might be charlist, iodata, or tuple of charlists
+    msg = try do
+      case message do
+        s when is_binary(s) -> s
+        l when is_list(l) -> List.to_string(l)
+        {part1, part2} when is_list(part1) and is_list(part2) ->
+          List.to_string(part1) <> List.to_string(part2)
+        _ -> inspect(message)
+      end
+    rescue
+      _ -> inspect(message)
+    end
+
+    is_id_error =
+      String.contains?(msg, "mixed script") or
+        String.contains?(msg, "mixed-script") or
         String.contains?(msg, "confusable") or
         String.contains?(msg, "NFKC") or
         String.contains?(msg, "atom length must be less")
 
+    # Only trigger if we have an actual identifier error AND non-delimiter follows
     case rest do
-      [] -> starts_with_id_error
-      [h | _] -> starts_with_id_error or not is_delimiter_or_space(h)
+      [] -> false  # No input left, can't sanitize
+      [h | _] -> is_id_error and not is_delimiter_or_space(h)
     end
   end
 
-  defp is_delimiter_or_space(ch) when ch in '()[]{};,:.#%~?"' do
+  defp is_delimiter_or_space(ch) when ch in ~c"()[]{};,:.#%~?\"" do
     true
   end
   defp is_delimiter_or_space(ch) when ch in [32, ?\t, ?\n, ?\r], do: true

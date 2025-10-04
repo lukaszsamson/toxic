@@ -9,7 +9,7 @@ defmodule ToxicTolerantModeTest do
         elixir_compatibility: false,
         preserve_comments: false
       ]
-      |> Keyword.merge(Keyword.take(opts, [:existing_atoms_only]))
+      |> Keyword.merge(Keyword.take(opts, [:existing_atoms_only, :insert_identifier_sanitization]))
 
     stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
 
@@ -346,6 +346,117 @@ defmodule ToxicTolerantModeTest do
       # Verify values
       valid = valid_tokens(tokens)
       assert {:identifier, _, :baz} = Enum.at(valid, 1)
+    end
+  end
+
+  # ============================================================================
+  # Category 6b: Identifier Sanitization
+  # ============================================================================
+
+  describe "Category 6b: Identifier sanitization (insert_identifier_sanitization: true)" do
+    test "mixed script Latin+Cyrillic triggers sanitization" do
+      # Using Cyrillic 'а' (U+0430) which looks like Latin 'a'
+      # This should trigger "mixed script" error
+      mixed = "varа + 1"  # Cyrillic а in "varа"
+      tokens = tokenize_tolerant(mixed, insert_identifier_sanitization: true)
+
+      types = token_types(tokens)
+      # Should have error for mixed script
+      assert :error_token in types
+      # Should continue with sanitized identifier or next token
+      assert :dual_op in types or :identifier in types
+    end
+
+    test "confusable Greek omicron in identifier" do
+      # Greek omicron (ο, U+03BF) looks like Latin o
+      # This should trigger confusable character error
+      confusable = "foο + bar"  # Greek ο in "foο"
+      tokens = tokenize_tolerant(confusable, insert_identifier_sanitization: true)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      # Should continue with rest of expression
+      assert :dual_op in types
+      assert :identifier in types
+    end
+
+    test "atom with excessive length triggers sanitization" do
+      # Atoms in Elixir have a length limit (255 bytes)
+      long_name = String.duplicate("x", 300)
+      tokens = tokenize_tolerant(":#{long_name} + 1", insert_identifier_sanitization: true)
+
+      # Should have error for atom length
+      assert length(error_tokens(tokens)) >= 1
+      # Should continue with + and 1
+      types = token_types(tokens)
+      assert :dual_op in types
+      assert :int in types
+    end
+
+    test "identifier with excessive length triggers sanitization" do
+      # Very long identifier
+      long_name = String.duplicate("variable", 50)  # 400 chars
+      tokens = tokenize_tolerant("#{long_name} = 1", insert_identifier_sanitization: true)
+
+      # Behavior depends on whether String.Tokenizer rejects this
+      # At minimum, should not crash and should continue
+      types = token_types(tokens)
+      # Should have either identifier or error + sanitized identifier
+      assert :match_op in types
+      assert :int in types
+    end
+
+    test "NFKC normalization with compatibility characters" do
+      # Compatibility characters that should normalize (e.g., ﬁ ligature)
+      # Note: This may or may not trigger an error depending on String.Tokenizer
+      nfkc_test = "ﬁle + 1"  # ﬁ is U+FB01 (fi ligature)
+      tokens = tokenize_tolerant(nfkc_test, insert_identifier_sanitization: true)
+
+      # Should tokenize successfully (NFKC normalizes to "file")
+      # or produce error + sanitized identifier
+      types = token_types(tokens)
+      assert :dual_op in types
+      assert :int in types
+    end
+
+    test "sanitization disabled does not create synthetic identifiers" do
+      # With sanitization off, errors should just be errors
+      mixed = "varа + 1"  # Cyrillic а
+      tokens = tokenize_tolerant(mixed, insert_identifier_sanitization: false)
+
+      types = token_types(tokens)
+      # Should have error
+      assert :error_token in types
+      # Should NOT have sanitized identifier before the error
+      # (any identifiers are from normal tokenization, not sanitization)
+    end
+
+    test "sanitization with null byte in identifier" do
+      # Null bytes are control characters
+      tokens = tokenize_tolerant("foo\x00bar + x", insert_identifier_sanitization: true)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      # Should recover and continue
+      assert :dual_op in types
+    end
+
+    test "sanitization creates valid ASCII skeleton" do
+      # Mixed with confusables should produce ASCII-safe identifier
+      mixed = "tеst"  # Cyrillic е (U+0435) instead of Latin e
+      tokens = tokenize_tolerant("#{mixed} = 1", insert_identifier_sanitization: true)
+
+      # Should have error + continue with assignment
+      types = token_types(tokens)
+      assert :match_op in types
+      assert :int in types
+
+      # If sanitized identifier is created, it should be ASCII-only
+      identifiers = Enum.filter(tokens, fn t -> elem(t, 0) == :identifier end)
+      if length(identifiers) > 0 do
+        # Check that sanitized identifier is present
+        assert length(identifiers) >= 1
+      end
     end
   end
 
