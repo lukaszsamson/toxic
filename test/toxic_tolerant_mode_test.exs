@@ -730,6 +730,300 @@ defmodule ToxicTolerantModeTest do
   end
 
   # ============================================================================
+  # Phase 2: Structural Synthesis Tests
+  # ============================================================================
+
+  describe "Phase 2: Structural synthesis (insert_structural_closers: true)" do
+    # Helper for synthesis tests (default has flag enabled)
+    defp tokenize_with_synthesis(string) do
+      tokenize_tolerant(string)
+    end
+
+    defp tokenize_without_synthesis(string) do
+      stream_opts = [
+        error_mode: :tolerant,
+        insert_structural_closers: false
+      ]
+
+      stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+      collect_all_tokens(stream, [], include_errors: true)
+    end
+
+    test "missing string terminator synthesizes bin_string_end" do
+      tokens = tokenize_with_synthesis("\"foo")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :bin_string_end in types
+      # String end comes after error
+      error_idx = Enum.find_index(types, &(&1 == :error_token))
+      end_idx = Enum.find_index(types, &(&1 == :bin_string_end))
+      assert end_idx > error_idx
+    end
+
+    test "missing charlist terminator synthesizes list_string_end" do
+      tokens = tokenize_with_synthesis("'foo")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :list_string_end in types
+    end
+
+    test "missing heredoc terminator synthesizes bin_heredoc_end" do
+      tokens = tokenize_with_synthesis("\"\"\"foo\nbar")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :bin_heredoc_end in types
+    end
+
+    test "missing list heredoc terminator synthesizes list_heredoc_end" do
+      tokens = tokenize_with_synthesis("'''foo\nbar")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :list_heredoc_end in types
+    end
+
+    test "missing sigil terminator synthesizes sigil_end" do
+      tokens = tokenize_with_synthesis("~s\"foo")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :sigil_end in types
+    end
+
+    test "missing quoted atom terminator synthesizes atom_safe_end" do
+      tokens = tokenize_with_synthesis(":\"foo")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :atom_safe_end in types
+    end
+
+    test "missing quoted identifier terminator synthesizes quoted_identifier_end" do
+      tokens = tokenize_with_synthesis("Foo.\"bar")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :quoted_identifier_end in types
+    end
+
+    test "missing interpolation terminator synthesizes end_interpolation" do
+      tokens = tokenize_with_synthesis("\"\#{foo")
+      types = token_types(tokens)
+
+      # Should have: begin_interpolation, identifier, error, end_interpolation, error, bin_string_end
+      assert :begin_interpolation in types
+      assert :identifier in types
+      assert :end_interpolation in types
+      assert :bin_string_end in types
+
+      # Count errors: one for missing }, one for missing "
+      assert length(error_tokens(tokens)) == 2
+    end
+
+    test "missing terminator ( synthesizes closing )" do
+      tokens = tokenize_with_synthesis("foo(")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :")" in types
+      assert :"(" in types
+    end
+
+    test "missing terminator [ synthesizes closing ]" do
+      tokens = tokenize_with_synthesis("[1, 2")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :"]" in types
+    end
+
+    test "missing terminator { synthesizes closing }" do
+      tokens = tokenize_with_synthesis("{:a, :b")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :"}" in types
+    end
+
+    test "missing terminator << synthesizes closing >>" do
+      tokens = tokenize_with_synthesis("<<1, 2")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :">>" in types
+    end
+
+    test "unexpected closer ) synthesizes opening (" do
+      tokens = tokenize_with_synthesis(")")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :"(" in types
+      assert :")" in types
+
+      # Order: error, synthetic (, actual )
+      error_idx = Enum.find_index(types, &(&1 == :error_token))
+      open_idx = Enum.find_index(types, &(&1 == :"("))
+      close_idx = Enum.find_index(types, &(&1 == :")"))
+
+      assert error_idx < open_idx
+      assert open_idx < close_idx
+    end
+
+    test "unexpected closer ] synthesizes opening [" do
+      tokens = tokenize_with_synthesis("]")
+      types = token_types(tokens)
+
+      assert :"[" in types
+      assert :"]" in types
+    end
+
+    test "unexpected closer } synthesizes opening {" do
+      tokens = tokenize_with_synthesis("}")
+      types = token_types(tokens)
+
+      assert :"{" in types
+      assert :"}" in types
+    end
+
+    test "unexpected closer >> synthesizes opening <<" do
+      tokens = tokenize_with_synthesis(">>")
+      types = token_types(tokens)
+
+      assert :"<<" in types
+      assert :">>" in types
+    end
+
+    test "mismatched closer synthesizes expected closer" do
+      tokens = tokenize_with_synthesis("([)")
+      types = token_types(tokens)
+
+      # Should have: (, [, error, ], error, )
+      # Synthetic ] comes after first error, before second error
+      assert :"(" in types
+      assert :"[" in types
+      assert :")" in types
+
+      # Count ]: one synthetic, no actual (consumed by error)
+      bracket_count = Enum.count(types, &(&1 == :"]"))
+      assert bracket_count == 1
+
+      # Two errors: one for mismatch, one for unexpected )
+      assert length(error_tokens(tokens)) == 2
+    end
+
+    test "nested missing terminators synthesize multiple closers" do
+      tokens = tokenize_with_synthesis("foo([{")
+      types = token_types(tokens)
+
+      # Should have errors and synthetic }, ], )
+      assert :error_token in types
+      assert :"}" in types
+      assert :"]" in types
+      assert :")" in types
+
+      # Three errors (one per missing closer)
+      assert length(error_tokens(tokens)) >= 3
+    end
+
+    test "EOF drains multiple errors with synthesis" do
+      tokens = tokenize_with_synthesis("\"\#{foo(")
+      types = token_types(tokens)
+
+      # Should see:
+      # - begin_interpolation, identifier, (
+      # - error (missing )), synthetic )
+      # - error (missing }), synthetic end_interpolation
+      # - error (missing "), synthetic bin_string_end
+
+      assert :begin_interpolation in types
+      assert :identifier in types
+      assert :"(" in types
+      assert :")" in types
+      assert :end_interpolation in types
+      assert :bin_string_end in types
+
+      # Three errors
+      assert length(error_tokens(tokens)) == 3
+    end
+
+    test "synthesis preserves continuation after error" do
+      tokens = tokenize_with_synthesis("foo( + 1")
+      types = token_types(tokens)
+
+      # Should have: identifier, (, error, ), +, int
+      assert :identifier in types
+      assert :")" in types
+      assert :dual_op in types
+      assert :int in types
+    end
+
+    test "synthesis with flag disabled produces no synthetic tokens" do
+      tokens = tokenize_without_synthesis("\"foo")
+      types = token_types(tokens)
+
+      # Should have error but NO bin_string_end
+      assert :error_token in types
+      refute :bin_string_end in types
+    end
+
+    test "missing interpolation without synthesis has no end_interpolation" do
+      tokens = tokenize_without_synthesis("\"\#{foo")
+      types = token_types(tokens)
+
+      assert :error_token in types
+      refute :end_interpolation in types
+    end
+
+    test "unexpected closer without synthesis has no synthetic opener" do
+      tokens = tokenize_without_synthesis(")")
+      types = token_types(tokens)
+
+      # Should have error and actual ), but no synthetic (
+      assert :error_token in types
+      assert :")" in types
+
+      # Only one ) (the actual one)
+      close_count = Enum.count(types, &(&1 == :")"))
+      assert close_count == 1
+    end
+
+    test "mismatched closer without synthesis has no synthetic expected" do
+      tokens = tokenize_without_synthesis("([)")
+      types = token_types(tokens)
+
+      # Should have (, [, ), errors, but NO synthetic ]
+      assert :"(" in types
+      assert :"[" in types
+      assert :")" in types
+
+      # No ] at all (not synthesized, actual consumed by error)
+      refute :"]" in types
+    end
+
+    test "synthetic tokens have zero-length spans" do
+      tokens = tokenize_with_synthesis(")")
+
+      # Find synthetic ( - it should come after error, before )
+      types = token_types(tokens)
+      error_idx = Enum.find_index(types, &(&1 == :error_token))
+      synthetic_paren = Enum.at(tokens, error_idx + 1)
+
+      # Synthetic token should have zero-length meta
+      case synthetic_paren do
+        {:"(", {{sl, sc}, {el, ec}, _}} ->
+          assert {sl, sc} == {el, ec}, "Synthetic token should have zero-length span"
+
+        _ ->
+          flunk("Expected synthetic ( after error")
+      end
+    end
+  end
+
+  # ============================================================================
   # Forward Progress and Position Tests
   # ============================================================================
 
