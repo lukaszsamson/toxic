@@ -1070,6 +1070,14 @@ defmodule Toxic.Driver do
   defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
        when is_list(token_chars) do
     cond do
+      heredoc_header_error?(message, token_chars) ->
+        # Invalid heredoc header: still synthesize an appropriate heredoc end token
+        # so downstream sees a balanced structure in tolerant mode.
+        {end_kind, delim} = heredoc_end_from_token_chars(token_chars)
+        meta_end = meta(state.line, state.column, state.line, state.column, nil)
+        end_token = {end_kind, meta_end, delim, 0}
+        {def_rest, def_line, def_col, [{:post_error, end_token}], state.scope}
+
       ternary_missing_slash?(rest) ->
         # Ternary identifier should come AFTER error, but we return it from adjust_recovery
         # which puts it in pre_inserted. We'll handle this specially below.
@@ -1173,6 +1181,15 @@ defmodule Toxic.Driver do
       _ -> ""
     end
   end
+
+  defp heredoc_header_error?(message, token_chars) do
+    msg = parse_error_message(message)
+    starts = String.starts_with?(msg, "heredoc allows only whitespace characters followed by a new line after opening ")
+    starts and (token_chars == [?' , ?', ?'] or token_chars == [?", ?", ?"]) 
+  end
+
+  defp heredoc_end_from_token_chars([?', ?', ?'] = delim), do: {:list_heredoc_end, delim}
+  defp heredoc_end_from_token_chars([?", ?", ?"] = delim), do: {:bin_heredoc_end, delim}
 
   defp sanitize_identifier_from_chars(chars, line, col) do
     # Normalize original erroneous identifier and build ASCII-friendly skeleton
@@ -1585,7 +1602,7 @@ defmodule Toxic.Driver do
   end
 
   # Extract an actual closer atom from an error reason, if present
-  defp actual_closer_from_reason({meta_list, _msg, token_chars}) when is_list(token_chars) do
+  defp actual_closer_from_reason({_meta_list, _msg, token_chars}) when is_list(token_chars) do
     closer_atom_from_chars(List.flatten(token_chars))
   end
 

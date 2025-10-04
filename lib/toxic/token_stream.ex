@@ -492,14 +492,10 @@ defmodule Toxic.TokenStream do
         :queue.in(entry, buf)
       end)
 
-    # Mark EOF if driver reported EOF or if fewer tokens than requested were returned without error.
-    # This avoids an extra fetch cycle at EOF while preserving tolerant error recovery.
-    stream_eof =
-      cond do
-        eof -> true
-        error == nil and length(tokens) < max_batch -> true
-        true -> stream.eof
-      end
+    # Only mark EOF when the driver explicitly reports EOF.
+    # Do not infer EOF from batch size; tolerant mode may need additional
+    # driver cycles to drain pending errors and synthesized closers.
+    stream_eof = if eof, do: true, else: stream.eof
 
     %{
       stream
