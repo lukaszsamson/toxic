@@ -309,9 +309,8 @@ defmodule ToxicTolerantModeTest do
 
       assert length(error_tokens(tokens)) == 1
       # Should emit %, error, {, }, +, foo
-      assert types = token_types(tokens)
-      assert :% in types
-      assert :error_token in types
+      types = token_types(tokens)
+      assert [:%, :error_token | _] = types
       assert :"{" in types
       assert :dual_op in types
       assert :identifier in types
@@ -321,18 +320,20 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant("%( ) + x")
 
       assert length(error_tokens(tokens)) == 1
-      assert types = token_types(tokens)
-      assert :% in types
-      assert :error_token in types
+      types = token_types(tokens)
+      assert [:%, :error_token | _] = types
+      assert :"(" in types
+      assert :dual_op in types
     end
 
     test "invalid opener %[ with continuation" do
       tokens = tokenize_tolerant("%[ ] , y")
 
       assert length(error_tokens(tokens)) == 1
-      assert types = token_types(tokens)
-      assert :% in types
-      assert :error_token in types
+      types = token_types(tokens)
+      assert [:%, :error_token | _] = types
+      assert :"[" in types
+      assert :"," in types
     end
   end
 
@@ -414,8 +415,8 @@ defmodule ToxicTolerantModeTest do
     test "unexpected token after alias" do
       tokens = tokenize_tolerant("Foo(1 + 2)")
 
-      assert Enum.any?(token_types(tokens), &(&1 == :error_token))
-      assert Enum.any?(token_types(tokens), &(&1 == :int))
+      types = token_types(tokens)
+      assert [:alias, :error_token, :"(", :int, :dual_op, :int, :")" | _] = types
     end
 
     test "fn followed by do" do
@@ -1208,11 +1209,10 @@ defmodule ToxicTolerantModeTest do
     test "continue after ternary error" do
       tokens = tokenize_tolerant("..//foo + bar")
 
-      assert length(error_tokens(tokens)) >= 1
-
-      # Should continue with + bar
-      valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 2) == :bar end)
+      types = token_types(tokens)
+      assert [:error_token, :identifier, :identifier, :dual_op, :identifier] = types
+      [_, op_token | _] = tokens
+      assert {:identifier, _, :..//} = op_token
     end
   end
 
