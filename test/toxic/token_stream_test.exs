@@ -1026,6 +1026,250 @@ defmodule Toxic.TokenStreamTest do
 
       assert {{1, 3}, _stream} = TokenStream.position(stream)
     end
+
+    # Phase 3: Tolerant mode recovery tests
+    test "tolerant next/1 recovers from error and continues" do
+      stream = TokenStream.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # First token: 1
+      {:ok, token1, stream} = TokenStream.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token1
+
+      # Second token: error_token (for Ä)
+      {:ok, token2, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = token2
+
+      # Third token: 2 (continues after error)
+      {:ok, token3, stream} = TokenStream.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token3
+
+      # EOF
+      assert {:eof, _} = TokenStream.next(stream)
+    end
+
+    test "tolerant next/1 recovers from error at EOF" do
+      stream = TokenStream.new("}", 1, 1, error_mode: :tolerant)
+
+      # First token: error_token (unexpected closer)
+      {:ok, token, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = token
+
+      # EOF after error recovery
+      assert {:eof, _} = TokenStream.next(stream)
+    end
+
+    test "tolerant peek/1 recovers error into buffer without consuming" do
+      stream = TokenStream.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Peek should recover error into buffer
+      {:ok, token1, stream1} = TokenStream.peek(stream)
+      assert {:error_token, _, _} = token1
+
+      # Peek again should return same error token
+      {:ok, token2, stream2} = TokenStream.peek(stream1)
+      assert {:error_token, _, _} = token2
+
+      # Stream unchanged
+      assert stream1 == stream2
+
+      # Next consumes the error token
+      {:ok, token3, stream3} = TokenStream.next(stream2)
+      assert {:error_token, _, _} = token3
+
+      # Next token after error
+      {:ok, token4, _stream4} = TokenStream.next(stream3)
+      assert {:int, {{1, 4}, {1, 5}, 1}, ~c"1"} = token4
+    end
+
+    test "tolerant peek/1 after error continues" do
+      stream = TokenStream.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # Consume first token
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      # Peek at error
+      {:ok, token, stream} = TokenStream.peek(stream)
+      assert {:error_token, _, _} = token
+
+      # Consume error
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      # Peek at continuation token
+      {:ok, token, _stream} = TokenStream.peek(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "tolerant peek_n/2 recovers and continues filling buffer" do
+      stream = TokenStream.new("1 Ä 2 3", 1, 1, error_mode: :tolerant)
+
+      # Peek 4 tokens: 1, error, 2, 3
+      {:ok, tokens, stream} = TokenStream.peek_n(stream, 4)
+
+      assert length(tokens) == 4
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = Enum.at(tokens, 2)
+      assert {:int, {{1, 7}, {1, 8}, 3}, ~c"3"} = Enum.at(tokens, 3)
+
+      # Stream unchanged
+      {:ok, token, _} = TokenStream.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+    end
+
+    test "tolerant peek_n/2 with multiple errors" do
+      stream = TokenStream.new("Ä Ü 1", 1, 1, error_mode: :tolerant)
+
+      # Peek 3 tokens: error, error, 1
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 3)
+
+      assert length(tokens) == 3
+      assert {:error_token, _, _} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 7}, {1, 8}, 1}, ~c"1"} = Enum.at(tokens, 2)
+    end
+
+    test "tolerant peek_n/2 at EOF with error" do
+      stream = TokenStream.new("1 }", 1, 1, error_mode: :tolerant)
+
+      # Peek 5 tokens, but only 2 available (1 and error)
+      {:eof, tokens, _stream} = TokenStream.peek_n(stream, 5)
+
+      assert length(tokens) == 2
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+    end
+
+    test "tolerant position/1 recovers error for accurate position" do
+      stream = TokenStream.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Initial position
+      {{line1, col1}, stream} = TokenStream.position(stream)
+      assert {line1, col1} == {1, 1}
+
+      # Consume error token
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      # Position after error should be at next valid token
+      {{line2, col2}, _stream} = TokenStream.position(stream)
+      assert {line2, col2} == {1, 4}
+    end
+
+    test "tolerant pushback with error token works correctly" do
+      stream = TokenStream.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Consume error token
+      {:ok, error_token, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = error_token
+
+      # Consume next token
+      {:ok, int_token, stream} = TokenStream.next(stream)
+      assert {:int, {{1, 4}, {1, 5}, 1}, ~c"1"} = int_token
+
+      # Push back both tokens
+      stream =
+        stream
+        |> TokenStream.pushback(int_token)
+        |> TokenStream.pushback(error_token)
+
+      # Should get error token first
+      {:ok, token1, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = token1
+
+      # Then int token
+      {:ok, token2, _stream} = TokenStream.next(stream)
+      assert {:int, {{1, 4}, {1, 5}, 1}, ~c"1"} = token2
+    end
+
+    test "tolerant checkpoint/rewind with errors is deterministic" do
+      stream = TokenStream.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # Consume first token
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      # Create checkpoint before error
+      {ref, stream} = TokenStream.checkpoint(stream)
+
+      # Consume error and next token
+      {:ok, error1, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = error1
+      {:ok, _, stream} = TokenStream.next(stream)
+
+      # Rewind to checkpoint
+      stream = TokenStream.rewind_to(stream, ref)
+
+      # Should get same error token again
+      {:ok, error2, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = error2
+
+      # Positions should match
+      {_, {{sl1, sc1}, {el1, ec1}, _}, _} = error1
+      {_, {{sl2, sc2}, {el2, ec2}, _}, _} = error2
+      assert {sl1, sc1, el1, ec1} == {sl2, sc2, el2, ec2}
+
+      # Continue should work
+      {:ok, token, _} = TokenStream.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "tolerant to_stream/1 includes error tokens in output" do
+      stream = TokenStream.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      tokens =
+        stream
+        |> TokenStream.to_stream()
+        |> Enum.to_list()
+
+      assert length(tokens) == 3
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = Enum.at(tokens, 2)
+    end
+
+    test "tolerant handles multiple consecutive errors" do
+      stream = TokenStream.new("Ä Ü Ñ 1", 1, 1, error_mode: :tolerant)
+
+      # Consume all tokens
+      {:ok, t1, stream} = TokenStream.next(stream)
+      {:ok, t2, stream} = TokenStream.next(stream)
+      {:ok, t3, stream} = TokenStream.next(stream)
+      {:ok, t4, stream} = TokenStream.next(stream)
+
+      assert {:error_token, _, _} = t1
+      assert {:error_token, _, _} = t2
+      assert {:error_token, _, _} = t3
+      assert {:int, {{1, 10}, {1, 11}, 1}, ~c"1"} = t4
+
+      assert {:eof, _} = TokenStream.next(stream)
+    end
+
+    test "tolerant handles error in small batch size scenario" do
+      stream = TokenStream.new("1 Ä 2 3", 1, 1, error_mode: :tolerant, max_batch: 2)
+
+      # Force multiple batches with error in middle
+      {:ok, _, stream} = TokenStream.next(stream)
+      {:ok, error, stream} = TokenStream.next(stream)
+      assert {:error_token, _, _} = error
+
+      # Should continue across batch boundary
+      {:ok, token, stream} = TokenStream.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+
+      {:ok, token, _stream} = TokenStream.next(stream)
+      assert {:int, {{1, 7}, {1, 8}, 3}, ~c"3"} = token
+    end
+
+    test "tolerant peek_n forces multiple recoveries during fill" do
+      stream = TokenStream.new("Ä Ü 1 2", 1, 1, error_mode: :tolerant, max_batch: 1)
+
+      # Peek 4 tokens with batch size 1 - forces multiple refills and recoveries
+      {:ok, tokens, _stream} = TokenStream.peek_n(stream, 4)
+
+      assert length(tokens) == 4
+      assert {:error_token, _, _} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, _, ~c"1"} = Enum.at(tokens, 2)
+      assert {:int, _, ~c"2"} = Enum.at(tokens, 3)
+    end
   end
 
   describe "Batching" do

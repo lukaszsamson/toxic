@@ -218,10 +218,31 @@ defmodule Toxic.TokenStream do
       if not_filled == 0 do
         {:ok, push_tokens ++ buffer_tokens, stream}
       else
-        if stream.eof do
-          {:eof, push_tokens ++ buffer_tokens, stream}
-        else
-          {:error, stream.error, push_tokens ++ buffer_tokens, stream}
+        # Try to recover/fill further in tolerant mode
+        case Keyword.get(stream.opts, :error_mode, :tolerant) do
+          :strict ->
+            if stream.eof do
+              {:eof, push_tokens ++ buffer_tokens, stream}
+            else
+              {:error, stream.error, push_tokens ++ buffer_tokens, stream}
+            end
+
+          :tolerant ->
+            stream = fill_for_peek(stream, not_filled)
+
+            new_buf_tokens =
+              stream.buffer
+              |> :queue.to_list()
+              |> Enum.take(needed)
+              |> Enum.map(fn {t, _, _} -> t end)
+
+            new_not_filled = needed - length(new_buf_tokens)
+
+            cond do
+              new_not_filled == 0 -> {:ok, push_tokens ++ new_buf_tokens, stream}
+              stream.eof -> {:eof, push_tokens ++ new_buf_tokens, stream}
+              true -> {:ok, push_tokens ++ new_buf_tokens, stream}
+            end
         end
       end
     end
@@ -508,12 +529,17 @@ defmodule Toxic.TokenStream do
 
       true ->
         # Ensure we have a head entry to accurately reflect the next-token start
-        if strict_error?(stream) do
-          # TODO: tolerant mode
-          {{stream.driver.line, stream.driver.column}, stream}
-        else
-          stream = refill_buffer(stream)
-          position(stream)
+        cond do
+          strict_error?(stream) ->
+            {{stream.driver.line, stream.driver.column}, stream}
+
+          Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant and stream.error ->
+            stream = recover_into_buffer(stream)
+            position(stream)
+
+          true ->
+            stream = refill_buffer(stream)
+            position(stream)
         end
     end
   end
@@ -534,6 +560,16 @@ defmodule Toxic.TokenStream do
         stream
         |> refill_buffer()
         |> ensure_buffer_size(needed)
+    end
+  end
+
+  # Attempt to fill buffer with at least count more tokens in tolerant mode
+  defp fill_for_peek(%__MODULE__{} = stream, count, tries \\ 0) do
+    cond do
+      tries > 4 -> stream
+      stream.eof -> stream
+      stream.error -> fill_for_peek(recover_into_buffer(stream), count, tries + 1)
+      true -> fill_for_peek(refill_buffer(stream), count, tries + 1)
     end
   end
 
