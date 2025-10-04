@@ -1028,6 +1028,10 @@ defmodule Toxic.Driver do
         op_token = {:identifier, meta_op, :..//}
         {Enum.drop(rest, 4), state.line, state.column + 4, [op_token], state.scope}
 
+      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
+        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
+        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
+
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
         {tl(rest), state.line, state.column + 1, [], state.scope}
@@ -1103,7 +1107,8 @@ defmodule Toxic.Driver do
         String.contains?(msg, "mixed-script") or
         String.contains?(msg, "confusable") or
         String.contains?(msg, "NFKC") or
-        String.contains?(msg, "atom length must be less")
+        String.contains?(msg, "atom length must be less") or
+        String.contains?(msg, "unsafe atom does not exist")
 
     # Only trigger if we have an actual identifier error AND non-delimiter follows
     case rest do
@@ -1112,7 +1117,7 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp is_delimiter_or_space(ch) when ch in ~c"()[]{};,:.#%~?\"" do
+  defp is_delimiter_or_space(ch) when ch in ~c"()[]{};,:.#%~?'\"" do
     true
   end
   defp is_delimiter_or_space(ch) when ch in [32, ?\t, ?\n, ?\r], do: true
@@ -1180,7 +1185,15 @@ defmodule Toxic.Driver do
     consume_leading_spaces(rest, line, column, 0)
   end
 
-  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\t, ?\f, 32] do
+  defp consume_leading_spaces([?\\, ?\n | tail], line, _column, count) do
+    consume_leading_spaces(tail, line + 1, 1, count + 1)
+  end
+
+  defp consume_leading_spaces([?\\, ?\r, ?\n | tail], line, _column, count) do
+    consume_leading_spaces(tail, line + 1, 1, count + 1)
+  end
+
+  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\t, ?\f, ?\v, 32] do
     consume_leading_spaces(tail, line, column + 1, count + 1)
   end
 

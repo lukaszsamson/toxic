@@ -9,7 +9,9 @@ defmodule ToxicTolerantModeTest do
         elixir_compatibility: false,
         preserve_comments: false
       ]
-      |> Keyword.merge(Keyword.take(opts, [:existing_atoms_only, :insert_identifier_sanitization]))
+      |> Keyword.merge(
+        Keyword.take(opts, [:existing_atoms_only, :insert_structural_closers, :insert_identifier_sanitization])
+      )
 
     stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
 
@@ -504,6 +506,55 @@ defmodule ToxicTolerantModeTest do
 
       types = token_types(tokens)
       assert [:identifier, :";", :error_token, :identifier | _] = types
+    end
+  end
+
+  # ============================================================================
+  # Identifier Sanitization
+  # ============================================================================
+
+  describe "Identifier sanitization" do
+    test "mixed script identifier is sanitized" do
+      input = "foo" <> <<0x03B1::utf8>> <> "bar + 1"
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert [:identifier, :error_token, :dual_op, :int | _] = types
+
+      {:identifier, _, sanitized_atom} = hd(tokens)
+      assert sanitized_atom |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
+    end
+
+    test "confusable identifier is sanitized" do
+      input = "foO" <> <<0x1D6B3::utf8>> <> " + 1"
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert [:identifier, :error_token, :dual_op, :int | _] = types
+
+      {:identifier, _, sanitized_atom} = hd(tokens)
+      assert sanitized_atom |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
+    end
+
+    test "identifier exceeding atom length limit is truncated" do
+      long = String.duplicate("a", 300) <> " + 1"
+      tokens = tokenize_tolerant(long)
+
+      types = token_types(tokens)
+      assert [:identifier, :error_token, :dual_op, :int | _] = types
+
+      {:identifier, _, sanitized_atom} = hd(tokens)
+      san = Atom.to_string(sanitized_atom)
+      assert byte_size(san) <= 255
+      assert String.match?(san, ~r/^[A-Za-z0-9_]+$/)
+    end
+
+    test "sanitization disabled does not insert identifier" do
+      input = "foo" <> <<0x03B1::utf8>> <> "bar + 1"
+      tokens = tokenize_tolerant(input, insert_identifier_sanitization: false)
+
+      types = token_types(tokens)
+      assert [:error_token, :dual_op, :int | _] = types
     end
   end
 
@@ -1137,6 +1188,33 @@ defmodule ToxicTolerantModeTest do
         _ ->
           flunk("Expected synthetic ( after error")
       end
+    end
+  end
+
+  describe "Nested interpolation EOF recovery" do
+    test "string with unterminated interpolation synthesizes closers" do
+      tokens = tokenize_tolerant("\"\#{foo(")
+
+      types = token_types(tokens)
+      assert Enum.count(types, &(&1 == :error_token)) >= 3
+      assert Enum.any?(types, &(&1 == :end_interpolation))
+      assert Enum.any?(types, &(&1 == :bin_string_end))
+    end
+  end
+
+  describe "Cascade error recovery" do
+    test "mixed errors (%( foo:bar ..// ;; baz)" do
+      input = "% ( foo:bar ..// ;; baz"
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert Enum.count(types, &(&1 == :error_token)) >= 4
+      assert Enum.any?(types, &(&1 == :"("))
+      assert Enum.any?(types, &(&1 == :";"))
+      assert Enum.any?(types, fn t -> t == :identifier end)
+
+      valid = valid_tokens(tokens)
+      assert {:identifier, _, :baz} = List.last(valid)
     end
   end
 
