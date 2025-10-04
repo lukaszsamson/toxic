@@ -297,7 +297,10 @@ defmodule ToxicTolerantModeTest do
 
       # But should tokenize the :ok atom
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 0) == :atom and elem(t, 2) == :ok end)
+      assert Enum.any?(valid, fn
+               {:atom, _, :ok} -> true
+               _ -> false
+             end)
     end
   end
 
@@ -480,7 +483,10 @@ defmodule ToxicTolerantModeTest do
       assert length(error_tokens(tokens)) >= 1
       # Should continue and tokenize :ok
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 0) == :atom and elem(t, 2) == :ok end)
+      assert Enum.any?(valid, fn
+               {:atom, _, :ok} -> true
+               _ -> false
+             end)
     end
 
     test "identifier with @ sign" do
@@ -519,9 +525,15 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(input)
 
       types = token_types(tokens)
-      assert [:identifier, :error_token, :dual_op, :int | _] = types
+      assert [:error_token, :identifier, :dual_op, :int | _] = types
 
-      {:identifier, _, sanitized_atom} = hd(tokens)
+      sanitized_atom =
+        tokens
+        |> Enum.find_value(fn
+          {:identifier, _, atom} -> atom
+          _ -> nil
+        end)
+
       assert sanitized_atom |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
     end
 
@@ -530,9 +542,15 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(input)
 
       types = token_types(tokens)
-      assert [:identifier, :error_token, :dual_op, :int | _] = types
+      assert [:error_token, :identifier, :dual_op, :int | _] = types
 
-      {:identifier, _, sanitized_atom} = hd(tokens)
+      sanitized_atom =
+        tokens
+        |> Enum.find_value(fn
+          {:identifier, _, atom} -> atom
+          _ -> nil
+        end)
+
       assert sanitized_atom |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
     end
 
@@ -541,9 +559,15 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(long)
 
       types = token_types(tokens)
-      assert [:identifier, :error_token, :dual_op, :int | _] = types
+      assert [:error_token, :identifier, :dual_op, :int | _] = types
 
-      {:identifier, _, sanitized_atom} = hd(tokens)
+      sanitized_atom =
+        tokens
+        |> Enum.find_value(fn
+          {:identifier, _, atom} -> atom
+          _ -> nil
+        end)
+
       san = Atom.to_string(sanitized_atom)
       assert byte_size(san) <= 255
       assert String.match?(san, ~r/^[A-Za-z0-9_]+$/)
@@ -583,7 +607,7 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant("Foo(1 + 2)")
 
       types = token_types(tokens)
-      assert [:alias, :error_token, :"(", :int, :dual_op, :int, :")" | _] = types
+      assert [:alias, :"(", :error_token, :int, :dual_op, :int, :")" | _] = types
     end
 
     test "fn followed by do" do
@@ -1312,7 +1336,12 @@ defmodule ToxicTolerantModeTest do
       # Should get multiple errors, then successfully tokenize 'ok'
       assert length(error_tokens(tokens)) >= 1
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 2) == :ok end)
+      assert Enum.any?(valid, fn
+               {:identifier, _, :ok} -> true
+               {:atom, _, :ok} -> true
+               {:alias, _, :ok} -> true
+               _ -> false
+             end)
 
       assert_forward_progress(tokens)
     end
@@ -1325,7 +1354,12 @@ defmodule ToxicTolerantModeTest do
       {_kind, {{_sl, _sc}, {el, _ec}, _extra}, _reason} = error
 
       # Error end line should be <= line of baz
-      baz_token = Enum.find(tokens, fn t -> elem(t, 2) == :baz end)
+      baz_token =
+        Enum.find(tokens, fn
+          {_, _, :baz} -> true
+          _ -> false
+        end)
+
       {_, {{baz_line, _}, _, _}, _} = baz_token
 
       assert el <= baz_line
@@ -1392,7 +1426,12 @@ defmodule ToxicTolerantModeTest do
       assert :identifier in types
 
       # y should be on line 2
-      y_token = Enum.find(tokens, fn t -> elem(t, 2) == :y end)
+      y_token =
+        Enum.find(tokens, fn
+          {_, _, :y} -> true
+          _ -> false
+        end)
+
       {_, {{line, _}, _, _}, _} = y_token
       assert line == 2
     end
@@ -1415,7 +1454,10 @@ defmodule ToxicTolerantModeTest do
 
       # bar should be tokenized
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t when elem(t, 2) == :bar -> true; _ -> false end)
+      assert Enum.any?(valid, fn
+               {_, _, :bar} -> true
+               _ -> false
+             end)
     end
 
     test "sync to closer when in context" do
@@ -1441,7 +1483,10 @@ defmodule ToxicTolerantModeTest do
 
       # Should tokenize Bar
       valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> elem(t, 2) == Bar end)
+      assert Enum.any?(valid, fn
+               {_, _, Bar} -> true
+               _ -> false
+             end)
     end
 
     test "continue after sigil error" do

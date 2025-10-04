@@ -1040,7 +1040,7 @@ defmodule Toxic.Driver do
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
   defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
-       when is_list(message) and is_list(token_chars) do
+       when is_list(token_chars) do
     cond do
       ternary_missing_slash?(rest) ->
         # Ternary identifier should come AFTER error, but we return it from adjust_recovery
@@ -1094,19 +1094,21 @@ defmodule Toxic.Driver do
   end
 
   defp keyword_no_space?(message) do
-    prefix = ~c"keyword argument must be followed by space"
-    :lists.prefix(prefix, message)
+    msg = parse_error_message(message)
+    String.starts_with?(msg, "keyword argument must be followed by space")
   end
 
   defp map_expected_error?(message, token_chars) do
+    msg = parse_error_message(message)
     token_chars == [?%, ?(] or token_chars == [?%, ?[] or
-      :lists.prefix(~c"unexpected space between % and {", message)
+      String.starts_with?(msg, "unexpected space between % and {")
   end
 
   defp alias_after_paren?(message, token_chars) do
     # token_chars from Terminator is usually [~c"("]
     match_paren = (token_chars == [~c"("])
-    match_paren and :lists.prefix(~c"unexpected ( after alias", message)
+    msg = parse_error_message(message)
+    match_paren and String.starts_with?(msg, "unexpected ( after alias")
   end
 
   defp identifier_sanitization_candidate?(message) do
@@ -1494,7 +1496,9 @@ defmodule Toxic.Driver do
 
       _ ->
         # Unexpected closer (no error_type) can be inferred from token_chars
-        case closer_atom_from_chars(token_chars) do
+        # Flatten token_chars in case it's wrapped: [~c")"] -> ~c")"
+        flattened_chars = List.flatten(token_chars)
+        case closer_atom_from_chars(flattened_chars) do
           nil -> {:none, [], state.scope}
           closer ->
             case opening_for_closer(closer) do
