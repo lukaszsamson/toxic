@@ -1013,10 +1013,21 @@ defmodule Toxic.Driver do
 
     {pre_synth, post_synth} =
       case synth_side do
-        # For unexpected closers, synthesize opener BEFORE error (per plan)
-        :opener -> {inserted_struct, []}
+        # For unexpected closers, synthesize opener AFTER error (per finalized plan/tests)
+        :opener -> {[], inserted_struct}
+        # For mismatches/missing closers, synthesize closer AFTER error
         :closer -> {[], inserted_struct}
         _ -> {[], []}
+      end
+
+    # If this error originated from encountering a closer in the input, emit the
+    # actual closer token after any synthesized tokens so the stream includes it
+    # even when synthesis is disabled. This preserves expected [:error_token, synthetic_opener?, closer]
+    # ordering. Use zero-length meta at the current position to avoid position drift.
+    post_actual_closer =
+      case actual_closer_from_reason(reason) do
+        nil -> []
+        closer_atom -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 
     # Flush deferrals BEFORE error to preserve ordering; merge synthesized tokens on proper sides
@@ -1024,7 +1035,7 @@ defmodule Toxic.Driver do
     new_output =
       state.output ++
         Enum.reverse(state.deferrals) ++
-        pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth
+        pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth ++ post_actual_closer
     new_state = %{
       state
       | line: new_line,
@@ -1506,7 +1517,9 @@ defmodule Toxic.Driver do
               opening ->
                 # Insert synthetic opener and push to stack
                 case synthesize_opening(opening, state) do
-                  {:ok, tok, new_scope} -> {:opener, [tok], new_scope}
+                  {:ok, tok, new_scope} ->
+                    tok = maybe_tag_zero_len(tok, state)
+                    {:opener, [tok], new_scope}
                   _ -> {:none, [], state.scope}
                 end
             end
@@ -1553,6 +1566,13 @@ defmodule Toxic.Driver do
   defp maybe_tag_zero_len({kind, {{sl, sc}, {_el, _ec}, extra}}, _state) do
     {kind, {{sl, sc}, {sl, sc}, extra}}
   end
+
+  # Extract an actual closer atom from an error reason, if present
+  defp actual_closer_from_reason({meta_list, _msg, token_chars}) when is_list(token_chars) do
+    closer_atom_from_chars(List.flatten(token_chars))
+  end
+
+  defp actual_closer_from_reason(_), do: nil
 
   # Advance over a list of characters (handles grapheme clusters and newlines)
   defp advance_over_chars(chars, line, col) do
