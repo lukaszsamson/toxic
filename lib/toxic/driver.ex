@@ -1086,13 +1086,15 @@ defmodule Toxic.Driver do
         # Mark with special flag that this should go after error
         {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
 
-      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message) ->
-        # Build sanitized identifier from the original erroneous span and always advance
-        orig_chars = List.flatten(token_chars)
-        original_len = length(orig_chars)
-        {adv_line, adv_col} = advance_over_chars(orig_chars, state.line, state.column)
-        id_token = sanitize_identifier_from_chars(orig_chars, adv_line, adv_col)
-        {Enum.drop(rest, original_len), adv_line, adv_col, [{:post_error, id_token}], state.scope}
+      state.insert_identifier_sanitization and (identifier_sanitization_candidate?(message) or unexpected_identifier_token?(message, rest)) ->
+        # Build sanitized identifier for the erroneous span. Prefer the default
+        # scan window (to sync point) as the span when token_chars isn't reliable
+        # (e.g., identifier suggestions encode message in token_chars).
+        span_chars = take_prefix_until(rest, def_rest)
+        # Fall back to provided token_chars if prefix is empty
+        base_chars = if span_chars == [], do: List.flatten(token_chars), else: span_chars
+        id_token = sanitize_identifier_from_chars(base_chars, state.line, state.column)
+        {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
 
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
@@ -1152,11 +1154,16 @@ defmodule Toxic.Driver do
     # Message might be charlist, iodata, or tuple of charlists
     msg = parse_error_message(message)
 
+    # Intentionally no logging here to keep test output clean
+
     is_id_error =
       String.contains?(msg, "mixed script") or
         String.contains?(msg, "mixed-script") or
         String.contains?(msg, "confusable") or
         String.contains?(msg, "NFKC") or
+        String.contains?(msg, "NFC") or
+        String.contains?(msg, "Codepoint failed identifier tokenization") or
+        String.contains?(msg, "Elixir expects unquoted Unicode atoms, variables, and calls") or
         String.contains?(msg, "atom length must be less") or
         String.contains?(msg, "unsafe atom does not exist")
 
@@ -1181,6 +1188,33 @@ defmodule Toxic.Driver do
       _ -> ""
     end
   end
+
+  defp unexpected_identifier_token?(message, rest) do
+    msg = parse_error_message(message)
+    String.contains?(msg, "unexpected token") and starts_like_identifier?(rest)
+  end
+
+  defp starts_like_identifier?(list) do
+    case :unicode_util.gc(list) do
+      [cluster | _] when is_list(cluster) ->
+        # Treat any non-space cluster that isn't an obvious delimiter as identifier-ish
+        not contains_space?(cluster) and not starts_with_delimiter?(cluster)
+      [codepoint | _] when is_integer(codepoint) ->
+        not is_space(codepoint) and not is_delimiter_char?(codepoint)
+      _ -> false
+    end
+  end
+
+  defp contains_space?(cluster), do: Enum.any?(cluster, &is_space/1)
+
+  defp starts_with_delimiter?([cp | _]), do: is_delimiter_char?(cp)
+  defp starts_with_delimiter?(_), do: false
+
+  defp is_delimiter_char?(cp) when cp in '()[]{}', do: true
+  defp is_delimiter_char?(cp) when cp in ':+-*/%=;,.|&^', do: true
+  defp is_delimiter_char?(cp) when cp in ':<>', do: true
+  defp is_delimiter_char?(?#), do: true
+  defp is_delimiter_char?(_), do: false
 
   defp heredoc_header_error?(message, token_chars) do
     msg = parse_error_message(message)
@@ -1212,6 +1246,14 @@ defmodule Toxic.Driver do
     id_atom = List.to_atom(filtered)
     {:identifier, meta_id, id_atom}
   end
+
+  # Take the prefix list elements of `list` up to the exact `tail` list identity.
+  # If `tail` is not a suffix of `list`, returns all of `list`.
+  defp take_prefix_until(list, tail), do: do_take_prefix_until(list, tail, [])
+
+  defp do_take_prefix_until(list, list, acc), do: Enum.reverse(acc)
+  defp do_take_prefix_until([h | t], tail, acc), do: do_take_prefix_until(t, tail, [h | acc])
+  defp do_take_prefix_until([], _tail, acc), do: Enum.reverse(acc)
 
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
   defp allowed_ident_char?(c) when c in ?A..?Z, do: true
