@@ -1004,17 +1004,27 @@ defmodule Toxic.Driver do
     error_token = {:error_token, error_meta, reason}
 
     # Optionally synthesize structural tokens for delimiter errors
-    {inserted_struct, scope_after_insert} =
+    {synth_side, inserted_struct, scope_after_insert} =
       if state.insert_structural_closers do
         synthesize_from_reason(reason, %{state | scope: scope_after_pre})
       else
-        {[], scope_after_pre}
+        {:none, [], scope_after_pre}
       end
 
-    # Flush deferrals BEFORE error to preserve ordering; enqueue inserted tokens after error
-    # Order: deferrals + pre_inserted + error + post_inserted + inserted_struct
+    {pre_synth, post_synth} =
+      case synth_side do
+        # For unexpected closers, synthesize opener BEFORE error (per plan)
+        :opener -> {inserted_struct, []}
+        :closer -> {[], inserted_struct}
+        _ -> {[], []}
+      end
+
+    # Flush deferrals BEFORE error to preserve ordering; merge synthesized tokens on proper sides
+    # Order: deferrals + pre_inserted + pre_synth + error + post_inserted + post_synth
     new_output =
-      state.output ++ Enum.reverse(state.deferrals) ++ pre_inserted ++ [error_token] ++ post_inserted ++ inserted_struct
+      state.output ++
+        Enum.reverse(state.deferrals) ++
+        pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth
     new_state = %{
       state
       | line: new_line,
@@ -1040,10 +1050,13 @@ defmodule Toxic.Driver do
         # Mark with special flag that this should go after error
         {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
 
-      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
-        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
-        # Sanitized identifiers also come AFTER error
-        {Enum.drop(rest, consumed), new_line, new_col, [{:post_error, id_token}], state.scope}
+      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message) ->
+        # Build sanitized identifier from the original erroneous span and always advance
+        orig_chars = List.flatten(token_chars)
+        original_len = length(orig_chars)
+        {adv_line, adv_col} = advance_over_chars(orig_chars, state.line, state.column)
+        id_token = sanitize_identifier_from_chars(orig_chars, adv_line, adv_col)
+        {Enum.drop(rest, original_len), adv_line, adv_col, [{:post_error, id_token}], state.scope}
 
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
@@ -1071,10 +1084,6 @@ defmodule Toxic.Driver do
         semi_token = {:";", meta_semi}
         {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
 
-      state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
-        {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
-        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
-
       true ->
         {def_rest, def_line, def_col, [], state.scope}
     end
@@ -1100,7 +1109,7 @@ defmodule Toxic.Driver do
     match_paren and :lists.prefix(~c"unexpected ( after alias", message)
   end
 
-  defp identifier_sanitization_candidate?(message, rest) do
+  defp identifier_sanitization_candidate?(message) do
     # Only sanitize for explicit identifier/atom errors
     # Message might be charlist, iodata, or tuple of charlists
     msg = parse_error_message(message)
@@ -1113,10 +1122,8 @@ defmodule Toxic.Driver do
         String.contains?(msg, "atom length must be less") or
         String.contains?(msg, "unsafe atom does not exist")
 
-    # Sanitize whenever we have an identifier error
-    # The tokenizer has already consumed the bad identifier, so rest may point
-    # to a delimiter. We can't use rest to determine if this is identifier-like.
-    is_id_error and rest != []
+    # Sanitize whenever we have an identifier error (do not depend on `rest`)
+    is_id_error
   end
 
   defp parse_error_message(message) do
@@ -1137,22 +1144,15 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp is_delimiter_or_space(ch) when ch in ~c"()[]{};,:.#%~?'\"" do
-    true
-  end
-  defp is_delimiter_or_space(ch) when ch in [32, ?\t, ?\n, ?\r], do: true
-  defp is_delimiter_or_space(_), do: false
-
-  defp sanitize_identifier(rest, line, col) do
-    # Capture a chunk up to space/delimiter
-    {chunk, consumed} = take_until_boundary(rest, 0)
-    # Normalize and build ASCII-friendly skeleton if possible
-    bin = Toxic.Util.characters_to_binary(chunk)
-    skeleton = try do
-      String.Tokenizer.Security.confusable_skeleton(bin)
-    rescue
-      _ -> bin
-    end
+  defp sanitize_identifier_from_chars(chars, line, col) do
+    # Normalize original erroneous identifier and build ASCII-friendly skeleton
+    bin = Toxic.Util.characters_to_binary(chars)
+    skeleton =
+      try do
+        String.Tokenizer.Security.confusable_skeleton(bin)
+      rescue
+        _ -> bin
+      end
 
     nfkc = :unicode.characters_to_nfkc_list(skeleton)
     filtered =
@@ -1163,19 +1163,8 @@ defmodule Toxic.Driver do
 
     meta_id = meta(line, col, line, col + length(filtered), filtered)
     id_atom = List.to_atom(filtered)
-    {{:identifier, meta_id, id_atom}, consumed, line, col + length(filtered)}
+    {:identifier, meta_id, id_atom}
   end
-
-  defp take_until_boundary([h | t], n) do
-    if is_delimiter_or_space(h) do
-      {[], n}
-    else
-      {rest, consumed} = take_until_boundary(t, n + 1)
-      {[h | rest], consumed}
-    end
-  end
-
-  defp take_until_boundary([], n), do: {[], n}
 
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
   defp allowed_ident_char?(c) when c in ?A..?Z, do: true
@@ -1499,29 +1488,29 @@ defmodule Toxic.Driver do
         case synthesize_closing(expected, state) do
           {:ok, tok, new_scope} ->
             tok = maybe_tag_zero_len(tok, state)
-            {[tok], new_scope}
-          _ -> {[], state.scope}
+            {:closer, [tok], new_scope}
+          _ -> {:none, [], state.scope}
         end
 
       _ ->
         # Unexpected closer (no error_type) can be inferred from token_chars
         case closer_atom_from_chars(token_chars) do
-          nil -> {[], state.scope}
+          nil -> {:none, [], state.scope}
           closer ->
             case opening_for_closer(closer) do
-              nil -> {[], state.scope}
+              nil -> {:none, [], state.scope}
               opening ->
                 # Insert synthetic opener and push to stack
                 case synthesize_opening(opening, state) do
-                  {:ok, tok, new_scope} -> {[tok], new_scope}
-                  _ -> {[], state.scope}
+                  {:ok, tok, new_scope} -> {:opener, [tok], new_scope}
+                  _ -> {:none, [], state.scope}
                 end
             end
         end
     end
   end
 
-  defp synthesize_from_reason(_reason, state), do: {[], state.scope}
+  defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
 
   defp closer_atom_from_chars(~c")"), do: :")"
   defp closer_atom_from_chars(~c"]"), do: :"]"
@@ -1559,5 +1548,23 @@ defmodule Toxic.Driver do
 
   defp maybe_tag_zero_len({kind, {{sl, sc}, {_el, _ec}, extra}}, _state) do
     {kind, {{sl, sc}, {sl, sc}, extra}}
+  end
+
+  # Advance over a list of characters (handles grapheme clusters and newlines)
+  defp advance_over_chars(chars, line, col) do
+    do_advance_over_chars(List.wrap(chars), line, col)
+  end
+
+  defp do_advance_over_chars([], line, col), do: {line, col}
+  defp do_advance_over_chars(list, line, col) do
+    case :unicode_util.gc(list) do
+      [cluster | rest2] when is_list(cluster) ->
+        {nline, ncol} = advance_pos_cluster(cluster, line, col)
+        do_advance_over_chars(rest2, nline, ncol)
+      [codepoint | rest2] when is_integer(codepoint) ->
+        {nline, ncol} = advance_pos(codepoint, line, col)
+        do_advance_over_chars(rest2, nline, ncol)
+      [] -> {line, col}
+    end
   end
 end

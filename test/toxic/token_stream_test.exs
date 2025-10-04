@@ -1169,7 +1169,7 @@ defmodule Toxic.TokenStreamTest do
 
       # Consume next token
       {:ok, int_token, stream} = TokenStream.next(stream)
-      assert {:int, {{1, 4}, {1, 5}, 1}, ~c"1"} = int_token
+      assert {:int, {{1, 3}, {1, 4}, 1}, ~c"1"} = int_token
 
       # Push back both tokens
       stream =
@@ -1183,7 +1183,7 @@ defmodule Toxic.TokenStreamTest do
 
       # Then int token
       {:ok, token2, _stream} = TokenStream.next(stream)
-      assert {:int, {{1, 4}, {1, 5}, 1}, ~c"1"} = token2
+      assert {:int, {{1, 3}, {1, 4}, 1}, ~c"1"} = token2
     end
 
     test "tolerant checkpoint/rewind with errors is deterministic" do
