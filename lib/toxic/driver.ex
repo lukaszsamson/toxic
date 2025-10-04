@@ -981,8 +981,16 @@ defmodule Toxic.Driver do
     {def_rest, def_line, def_col} = scan_to_sync(rest, state)
 
     # Phase 4: Context-specific minimal recovery (override default scan)
-    {new_rest, new_line, new_column, pre_inserted, scope_after_pre} =
+    {new_rest, new_line, new_column, recovery_tokens, scope_after_pre} =
       adjust_recovery(reason, rest, state, def_rest, def_line, def_col)
+
+    # Separate pre_inserted (before error) from post_inserted (after error)
+    {pre_inserted, post_inserted} = Enum.split_with(recovery_tokens, fn
+      {:post_error, _} -> false
+      _ -> true
+    end)
+    # Unwrap post_error markers
+    post_inserted = Enum.map(post_inserted, fn {:post_error, tok} -> tok end)
 
     # Always make progress
     {new_rest, new_line, new_column} =
@@ -1004,8 +1012,9 @@ defmodule Toxic.Driver do
       end
 
     # Flush deferrals BEFORE error to preserve ordering; enqueue inserted tokens after error
+    # Order: deferrals + pre_inserted + error + post_inserted + inserted_struct
     new_output =
-      state.output ++ Enum.reverse(state.deferrals) ++ pre_inserted ++ [error_token] ++ inserted_struct
+      state.output ++ Enum.reverse(state.deferrals) ++ pre_inserted ++ [error_token] ++ post_inserted ++ inserted_struct
     new_state = %{
       state
       | line: new_line,
@@ -1024,13 +1033,17 @@ defmodule Toxic.Driver do
        when is_list(message) and is_list(token_chars) do
     cond do
       ternary_missing_slash?(rest) ->
+        # Ternary identifier should come AFTER error, but we return it from adjust_recovery
+        # which puts it in pre_inserted. We'll handle this specially below.
         meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
         op_token = {:identifier, meta_op, :..//}
-        {Enum.drop(rest, 4), state.line, state.column + 4, [op_token], state.scope}
+        # Mark with special flag that this should go after error
+        {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
 
       state.insert_identifier_sanitization and identifier_sanitization_candidate?(message, rest) ->
         {id_token, consumed, new_line, new_col} = sanitize_identifier(rest, state.line, state.column)
-        {Enum.drop(rest, consumed), new_line, new_col, [id_token], state.scope}
+        # Sanitized identifiers also come AFTER error
+        {Enum.drop(rest, consumed), new_line, new_col, [{:post_error, id_token}], state.scope}
 
       keyword_no_space?(message) and match?([?: | _], rest) ->
         # Consume only ':' so the following identifier is preserved
@@ -1090,17 +1103,7 @@ defmodule Toxic.Driver do
   defp identifier_sanitization_candidate?(message, rest) do
     # Only sanitize for explicit identifier/atom errors
     # Message might be charlist, iodata, or tuple of charlists
-    msg = try do
-      case message do
-        s when is_binary(s) -> s
-        l when is_list(l) -> List.to_string(l)
-        {part1, part2} when is_list(part1) and is_list(part2) ->
-          List.to_string(part1) <> List.to_string(part2)
-        _ -> inspect(message)
-      end
-    rescue
-      _ -> inspect(message)
-    end
+    msg = parse_error_message(message)
 
     is_id_error =
       String.contains?(msg, "mixed script") or
@@ -1110,10 +1113,27 @@ defmodule Toxic.Driver do
         String.contains?(msg, "atom length must be less") or
         String.contains?(msg, "unsafe atom does not exist")
 
-    # Only trigger if we have an actual identifier error AND non-delimiter follows
-    case rest do
-      [] -> false  # No input left, can't sanitize
-      [h | _] -> is_id_error and not is_delimiter_or_space(h)
+    # Sanitize whenever we have an identifier error
+    # The tokenizer has already consumed the bad identifier, so rest may point
+    # to a delimiter. We can't use rest to determine if this is identifier-like.
+    is_id_error and rest != []
+  end
+
+  defp parse_error_message(message) do
+    case message do
+      l when is_list(l) ->
+        try do
+          List.to_string(l)
+        rescue
+          _ -> ""
+        end
+      {part1, part2} ->
+        try do
+          List.to_string(part1) <> List.to_string(part2)
+        rescue
+          _ -> ""
+        end
+      _ -> ""
     end
   end
 
