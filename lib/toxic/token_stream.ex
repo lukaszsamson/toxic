@@ -419,15 +419,6 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  # TODO: remove
-  # defp driver_opts(opts) do
-  #   [
-  #     unescape: Keyword.get(opts, :unescape, true),
-  #     error_mode: Keyword.get(opts, :error_mode, :tolerant),
-  #     error_sync: Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer])
-  #   ]
-  # end
-
   defp fetch_tokens_from_driver(stream, max_batch, opts) do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
     # TODO: slicing source
