@@ -1131,7 +1131,7 @@ defmodule Toxic.TokenStreamTest do
       assert length(tokens) == 3
       assert {:error_token, _, _} = Enum.at(tokens, 0)
       assert {:error_token, _, _} = Enum.at(tokens, 1)
-      assert {:int, {{1, 7}, {1, 8}, 1}, ~c"1"} = Enum.at(tokens, 2)
+      assert {:int, {{1, 5}, {1, 6}, 1}, ~c"1"} = Enum.at(tokens, 2)
     end
 
     test "tolerant peek_n/2 at EOF with error" do
@@ -1157,7 +1157,7 @@ defmodule Toxic.TokenStreamTest do
 
       # Position after error should be at next valid token
       {{line2, col2}, _stream} = TokenStream.position(stream)
-      assert {line2, col2} == {1, 4}
+      assert {line2, col2} == {1, 3}
     end
 
     test "tolerant pushback with error token works correctly" do

@@ -1216,6 +1216,61 @@ defmodule ToxicTolerantModeTest do
       valid = valid_tokens(tokens)
       assert {:identifier, _, :baz} = List.last(valid)
     end
+
+    test "nested interpolation with missing terminators" do
+      input = ~S["#{foo(#{bar[}"]
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert Enum.count(types, &(&1 == :error_token)) >= 3
+      assert Enum.any?(types, &(&1 == :end_interpolation))
+      assert Enum.any?(types, &(&1 == :bin_string_end))
+    end
+
+    test "brace then array opener error sequence" do
+      input = "{ [ ) }"
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      # Expect one error for mismatched ) plus synthetic closers
+      assert Enum.count(types, &(&1 == :error_token)) >= 1
+      assert Enum.any?(types, &(&1 == :"("))
+      assert Enum.any?(types, &(&1 == :")"))
+      assert Enum.any?(types, &(&1 == :"["))
+      assert Enum.any?(types, &(&1 == :"]"))
+    end
+
+    test "nested structural + identifier issues" do
+      input = "%{ foo" <> <<0x03B1::utf8>> <> "bar ;;" <> <<0x202E::utf8>>
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert Enum.count(types, &(&1 == :error_token)) >= 3
+      assert Enum.any?(types, &(&1 == :%))
+      assert Enum.any?(types, &(&1 == :"{"))
+      assert Enum.any?(types, &(&1 == :";"))
+
+      # Sanitized identifier should appear
+      assert {:identifier, _, id} = hd(tokens)
+      assert id |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
+    end
+
+    test "string with escaped newline and unterminated interpolation" do
+      input = ~S["line1\
+#{foo"]
+      tokens = tokenize_tolerant(input)
+
+      types = token_types(tokens)
+      assert Enum.count(types, &(&1 == :error_token)) >= 2
+      assert Enum.any?(types, &(&1 == :end_interpolation))
+      assert Enum.any?(types, &(&1 == :bin_string_end))
+      # Position should advance to line 2
+      foo_token = Enum.find(tokens, fn t -> match?({:identifier, _, :foo}, t) end)
+      if foo_token do
+        {:identifier, {{line, _}, _, _}, _} = foo_token
+        assert line >= 2
+      end
+    end
   end
 
   # ============================================================================
