@@ -72,6 +72,16 @@ defmodule Toxic.Driver do
     }
   end
 
+  @doc """
+  Recover from a driver-level error in tolerant mode by emitting an error token
+  (and optionally structural insertions) and advancing to the next sync point.
+
+  Returns same shape as next/2: {:ok, token, rest, new_driver}.
+  """
+  def recover(rest, %__MODULE__{error_mode: :tolerant} = state, reason) do
+    emit_error_and_advance(reason, rest, state)
+  end
+
   def next(rest, %__MODULE__{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end

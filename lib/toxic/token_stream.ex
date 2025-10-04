@@ -134,11 +134,9 @@ defmodule Toxic.TokenStream do
             {:eof, stream}
 
           stream.error ->
-            if Keyword.get(stream.opts, :error_mode, :tolerant) == :strict do
-              {:error, stream.error, stream}
-            else
-              # TODO: tolerant mode
-              :not_implemented
+            case Keyword.get(stream.opts, :error_mode, :tolerant) do
+              :strict -> {:error, stream.error, stream}
+              :tolerant -> recover_next(stream)
             end
 
           true ->
@@ -169,11 +167,11 @@ defmodule Toxic.TokenStream do
             {:eof, stream}
 
           stream.error ->
-            if Keyword.get(stream.opts, :error_mode, :tolerant) == :strict do
-              {:error, stream.error, stream}
-            else
-              # TODO: tolerant mode
-              :not_implemented
+            case Keyword.get(stream.opts, :error_mode, :tolerant) do
+              :strict -> {:error, stream.error, stream}
+              :tolerant ->
+                stream = recover_into_buffer(stream)
+                peek(stream)
             end
 
           true ->
@@ -523,17 +521,55 @@ defmodule Toxic.TokenStream do
   defp ensure_buffer_size(%__MODULE__{} = stream, needed) do
     buffer_size = :queue.len(stream.buffer)
 
-    strict_error? =
-      stream.error != nil and Keyword.get(stream.opts, :error_mode, :tolerant) == :strict
+    cond do
+      buffer_size >= needed or stream.eof ->
+        stream
 
-    # TODO: tolerant mode
+      stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant ->
+        stream
+        |> recover_into_buffer()
+        |> ensure_buffer_size(needed)
 
-    if buffer_size < needed and not stream.eof and not strict_error? do
-      stream
-      |> refill_buffer()
-      |> ensure_buffer_size(needed)
-    else
-      stream
+      true ->
+        stream
+        |> refill_buffer()
+        |> ensure_buffer_size(needed)
+    end
+  end
+
+  defp recover_next(%__MODULE__{} = stream) do
+    # Recover one error token directly and return it
+    pre_terms = Toxic.Driver.current_terminators(stream.driver)
+
+    case Toxic.Driver.recover(stream.source, stream.driver, stream.error) do
+      {:ok, token, new_source, new_driver} ->
+        pre_pos = start_pos(token)
+        entry = {token, pre_terms, pre_pos}
+        new_stream =
+          %{stream |
+              driver: new_driver,
+              source: new_source,
+              error: nil,
+              last_emitted_entry: entry}
+
+        {:ok, token, new_stream}
+
+      other -> other
+    end
+  end
+
+  defp recover_into_buffer(%__MODULE__{} = stream) do
+    pre_terms = Toxic.Driver.current_terminators(stream.driver)
+
+    case Toxic.Driver.recover(stream.source, stream.driver, stream.error) do
+      {:ok, token, new_source, new_driver} ->
+        pre_pos = start_pos(token)
+        entry = {token, pre_terms, pre_pos}
+        new_buffer = :queue.in(entry, stream.buffer)
+        %{stream | driver: new_driver, source: new_source, error: nil, buffer: new_buffer}
+
+      _ ->
+        stream
     end
   end
 
