@@ -11,7 +11,7 @@ defmodule Toxic.Driver do
             error_mode: :tolerant,
             error_sync: [:semicolon, :newline, :closer, :comma],
             error_max_skip: 4096,
-            insert_structural_closers: false,
+            insert_structural_closers: true,
             # New: prioritized deferral list for delayed emissions
             # Entries: {:emit_next, token, consume_len, after_action | nil}
             #  - consume_len: non-neg integer to consume from input and advance column
@@ -53,7 +53,7 @@ defmodule Toxic.Driver do
     error_mode = Keyword.get(opts, :error_mode, :tolerant)
     error_sync = Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer, :comma])
     error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
-    insert_structural_closers = Keyword.get(opts, :insert_structural_closers, false)
+    insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
 
     %__MODULE__{
       line: line,
@@ -907,49 +907,60 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
-  defp emit_pending_error({:missing_interpolation, interp_context}, state) do
+  defp emit_pending_error({:missing_interpolation, {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context}, state) do
     reason = missing_interpolation_reason(interp_context, state)
-    emit_eof_error_and_pop_context(reason, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
+
+    inserted = if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
+
+    new_contexts = drop_first_interp(state.contexts)
+    new_output = state.output ++ [error_token | inserted]
+    {:ok, hd(new_output), [], %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}}
   end
 
-  defp emit_pending_error({:missing_context, interp_context}, state) do
+  defp emit_pending_error({:missing_context, {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context}, state) do
     reason = missing_terminator_reason(interp_context, state)
-    emit_eof_error_and_pop_context(reason, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
+
+    inserted = if state.insert_structural_closers, do: [synthesize_end_for_kind(kind, delim, meta0)], else: []
+
+    parent_terms_list = case parent_terms do :none -> []; list when is_list(list) -> list end
+    new_scope = scope(state.scope, terminators: parent_terms_list)
+    new_contexts = drop_first_interp(state.contexts)
+    new_output = state.output ++ [error_token | inserted]
+    {:ok, hd(new_output), [], %{state | contexts: new_contexts, scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
   end
 
-  defp emit_pending_error({:missing_scope, _entry} = error, state) do
-    reason =
-      case error do
-        {:missing_scope, entry} -> missing_scope_terminator_reason(entry, state)
-      end
+  defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
+    reason = missing_scope_terminator_reason(entry, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
 
     # Pop one scope terminator
     scope(terminators: terms) = state.scope
-
-    new_terms =
-      case terms do
-        [] -> []
-        [_ | rest] -> rest
-      end
-
+    new_terms = case terms do [] -> []; [_ | rest] -> rest end
     new_scope = scope(state.scope, terminators: new_terms)
 
-    error_meta = meta(state.line, state.column, state.line, state.column, nil)
-    token = {:error_token, error_meta, reason}
-    return_token(token, [], %{state | scope: new_scope})
-  end
+    inserted = if state.insert_structural_closers, do: [{closing_for(start), meta0}], else: []
 
-  defp emit_eof_error_and_pop_context(reason, state) do
-    error_meta = meta(state.line, state.column, state.line, state.column, nil)
-    token = {:error_token, error_meta, reason}
-
-    new_contexts = drop_first_interp(state.contexts)
-    return_token(token, [], %{state | contexts: new_contexts})
+    new_output = state.output ++ [error_token | inserted]
+    {:ok, hd(new_output), [], %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
   end
 
   defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
   defp drop_first_interp([head | tail]), do: [head | drop_first_interp(tail)]
   defp drop_first_interp([]), do: []
+
+  defp synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
+  defp synthesize_end_for_kind(:bin_heredoc, delim, meta), do: {:bin_heredoc_end, meta, delim, 0}
+  defp synthesize_end_for_kind(:list_heredoc, delim, meta), do: {:list_heredoc_end, meta, delim, 0}
+  defp synthesize_end_for_kind(:quoted_identifier, delim, meta), do: {:quoted_identifier_end, meta, delim}
+  defp synthesize_end_for_kind(:charlist, delim, meta), do: {:list_string_end, meta, delim}
+  defp synthesize_end_for_kind(:string, delim, meta), do: {:bin_string_end, meta, delim}
+  defp synthesize_end_for_kind(:atom_safe, delim, meta), do: {:atom_safe_end, meta, delim}
+  defp synthesize_end_for_kind(:atom_unsafe, delim, meta), do: {:atom_unsafe_end, meta, delim}
 
   # Phase 1 tolerant mode helpers
   defp emit_error_and_advance(reason, rest, state) do
@@ -966,9 +977,24 @@ defmodule Toxic.Driver do
     error_meta = meta(state.line, state.column, new_line, new_column, nil)
     error_token = {:error_token, error_meta, reason}
 
-    # Flush deferrals BEFORE error to preserve ordering
-    new_output = state.output ++ Enum.reverse(state.deferrals) ++ [error_token]
-    new_state = %{state | line: new_line, column: new_column, deferrals: [], output: new_output}
+    # Optionally synthesize structural tokens for delimiter errors
+    {inserted, scope_after_insert} =
+      if state.insert_structural_closers do
+        synthesize_from_reason(reason, state)
+      else
+        {[], state.scope}
+      end
+
+    # Flush deferrals BEFORE error to preserve ordering; enqueue inserted structurals after error
+    new_output = state.output ++ Enum.reverse(state.deferrals) ++ [error_token | inserted]
+    new_state = %{
+      state
+      | line: new_line,
+        column: new_column,
+        deferrals: [],
+        output: new_output,
+        scope: scope_after_insert
+    }
 
     # Return next token in output (could be a flushed deferral, then error token)
     next(new_rest, new_state)
@@ -977,10 +1003,12 @@ defmodule Toxic.Driver do
   defp consume_one(rest, state) do
     case :unicode_util.gc(rest) do
       [cluster | new_rest] when is_list(cluster) ->
-        {new_rest, advance_pos_cluster(cluster, state.line, state.column)}
+        {line, col} = advance_pos_cluster(cluster, state.line, state.column)
+        {new_rest, line, col}
 
       [codepoint | new_rest] when is_integer(codepoint) ->
-        {new_rest, advance_pos(codepoint, state.line, state.column)}
+        {line, col} = advance_pos(codepoint, state.line, state.column)
+        {new_rest, line, col}
 
       [] ->
         {[], state.line, state.column}
@@ -1240,5 +1268,75 @@ defmodule Toxic.Driver do
       end
 
     Toxic.Scope.prepend_warning(line, column, msg, scope)
+  end
+
+  # Phase 2: structural synthesis helpers
+  defp synthesize_from_reason({meta_list, _msg, token_chars}, state) when is_list(meta_list) do
+    case Keyword.get(meta_list, :error_type) do
+      :mismatched_delimiter ->
+        expected = Keyword.get(meta_list, :expected_delimiter)
+        case synthesize_closing(expected, state) do
+          {:ok, tok, new_scope} ->
+            tok = maybe_tag_zero_len(tok, state)
+            {[tok], new_scope}
+          _ -> {[], state.scope}
+        end
+
+      _ ->
+        # Unexpected closer (no error_type) can be inferred from token_chars
+        case closer_atom_from_chars(token_chars) do
+          nil -> {[], state.scope}
+          closer ->
+            case opening_for_closer(closer) do
+              nil -> {[], state.scope}
+              opening ->
+                # Insert synthetic opener and push to stack
+                case synthesize_opening(opening, state) do
+                  {:ok, tok, new_scope} -> {[tok], new_scope}
+                  _ -> {[], state.scope}
+                end
+            end
+        end
+    end
+  end
+
+  defp synthesize_from_reason(_reason, state), do: {[], state.scope}
+
+  defp closer_atom_from_chars(~c")"), do: :")"
+  defp closer_atom_from_chars(~c"]"), do: :"]"
+  defp closer_atom_from_chars(~c"}"), do: :"}"
+  defp closer_atom_from_chars([?>, ?>]), do: :">>"
+  defp closer_atom_from_chars(~c"end"), do: :end
+  defp closer_atom_from_chars(_), do: nil
+
+  defp opening_for_closer(:")"), do: :"("
+  defp opening_for_closer(:"]"), do: :"["
+  defp opening_for_closer(:"}"), do: :"{"
+  defp opening_for_closer(:">>"), do: :"<<"
+  defp opening_for_closer(:end), do: nil
+  defp opening_for_closer(_), do: nil
+
+  defp synthesize_closing(closer, state) do
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    token = {closer, meta0}
+    # Pop one if matches current opener; we will conservatively pop regardless
+    scope(terminators: terms) = state.scope
+    new_terms = case terms do
+      [] -> []
+      [_ | rest] -> rest
+    end
+    {:ok, token, scope(state.scope, terminators: new_terms)}
+  end
+
+  defp synthesize_opening(opening, state) do
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    token = {opening, meta0}
+    scope(indentation: indent, terminators: terms) = state.scope
+    new_terms = [{opening, meta0, indent} | terms]
+    {:ok, token, scope(state.scope, terminators: new_terms)}
+  end
+
+  defp maybe_tag_zero_len({kind, {{sl, sc}, {_el, _ec}, extra}}, _state) do
+    {kind, {{sl, sc}, {sl, sc}, extra}}
   end
 end

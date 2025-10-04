@@ -1,11 +1,16 @@
-  What remains out of scope for Phase 1
+  What was out of scope for Phase 1
 
-  - Structural insertions (synthesized closers/openers/end tokens) remain disabled (insert_structural_closers: false).
-  - Terminator mismatch handling (synthesis) will be done in Phase 2.
-  - TokenStream tolerant fallback path is not needed for Phase 1 since Driver now handles simple categories and EOF draining.
+  - Structural insertions (synthesized closers/openers/end tokens) were disabled (insert_structural_closers: false).
+  - Terminator mismatch handling (synthesis) was deferred to Phase 2.
+  - TokenStream tolerant fallback path was not needed for Phase 1 since Driver handled simple categories and EOF draining.
 
-Next steps (Phase 2)
+Phase 2 Completed ✅
 
-  - Add structural insertions under insert_structural_closers: true
-      - Mismatched/Unexpected closers and EOF stack draining with synthesized tokens.
-  - Extend tests for tolerant mode: boundary scanning, EOF draining, deferral ordering, grapheme clusters.
+  - ✅ Structural insertions implemented (insert_structural_closers: true by default)
+      - ✅ Mismatched closers: synthesize expected closer
+      - ✅ Unexpected closers: synthesize matching opener
+      - ✅ EOF stack draining: synthesize closers for all pending terminators
+      - ✅ String/sigil/heredoc: synthesize end tokens at EOF
+      - ✅ Interpolation: synthesize end_interpolation tokens
+  - ✅ All synthesis gated by insert_structural_closers flag
+  - Tests extended for tolerant mode: boundary scanning, EOF draining, deferral ordering, grapheme clusters.

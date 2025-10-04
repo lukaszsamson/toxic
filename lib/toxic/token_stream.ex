@@ -79,7 +79,7 @@ defmodule Toxic.TokenStream do
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer, :comma],
     error_max_skip: 4096,
-    insert_structural_closers: false,
+    insert_structural_closers: true,
     elixir_compatibility: false,
     preserve_comments: false,
     existing_atoms_only: false
