@@ -308,12 +308,9 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant("% {} + foo")
 
       assert length(error_tokens(tokens)) == 1
-      # Should emit %, error, {, }, +, foo
+      # % is emitted first, then error consumes {}, then + and foo
       types = token_types(tokens)
-      assert [:%, :error_token | _] = types
-      assert :"{" in types
-      assert :dual_op in types
-      assert :identifier in types
+      assert [:%, :error_token, :dual_op, :identifier] = types
     end
 
     test "invalid opener %( with continuation" do
@@ -321,9 +318,7 @@ defmodule ToxicTolerantModeTest do
 
       assert length(error_tokens(tokens)) == 1
       types = token_types(tokens)
-      assert [:%, :error_token | _] = types
-      assert :"(" in types
-      assert :dual_op in types
+      assert [:%, :error_token, :"(", :")", :dual_op, :identifier] = types
     end
 
     test "invalid opener %[ with continuation" do
@@ -331,9 +326,26 @@ defmodule ToxicTolerantModeTest do
 
       assert length(error_tokens(tokens)) == 1
       types = token_types(tokens)
-      assert [:%, :error_token | _] = types
-      assert :"[" in types
-      assert :"," in types
+      assert [:%, :error_token, :"[", :"]", :",", :identifier] = types
+    end
+  end
+
+  # ============================================================================
+  # Category 6a: Keyword Spacing Errors
+  # ============================================================================
+
+  describe "Category 6a: Keyword spacing errors" do
+    test "keyword not followed by space (foo:bar)" do
+      tokens = tokenize_tolerant("foo:bar + baz")
+
+      assert length(error_tokens(tokens)) == 1
+      types = token_types(tokens)
+      # Error consumes "foo:bar " (including trailing space), then continues with "+"
+      assert [:error_token, :dual_op, :identifier] = types
+
+      # Verify values
+      valid = valid_tokens(tokens)
+      assert {:identifier, _, :baz} = Enum.at(valid, 1)
     end
   end
 
@@ -345,12 +357,8 @@ defmodule ToxicTolerantModeTest do
     test "keyword not followed by space" do
       tokens = tokenize_tolerant("foo:bar + baz")
 
-      assert length(error_tokens(tokens)) == 1
-      # Should emit foo, error, bar, +, baz
-      assert types = token_types(tokens)
-      assert Enum.count(types, &(&1 == :identifier)) >= 2
-      assert :error_token in types
-      assert :dual_op in types
+      types = token_types(tokens)
+      assert [:identifier, :error_token, :identifier, :dual_op, :identifier | _] = types
     end
 
     test "unexpected reserved word do after comma" do
@@ -383,11 +391,8 @@ defmodule ToxicTolerantModeTest do
     test "consecutive semicolons" do
       tokens = tokenize_tolerant("foo ;; bar")
 
-      assert length(error_tokens(tokens)) == 1
-      assert types = token_types(tokens)
-      assert :identifier in types
-      assert :";" in types
-      assert :error_token in types
+      types = token_types(tokens)
+      assert [:identifier, :";", :error_token, :identifier | _] = types
     end
   end
 

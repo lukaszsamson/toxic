@@ -1001,7 +1001,7 @@ defmodule Toxic.Driver do
 
     # Flush deferrals BEFORE error to preserve ordering; enqueue inserted tokens after error
     new_output =
-      state.output ++ Enum.reverse(state.deferrals) ++ [error_token | pre_inserted ++ inserted_struct]
+      state.output ++ Enum.reverse(state.deferrals) ++ pre_inserted ++ [error_token] ++ inserted_struct
     new_state = %{
       state
       | line: new_line,
@@ -1031,7 +1031,9 @@ defmodule Toxic.Driver do
         # Emit standalone '%' and consume it
         meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
         percent_token = {:%, meta_percent}
-        {tl(rest), state.line, state.column + 1, [percent_token], state.scope}
+        rest_after_percent = tl(rest)
+        {rest_no_ws, l_after, c_after} = consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
+        {rest_no_ws, l_after, c_after, [percent_token], state.scope}
 
       alias_after_paren?(message, token_chars) and match?([?( | _], rest) ->
         # Insert '(' opener and consume it, updating the terminator stack
@@ -1041,6 +1043,11 @@ defmodule Toxic.Driver do
           _ ->
             {tl(rest), state.line, state.column + 1, [], state.scope}
         end
+
+      consecutive_semicolons?(rest) ->
+        meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
+        semi_token = {:";", meta_semi}
+        {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
 
       true ->
         {def_rest, def_line, def_col, [], state.scope}
@@ -1056,8 +1063,9 @@ defmodule Toxic.Driver do
     :lists.prefix(prefix, message)
   end
 
-  defp map_expected_error?(_message, token_chars) do
-    token_chars == [?%, ?(] or token_chars == [?%, ?[]
+  defp map_expected_error?(message, token_chars) do
+    token_chars == [?%, ?(] or token_chars == [?%, ?[] or
+      :lists.prefix(~c"unexpected space between % and {", message)
   end
 
   defp alias_after_paren?(message, token_chars) do
@@ -1075,6 +1083,21 @@ defmodule Toxic.Driver do
         end
       _ -> false
     end
+  end
+
+  defp consecutive_semicolons?([?;, ?; | _]), do: true
+  defp consecutive_semicolons?(_), do: false
+
+  defp consume_leading_spaces(rest, line, column) do
+    consume_leading_spaces(rest, line, column, 0)
+  end
+
+  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\s, ?\t] do
+    consume_leading_spaces(tail, line, column + 1, count + 1)
+  end
+
+  defp consume_leading_spaces(rest, line, column, _count) do
+    {rest, line, column}
   end
 
   defp consume_one(rest, state) do
