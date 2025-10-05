@@ -98,13 +98,16 @@ defmodule Toxic.Driver do
       error when state.error_mode == :strict ->
         case error do
           {:missing_interpolation, interp_context} ->
-            {:error, missing_interpolation_reason(interp_context, state), [], state}
+            reason = missing_interpolation_reason(interp_context, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_context, interp_context} ->
-            {:error, missing_terminator_reason(interp_context, state), [], state}
+            reason = missing_terminator_reason(interp_context, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_scope, entry} ->
-            {:error, missing_scope_terminator_reason(entry, state), [], state}
+            reason = missing_scope_terminator_reason(entry, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), [], state}
         end
 
       error when state.error_mode == :tolerant ->
@@ -130,7 +133,8 @@ defmodule Toxic.Driver do
           state
       )
       when start_token != :"{" do
-    {:error, mismatched_delimiter_reason(entry, :"}", state), rest, state}
+    reason = mismatched_delimiter_reason(entry, :"}", state)
+    {:error, Toxic.Error.to_reason_tuple(reason), rest, state}
   end
 
   def next(
@@ -481,9 +485,8 @@ defmodule Toxic.Driver do
 
       {:begin_interpolation, meta, rest, line, column, scope} ->
         if kind == :quoted_identifier do
-          {:error,
-           interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim),
-           rest, state}
+          reason = interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+          {:error, Toxic.Error.to_reason_tuple(reason), rest, state}
         else
           # Mark that we saw interpolation in the parent context
           updated_parent_context =
@@ -731,7 +734,6 @@ defmodule Toxic.Driver do
        ) do
     delim_chars = delimiter_charlist(delim)
     opening_atom = delimiter_atom(delim_chars)
-
     delimiter_length = delimiter_length(delim)
 
     {resolved_end_line, resolved_end_column} =
@@ -741,19 +743,26 @@ defmodule Toxic.Driver do
         {end_line, end_column}
       end
 
-    meta = [
-      opening_delimiter: opening_atom,
-      expected_delimiter: opening_atom,
-      line: start_line,
-      column: start_column,
-      end_line: resolved_end_line,
-      end_column: resolved_end_column
-    ]
+    code =
+      case kind do
+        k when k in [:bin_heredoc, :list_heredoc] -> :heredoc_missing_terminator
+        _ -> :string_missing_terminator
+      end
 
-    message = :io_lib.format(~c"missing terminator: ~ts", [delim_chars])
-    suffix = context_suffix(kind, delim, start_info)
-
-    {meta, [message, suffix], []}
+    %Toxic.Error{
+      code: code,
+      domain: if(code == :heredoc_missing_terminator, do: :heredoc, else: :string),
+      token_display: nil,
+      details: %{
+        opening_delimiter: opening_atom,
+        expected_delimiter: opening_atom,
+        line: start_line,
+        column: start_column,
+        end_line: resolved_end_line,
+        end_column: resolved_end_column,
+        suffix_iolist: context_suffix(kind, delim, start_info)
+      }
+    }
   end
 
   defp missing_interpolation_reason(
@@ -773,19 +782,20 @@ defmodule Toxic.Driver do
         {end_line, end_column}
       end
 
-    meta = [
-      opening_delimiter: opening_atom,
-      expected_delimiter: opening_atom,
-      line: start_line,
-      column: start_column,
-      end_line: resolved_end_line,
-      end_column: resolved_end_column
-    ]
-
-    message = :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]])
-    suffix = context_suffix(kind, delim, start_info)
-
-    {meta, [message, suffix], []}
+    %Toxic.Error{
+      code: :interpolation_missing_terminator,
+      domain: :interpolation,
+      token_display: nil,
+      details: %{
+        opening_delimiter: opening_atom,
+        expected_delimiter: opening_atom,
+        start_line: start_line,
+        start_column: start_column,
+        end_line: resolved_end_line,
+        end_column: resolved_end_column,
+        suffix_iolist: context_suffix(kind, delim, start_info)
+      }
+    }
   end
 
   defp missing_scope_terminator_reason(
@@ -794,21 +804,24 @@ defmodule Toxic.Driver do
        ) do
     closing = closing_for(start)
     closing_chars = terminator_chars(closing)
-    message = :io_lib.format(~c"missing terminator: ~ts", [closing_chars])
     hint = missing_scope_hint(entry, closing, scope)
 
     {{start_line, start_column}, _end_pos, _extra} = meta
 
-    meta_list = [
-      opening_delimiter: start,
-      expected_delimiter: closing,
-      line: start_line,
-      column: start_column,
-      end_line: end_line,
-      end_column: end_column
-    ]
-
-    {meta_list, [message, hint], []}
+    %Toxic.Error{
+      code: :terminator_missing_closer,
+      domain: :terminator,
+      token_display: nil,
+      details: %{
+        opening_delimiter: start,
+        expected_delimiter: closing,
+        line: start_line,
+        column: start_column,
+        end_line: end_line,
+        end_column: end_column,
+        hint_iolist: hint
+      }
+    }
   end
 
   defp mismatched_delimiter_reason({start, meta, _indent}, closing, %__MODULE__{
@@ -820,18 +833,17 @@ defmodule Toxic.Driver do
 
     {{start_line, start_column}, _end_pos, _extra} = meta
 
-    meta_list = [
-      line: start_line,
-      column: start_column,
-      end_line: end_line,
-      end_column: end_column,
-      error_type: :mismatched_delimiter,
-      opening_delimiter: start,
-      closing_delimiter: closing,
-      expected_delimiter: expected
-    ]
-
-    {meta_list, ~c"unexpected token: ", closing_chars}
+    %Toxic.Error{
+      code: :terminator_mismatched_closer,
+      domain: :terminator,
+      token_display: closing_chars,
+      position: {{start_line, start_column}, {end_line, end_column}},
+      details: %{
+        opening_delimiter: start,
+        closing_delimiter: closing,
+        expected_delimiter: expected
+      }
+    }
   end
 
   defp context_suffix(:sigil, delim, %{line: line, token: {:sigil_start, _meta, sigil_atom, _}}) do
@@ -868,10 +880,12 @@ defmodule Toxic.Driver do
   end
 
   defp interpolation_in_quoted_identifier_reason(start_line, start_column, delim) do
-    message =
-      ~c"interpolation is not allowed when calling function/macro. Found interpolation in a call starting with: "
-
-    {[line: start_line, column: start_column], message, delimiter_charlist(delim)}
+    %Toxic.Error{
+      code: :interpolation_not_allowed_in_quoted_identifier,
+      domain: :interpolation,
+      token_display: delimiter_charlist(delim),
+      details: %{start_line: start_line, start_column: start_column}
+    }
   end
 
   defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
