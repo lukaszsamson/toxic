@@ -843,14 +843,18 @@ defmodule Toxic.Driver do
          column: end_column
        }) do
     expected = closing_for(start)
+    is_end = closing == :end
     closing_chars = terminator_chars(closing)
 
     {{start_line, start_column}, _end_pos, _extra} = meta
 
+    code = if is_end, do: :reserved_unexpected_end, else: :terminator_mismatched_closer
+    token_display = if is_end, do: ~c"end", else: closing_chars
+
     %Toxic.Error{
-      code: :terminator_mismatched_closer,
-      domain: :terminator,
-      token_display: closing_chars,
+      code: code,
+      domain: if(is_end, do: :reserved, else: :terminator),
+      token_display: token_display,
       position: {{start_line, start_column}, {end_line, end_column}},
       details: %{
         opening_delimiter: start,

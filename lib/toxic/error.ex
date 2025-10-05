@@ -107,10 +107,21 @@ defmodule Toxic.Error do
   """
   @spec format(t()) :: iodata()
   def format(%__MODULE__{code: :terminator_mismatched_closer, token_display: tok}) do
-    [~c"unexpected token: ", List.wrap(tok)]
+    case List.wrap(tok) do
+      ~c"end" -> ~c"unexpected reserved word: "
+      _ -> ~c"unexpected token: "
+    end
   end
 
-  def format(%__MODULE__{code: :terminator_unexpected_closer}) do
+  def format(%__MODULE__{code: :terminator_unexpected_closer, token_display: tok}) do
+    case List.wrap(tok) do
+      ~c"end" -> ~c"unexpected reserved word: "
+      _ -> ~c"unexpected token: "
+    end
+  end
+
+  # Special case: Elixir prints only "unexpected token: " and puts descriptive part in token_chars
+  def format(%__MODULE__{code: :unexpected_token, token_display: _tok}) do
     ~c"unexpected token: "
   end
 
@@ -126,11 +137,17 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :string_missing_terminator, details: details}) do
-    expected = Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter))
-    chars = terminator_chars(expected)
-    msg = :io_lib.format(~c"missing terminator: ~ts", [chars])
-    suffix = Map.get(details, :suffix_iolist, [])
-    [msg, suffix]
+    # Escape-at-EOF errors in Elixir show a distinct message:
+    # "invalid escape \\ at end of file"
+    if Map.get(details, :escape_at_eof?, false) do
+      ~c"invalid escape \\ at end of file"
+    else
+      expected = Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter))
+      chars = terminator_chars(expected)
+      msg = :io_lib.format(~c"missing terminator: ~ts", [chars])
+      suffix = Map.get(details, :suffix_iolist, [])
+      [msg, suffix]
+    end
   end
 
   def format(%__MODULE__{code: :heredoc_missing_terminator, details: details}) do
@@ -141,8 +158,10 @@ defmodule Toxic.Error do
     [msg, suffix]
   end
 
-  def format(%__MODULE__{code: :interpolation_missing_terminator}) do
-    :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]] )
+  def format(%__MODULE__{code: :interpolation_missing_terminator, details: d}) do
+    base = :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]] )
+    suffix = Map.get(d, :suffix_iolist, [])
+    [base, suffix]
   end
 
   def format(%__MODULE__{code: :keyword_missing_space_after_colon}) do
@@ -166,16 +185,22 @@ defmodule Toxic.Error do
     ~c"unexpected reserved word: end"
   end
 
-  def format(%__MODULE__{code: :heredoc_invalid_header, details: %{delim: delim}}) do
-    # Align with phrasing used in Elixir tokenizer
-    [
-      ~c"heredoc allows only whitespace characters followed by a new line after opening ",
-      List.wrap(delim)
-    ]
+  def format(%__MODULE__{code: :heredoc_invalid_header, details: %{delim: delim} = d}) do
+    base = ~c"heredoc allows only whitespace characters followed by a new line after opening "
+    if Map.get(d, :message_excludes_delim?, false) do
+      base
+    else
+      [base, List.wrap(delim)]
+    end
   end
 
   def format(%__MODULE__{code: :alias_unexpected_paren}) do
     ~c"unexpected ( after alias"
+  end
+
+  def format(%__MODULE__{code: :alias_invalid_character, details: d, token_display: _tok}) do
+    # Message already fully formed at emission site (minus trailing token)
+    Map.get(d, :message_iolist, ~c"invalid character in alias: ")
   end
 
   def format(%__MODULE__{code: :number_trailing_garbage, details: d}) do
@@ -184,7 +209,8 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :number_invalid_float}) do
-    ~c"invalid float number"
+    # Elixir includes a trailing space so the offending literal is shown via token_chars
+    ~c"invalid float number "
   end
 
   def format(%__MODULE__{code: :sigil_invalid_name}) do
@@ -195,16 +221,42 @@ defmodule Toxic.Error do
     ~c"invalid sigil delimiter: "
   end
 
-  def format(%__MODULE__{code: :comment_invalid_bidi}) do
+  def format(%__MODULE__{code: :comment_invalid_bidi, domain: :comment}) do
     ~c"invalid bidirectional formatting character in comment: "
   end
 
-  def format(%__MODULE__{code: :comment_invalid_linebreak}) do
+  def format(%__MODULE__{code: :comment_invalid_bidi, domain: :string, token_display: tok}) do
+    [
+      ~c"invalid bidirectional formatting character in string: ",
+      List.wrap(tok),
+      ~c". If you want to use such character, use it in its escaped ",
+      List.wrap(tok),
+      ~c" form instead"
+    ]
+  end
+
+  def format(%__MODULE__{code: :comment_invalid_linebreak, domain: :comment}) do
     ~c"invalid line break character in comment: "
+  end
+
+  def format(%__MODULE__{code: :comment_invalid_linebreak, domain: :string, token_display: tok}) do
+    [
+      ~c"invalid line break character in string: ",
+      List.wrap(tok),
+      ~c". If you want to use such character, use it in its escaped ",
+      List.wrap(tok),
+      ~c" form instead"
+    ]
   end
 
   def format(%__MODULE__{code: :vc_merge_conflict_marker}) do
     ~c"found an unexpected version control marker, please resolve the conflicts: "
+  end
+
+  def format(%__MODULE__{code: :identifier_mixed_script, details: d}) do
+    prefix = Map.get(d, :message_prefix, ~c"invalid mixed-script identifier found: ")
+    suffix = Map.get(d, :message_suffix, [])
+    {prefix, suffix}
   end
 
   def format(%__MODULE__{code: :identifier_invalid_char, details: d}) do
@@ -222,6 +274,10 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :unexpected_token, token_display: tok}) do
     [~c"unexpected token: ", List.wrap(tok)]
+  end
+
+  def format(%__MODULE__{code: :identifier_nonexistent_atom_when_existing_only}) do
+    ~c"unsafe atom does not exist: "
   end
 
   def format(%__MODULE__{}) do
@@ -249,15 +305,23 @@ defmodule Toxic.Error do
       case error.code do
         :terminator_mismatched_closer -> List.wrap(error.token_display)
         :terminator_unexpected_closer -> List.wrap(error.token_display)
+        :interpolation_missing_terminator -> []
         :reserved_unexpected_end -> List.wrap(error.token_display)
+        :string_missing_terminator -> []
         :heredoc_invalid_header -> List.wrap(error.token_display)
+        :comment_invalid_bidi -> List.wrap(error.token_display)
+        :comment_invalid_linebreak -> List.wrap(error.token_display)
         :sigil_invalid_name -> List.wrap(error.token_display)
         :sigil_invalid_delimiter -> List.wrap(error.token_display)
         :map_invalid_open_delimiter -> List.wrap(error.token_display)
         :map_unexpected_space_after_percent -> List.wrap(error.token_display)
         :number_trailing_garbage -> List.wrap(error.token_display)
         :number_invalid_float -> List.wrap(error.token_display)
+        :identifier_mixed_script -> List.wrap(error.token_display)
         :identifier_invalid_char -> List.wrap(error.token_display)
+        :identifier_nonexistent_atom_when_existing_only -> List.wrap(error.token_display)
+        :alias_invalid_character -> List.wrap(error.token_display)
+        :alias_unexpected_paren -> List.wrap(error.token_display)
         :reserved_token_used -> List.wrap(error.token_display)
         :vc_merge_conflict_marker -> List.wrap(error.token_display)
         :unexpected_token -> List.wrap(error.token_display)
@@ -498,6 +562,7 @@ defmodule Toxic.Error do
   # defp infer_domain(:reserved_token_used), do: :reserved
   # defp infer_domain(:number_trailing_garbage), do: :number
   defp infer_domain(:number_invalid_float), do: :number
+  defp infer_domain(:alias_invalid_character), do: :alias
   # defp infer_domain(:encoding_invalid), do: :encoding
   # defp infer_domain(:comment_invalid_bidi), do: :comment
   # defp infer_domain(:comment_invalid_linebreak), do: :comment
@@ -554,6 +619,7 @@ defmodule Toxic.Error do
   defp validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
   defp validate_details!(%__MODULE__{code: :string_missing_terminator, details: _d}), do: :ok
   defp validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}), do: require_keys!(d, [:message_iolist])
   defp validate_details!(%__MODULE__{code: _}), do: :ok
 
   defp require_keys!(map, keys) do

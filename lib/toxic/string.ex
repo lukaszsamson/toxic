@@ -22,7 +22,7 @@ defmodule Toxic.String do
           code: :heredoc_invalid_header,
           domain: :heredoc,
           token_display: [h, h, h],
-          details: %{line: line, column: column + 3, delim: [h, h, h]}
+          details: %{line: line, column: column + 3, delim: [h, h, h], message_excludes_delim?: true}
         }
         {:error, err}
 
