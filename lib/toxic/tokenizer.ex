@@ -49,23 +49,14 @@ defmodule Toxic.Tokenizer do
 
   def tokenize_single([?# | string], line, column, scope, tokens) do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
-      {:error, char, reason_str} ->
+      {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
         token = :io_lib.format("\\u~4.16.0B", [char])
-        msg = IO.iodata_to_binary(reason_str)
-        code =
-          if String.starts_with?(msg, "invalid bidirectional formatting character") do
-            :comment_invalid_bidi
-          else
-            :comment_invalid_linebreak
-          end
-
         err = %Toxic.Error{
           code: code,
           domain: :comment,
           token_display: token,
           details: %{line: line, column: column}
         }
-
         {:error, err}
 
       {rest, comment} ->

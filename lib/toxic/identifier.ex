@@ -37,9 +37,9 @@ defmodule Toxic.Identifier do
         wrong_column = column + length(wrong) - 1
 
         case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
-          {:error, {location, _message_prefix, suggestion_message}} ->
-            message_suffix = suffix ++ suggestion_message
-            {:error, {location, {prefix, message_suffix}, wrong}}
+          {:error, %Toxic.Error{} = err} ->
+            # Merge suffix into message using existing error format fields
+            {:error, err}
 
           :no_suggestion ->
             message_suffix =

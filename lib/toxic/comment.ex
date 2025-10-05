@@ -10,11 +10,11 @@ defmodule Toxic.Comment do
   end
 
   def tokenize_comment([h | _rest], _) when bidi(h) do
-    {:error, h, ~c"invalid bidirectional formatting character in comment: "}
+    {:error, {:comment_invalid_bidi, h}}
   end
 
   def tokenize_comment([h | _rest], _) when break(h) do
-    {:error, h, ~c"invalid line break character in comment: "}
+    {:error, {:comment_invalid_linebreak, h}}
   end
 
   def tokenize_comment([h | rest], acc) do
