@@ -1064,6 +1064,17 @@ defmodule Toxic.Driver do
         {:none, [], scope_after_pre}
       end
 
+    scope_for_state =
+      if synth_side == :opener do
+        # This is the "unexpected closer" case. We just synthesized an opener
+        # and are about to emit the actual closer. Pop the synthetic opener
+        # immediately to keep the stack balanced for subsequent EOF checks.
+        scope(terminators: [_ | popped_terms]) = scope_after_insert
+        scope(scope_after_insert, terminators: popped_terms)
+      else
+        scope_after_insert
+      end
+
     {pre_synth, post_synth} =
       case synth_side do
         # For unexpected closers, synthesize opener AFTER error (per finalized plan/tests)
@@ -1089,13 +1100,14 @@ defmodule Toxic.Driver do
       state.output ++
         Enum.reverse(state.deferrals) ++
         pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth ++ post_actual_closer
+
     new_state = %{
       state
       | line: new_line,
         column: new_column,
         deferrals: [],
         output: new_output,
-        scope: scope_after_insert
+        scope: scope_for_state
     }
 
     # Return next token in output (could be a flushed deferral, then error token)
@@ -1104,26 +1116,29 @@ defmodule Toxic.Driver do
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
   # Code-based recovery only; no message parsing
-  defp adjust_recovery(%Toxic.Error{code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
-    case code do
-      :keyword_missing_space_after_colon ->
+  defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
+    case {domain, code} do
+      {_, :keyword_missing_space_after_colon} ->
         case rest do
           [?: | _] -> {tl(rest), state.line, state.column + 1, [], state.scope}
           _ -> {def_rest, def_line, def_col, [], state.scope}
         end
 
-      :map_invalid_open_delimiter ->
+      {_, :map_invalid_open_delimiter} ->
         case rest do
           [?% | _] ->
             meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
             percent_token = {:%, meta_percent}
             rest_after_percent = tl(rest)
-            {rest_no_ws, l_after, c_after} = consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
+
+            {rest_no_ws, l_after, c_after} =
+              consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
+
             {rest_no_ws, l_after, c_after, [percent_token], state.scope}
           _ -> {def_rest, def_line, def_col, [], state.scope}
         end
 
-      :string_missing_terminator ->
+      {_, :string_missing_terminator} ->
         if Map.get(details, :escape_at_eof?, false) do
           case def_rest do
             [?\n | new_rest] -> {new_rest, def_line + 1, 1, [], state.scope}
@@ -1134,8 +1149,9 @@ defmodule Toxic.Driver do
           {def_rest, def_line, def_col, [], state.scope}
         end
 
-      :heredoc_invalid_header ->
+      {_, :heredoc_invalid_header} ->
         meta_end = meta(state.line, state.column, state.line, state.column, nil)
+
         # Infer end token from delimiter in token_display (already set)
         end_token =
           case List.wrap(err.token_display) do
@@ -1143,10 +1159,11 @@ defmodule Toxic.Driver do
             [?", ?", ?"] = delim -> {:bin_heredoc_end, meta_end, delim, 0}
             _ -> nil
           end
+
         inserts = if end_token, do: [{:post_error, end_token}], else: []
         {def_rest, def_line, def_col, inserts, state.scope}
 
-      code when code in [:identifier_mixed_script, :identifier_unexpected_token, :identifier_invalid_char, :identifier_atom_length_limit, :identifier_nonexistent_atom_when_existing_only] ->
+      {:identifier, _code} ->
         if state.insert_identifier_sanitization do
           span_chars = take_prefix_until(rest, def_rest)
           id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
@@ -1155,12 +1172,19 @@ defmodule Toxic.Driver do
           {def_rest, def_line, def_col, [], state.scope}
         end
 
-      _ ->
+      # P1: Minimal recovery for simple lexical errors from the main tokenizer
+      {:tokenizer, _code} ->
+        {new_rest, new_line, new_col} = consume_one(rest, state)
+        {new_rest, new_line, new_col, [], state.scope}
+
+      {_, _} ->
         cond do
           ternary_missing_slash?(rest) ->
             meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
             op_token = {:identifier, meta_op, :..//}
-            {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
+
+            {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}],
+             state.scope}
 
           consecutive_semicolons?(rest) ->
             meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)

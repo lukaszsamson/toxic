@@ -95,18 +95,19 @@ defmodule ToxicTolerantModeTest do
   describe "Category 1: Invalid characters" do
     test "null byte with continuation" do
       # Input: foo\0bar + baz
-      # Note: \0bar is scanned as part of error until we hit space before +
+      # Note: \0 is a single error, recovery should continue with bar.
       tokens = tokenize_tolerant("foo" <> <<0>> <> "bar + baz")
 
       assert length(error_tokens(tokens)) == 1
-      # Error consumes "\0bar " up to the space, then + baz are tokenized
-      assert [:identifier, :error_token, :dual_op, :identifier] = token_types(tokens)
+      # Expect foo, error, bar, +, baz
+      assert [:identifier, :error_token, :identifier, :dual_op, :identifier] = token_types(tokens)
 
       # Verify continuation tokens are correct
       valid = valid_tokens(tokens)
       assert get_token_value(Enum.at(valid, 0)) == :foo
-      assert {:dual_op, _, :+} = Enum.at(valid, 1)
-      assert get_token_value(Enum.at(valid, 2)) == :baz
+      assert get_token_value(Enum.at(valid, 1)) == :bar
+      assert {:dual_op, _, :+} = Enum.at(valid, 2)
+      assert get_token_value(Enum.at(valid, 3)) == :baz
 
       assert_forward_progress(tokens)
     end
@@ -236,34 +237,33 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(") + foo")
 
       assert length(error_tokens(tokens)) == 1
-      # In Phase 1 (no insertions), we just emit error and skip the )
-      # Then continue with + foo
-      assert [:error_token, :dual_op, :identifier] = token_types(tokens)
+      # With synthesis, we get an error, a synthetic opener, the actual closer, and then the rest.
+      assert [:error_token, :"(", :")", :dual_op, :identifier] = token_types(tokens)
 
       valid = valid_tokens(tokens)
-      assert {:dual_op, _, :+} = Enum.at(valid, 0)
-      assert {_, _, :foo} = Enum.at(valid, 1)
+      assert {:dual_op, _, :+} = Enum.at(valid, 2)
+      assert {_, _, :foo} = Enum.at(valid, 3)
     end
 
     test "unexpected closing bracket with continuation" do
       tokens = tokenize_tolerant("] ; bar")
 
       assert length(error_tokens(tokens)) == 1
-      assert [:error_token, :";" , :identifier] = token_types(tokens)
+      assert [:error_token, :"[", :"]", :";", :identifier] = token_types(tokens)
     end
 
     test "unexpected closing brace" do
       tokens = tokenize_tolerant("} , baz")
 
       assert length(error_tokens(tokens)) == 1
-      assert [:error_token, :"," , :identifier] = token_types(tokens)
+      assert [:error_token, :"{", :"}", :",", :identifier] = token_types(tokens)
     end
 
     test "unexpected bitstring close" do
       tokens = tokenize_tolerant(">> + x")
 
       assert length(error_tokens(tokens)) == 1
-      assert [:error_token, :dual_op, :identifier] = token_types(tokens)
+      assert [:error_token, :"<<", :">>", :dual_op, :identifier] = token_types(tokens)
     end
 
     test "mismatched delimiter with continuation" do
@@ -985,12 +985,12 @@ defmodule ToxicTolerantModeTest do
       assert :sigil_end in types
     end
 
-    test "missing quoted atom terminator synthesizes atom_safe_end" do
+    test "missing quoted atom terminator synthesizes atom_unsafe_end" do
       tokens = tokenize_with_synthesis(":\"foo")
       types = token_types(tokens)
 
       assert :error_token in types
-      assert :atom_safe_end in types
+      assert :atom_unsafe_end in types
     end
 
     test "missing quoted identifier terminator synthesizes quoted_identifier_end" do
