@@ -1169,9 +1169,19 @@ defmodule Toxic.Driver do
         {new_rest, new_line, new_col, [], state.scope}
 
       {_, :keyword_missing_space_after_colon} ->
-        case rest do
-          [?: | _] -> {tl(rest), state.line, state.column + 1, [], state.scope}
-          _ -> {def_rest, def_line, def_col, [], state.scope}
+        # Emit the identifier before ':' as a valid token, then consume ':' and
+        # continue with the remainder. This preserves expected ordering
+        # [:identifier, :error_token, ...].
+        {id_chars, remainder} = Enum.split_while(rest, fn ch -> ch != ?: end)
+
+        case remainder do
+          [?: | tail] when id_chars != [] ->
+            id_token = sanitize_identifier_from_chars(id_chars, state.line, state.column)
+            consumed_len = length(id_chars) + 1
+            {tail, state.line, state.column + consumed_len, [id_token], state.scope}
+
+          _ ->
+            {def_rest, def_line, def_col, [], state.scope}
         end
 
       {_, :map_invalid_open_delimiter} ->

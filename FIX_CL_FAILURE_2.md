@@ -20,3 +20,16 @@
   • The “unexpected end with continuation” test now no longer emits a standalone :end token, but still shows :end in
     the sequence for one variant; full suite remains at 13 failures. Further tuning may be needed around where the
     :end token is being emitted from deferrals vs. direct tokenization.
+
+  Implemented keyword spacing pre-error emission:
+  • In adjust_recovery/6 for :keyword_missing_space_after_colon, we now:
+    • Split rest at the first :.
+    • Emit the identifier before : as a valid token.
+    • Consume : from input.
+    • Advance position accordingly.
+    • Return the inserted identifier token so output order is [:identifier, :error_token, …].
+
+  Quick checks:
+  • Specific keyword-spacing tests pass.
+  • Full suite remains at 13 failures (unchanged from previous step). One warning suggests switching length(id_chars)
+     > 0 to a non-empty list check; I can clean that up next if you want.
