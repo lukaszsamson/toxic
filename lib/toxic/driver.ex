@@ -1118,6 +1118,12 @@ defmodule Toxic.Driver do
   # Code-based recovery only; no message parsing
   defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case {domain, code} do
+      {_, :unexpected_token} ->
+        # For generic unexpected tokens, do not scan ahead. Consume exactly one
+        # grapheme to bound the error span and immediately continue.
+        {new_rest, new_line, new_col} = consume_one(rest, state)
+        {new_rest, new_line, new_col, [], state.scope}
+
       {_, :keyword_missing_space_after_colon} ->
         case rest do
           [?: | _] -> {tl(rest), state.line, state.column + 1, [], state.scope}
