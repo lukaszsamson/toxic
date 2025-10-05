@@ -403,6 +403,26 @@ defmodule Toxic.TokenStream do
     {warnings, stream}
   end
 
+  @doc """
+  Collect all error tokens emitted so far (for editor integrations).
+
+  Returns a list of `{meta, %Toxic.Error{}}` entries.
+  """
+  @type error_entry :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}, any()}
+  @spec errors(t()) :: {[{error_entry(), Toxic.Error.t()}], t()}
+  def errors(%__MODULE__{} = stream) do
+    tokens = to_stream(stream) |> Enum.to_list()
+
+    errs =
+      tokens
+      |> Enum.flat_map(fn
+        {:error_token, meta, %Toxic.Error{} = err} -> [{meta, err}]
+        _ -> []
+      end)
+
+    {errs, stream}
+  end
+
   # Compute terms at the logical current position (before next token)
   defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]})
        when is_list(pre_terms) do
