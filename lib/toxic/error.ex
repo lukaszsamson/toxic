@@ -165,7 +165,7 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :keyword_missing_space_after_colon}) do
-    ~c"keyword argument must be followed by space after:"
+    ~c"keyword argument must be followed by space after: "
   end
 
   def format(%__MODULE__{code: :map_invalid_open_delimiter}) do
@@ -199,7 +199,6 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :alias_invalid_character, details: d, token_display: _tok}) do
-    # Message already fully formed at emission site (minus trailing token)
     Map.get(d, :message_iolist, ~c"invalid character in alias: ")
   end
 
@@ -270,6 +269,12 @@ defmodule Toxic.Error do
   def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: d}) do
     # Message uses tuple {prefix, help}
     {~c"unexpected reserved word: ", Map.get(d, :help_iolist, [])}
+  end
+
+  def format(%__MODULE__{code: :reserved_unexpected_end, token_display: ~c"do", details: d}) do
+    # Special extended help for stray do (non-fn case)
+    suffix = Map.get(d, :help_iolist, [])
+    {~c"unexpected reserved word: ", suffix}
   end
 
   def format(%__MODULE__{code: :unexpected_token, token_display: tok}) do

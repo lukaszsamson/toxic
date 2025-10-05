@@ -9,7 +9,7 @@ defmodule Toxic.Alias do
       char_hex = String.upcase(Integer.to_string(invalid_char, 16))
       char_hex_padded = String.pad_leading(char_hex, 4, "0")
 
-      message =
+      message_prefix =
         ~c"invalid character \"" ++
           [invalid_char] ++
           ~c"\" (code point U+" ++
@@ -17,6 +17,9 @@ defmodule Toxic.Alias do
           ~c") in " ++
           ~c"alias (only ASCII characters, without punctuation, are allowed)" ++
           ~c": "
+
+      # Elixir puts the offending alias (Foo.Bär) as token_chars, so prefix ends with ': '
+      message = message_prefix
 
       err = %Toxic.Error{
         code: :alias_invalid_character,
