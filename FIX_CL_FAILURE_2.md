@@ -33,3 +33,10 @@
   • Specific keyword-spacing tests pass.
   • Full suite remains at 13 failures (unchanged from previous step). One warning suggests switching length(id_chars)
      > 0 to a non-empty list check; I can clean that up next if you want.
+
+  Remaining prominent failures:
+  • VC conflict newline/EOL ordering,
+  • Ternary continuation around ..//,
+  • Unexpected end suppression still emitting :end in one path,
+  • Mixed-errors cascade ordering,
+  • Mismatched delimiter ordering still adds an extra :( in one case.

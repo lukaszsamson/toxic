@@ -1449,6 +1449,8 @@ defmodule Toxic.Driver do
   defp closer_starts_with?(list, :"}"), do: starts_with_char?(list, ?})
   defp closer_starts_with?(list, :">>"), do: starts_with_list?(list, [?>, ?>])
   defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
+  defp closer_starts_with?(list, expected) when is_atom(expected),
+    do: starts_with_list?(list, terminator_chars(expected))
   defp closer_starts_with?(_list, _other), do: false
 
   defp starts_with_char?([h | _], ch), do: h == ch
