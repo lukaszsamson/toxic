@@ -240,3 +240,33 @@ end
 
 ### Conclusion
 This revision clarifies `details` contracts and validation, specifies recovery behavior per code, adds parity guardrails with message snapshot tests, reorders migration to reduce bridge complexity, and outlines stronger test and type-safety plans. The result is a low-risk path to a maintainable, predictable tolerant mode while preserving strict-mode compatibility and message parity.
+
+
+## Fixes needed after Phases 0-4
+
+  • I’ll address the reviewer’s Phase 0–4 gaps: complete key formatters, add a minimal details validator, and start
+    transitioning recovery to code-based checks for a few top cases without breaking behavior.
+  • Changes to make now:
+    • Complete high-impact formatters in Toxic.Error.format/1:
+      • Add clauses for: :string_missing_terminator, :heredoc_missing_terminator, :sigil_invalid_name,
+        :sigil_invalid_delimiter, :comment_invalid_bidi, :comment_invalid_linebreak, :vc_merge_conflict_marker,
+        :number_trailing_garbage, :identifier_invalid_char, :reserved_token_used, :keyword_do_with_fn_invalid,
+        :map_unexpected_space_after_percent, :map_invalid_open_delimiter. These directly unblock many strict tests.
+    • Add details validation (Option B) in Toxic.Error:
+      • Introduce a validate_details!/2 private helper and call it inside to_reason_tuple/1 or a small new/1 constructor
+        for common codes we just added. Start with 3 validators used by formatters above (terminator missing, mismatched
+        closer, map errors).
+    • Begin code-based recovery in Driver for 3 common codes (keep fallback for others):
+      • In adjust_recovery/5, first case error.code to handle:
+        • :keyword_missing_space_after_colon → consume : only.
+        • :map_invalid_open_delimiter → emit % then continue (existing helper).
+        • :string_missing_terminator when escape_at_eof? in details → consume newline (no message parsing).
+      • Leave remaining cases using existing legacy heuristics to avoid broad changes.
+  • What remains (Phase 5 items; not implemented here):
+    • Fill remaining format/1 clauses (identifier variants, alias errors, NFKC/confusable messages).
+    • Finish code-based recovery for all codes and remove message parsing helpers.
+    • Add more validators per code and enable snapshot/code tests; migrate Number.ex to emit a struct.
+  • Impact:
+    • Reduces strict-mode failures by covering the most frequent message shapes.
+    • Starts the shift to code-based tolerant recovery for key paths.
+    • Adds a guard against malformed details to prevent runtime mis-match later.

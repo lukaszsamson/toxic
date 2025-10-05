@@ -314,13 +314,6 @@ defmodule Toxic.Interpolation do
         char_hex_padded = String.pad_leading(char_hex, 4, "0")
         token = ~c"\\u" ++ String.to_charlist(char_hex_padded)
 
-        prefix =
-          if bidi(char) do
-            ~c"invalid bidirectional formatting character in string: "
-          else
-            ~c"invalid line break character in string: "
-          end
-
         # Adjust line number for heredoc content (which has prepended newline)
         # If we're processing heredoc content and line > start_line, subtract 1
         # to account for the prepended newline

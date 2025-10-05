@@ -817,7 +817,7 @@ defmodule Toxic.Driver do
          %__MODULE__{line: end_line, column: end_column, scope: scope} = _state
        ) do
     closing = closing_for(start)
-    closing_chars = terminator_chars(closing)
+
     hint = missing_scope_hint(entry, closing, scope)
 
     {{start_line, start_column}, _end_pos, _extra} = meta
@@ -1099,12 +1099,43 @@ defmodule Toxic.Driver do
   end
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
-  defp adjust_recovery(%Toxic.Error{code: _code} = reason_struct, rest, state, def_rest, def_line, def_col) do
-    # Phase 0 adapter: emulate existing message-based routing using formatted text
-    message = Toxic.Error.format(reason_struct) |> IO.iodata_to_binary()
-    token_chars = List.wrap(reason_struct.token_display)
+  defp adjust_recovery(%Toxic.Error{code: code, details: details} = reason_struct, rest, state, def_rest, def_line, def_col) do
+    # Phase 1.5: Introduce initial code-based routing for common cases, then fallback
+    case code do
+      :keyword_missing_space_after_colon ->
+        case rest do
+          [?: | _] -> {tl(rest), state.line, state.column + 1, [], state.scope}
+          _ -> {def_rest, def_line, def_col, [], state.scope}
+        end
 
-    cond do
+      :map_invalid_open_delimiter ->
+        case rest do
+          [?% | _] ->
+            meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
+            percent_token = {:%, meta_percent}
+            rest_after_percent = tl(rest)
+            {rest_no_ws, l_after, c_after} = consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
+            {rest_no_ws, l_after, c_after, [percent_token], state.scope}
+          _ -> {def_rest, def_line, def_col, [], state.scope}
+        end
+
+      :string_missing_terminator ->
+        if Map.get(details, :escape_at_eof?, false) do
+          case def_rest do
+            [?\n | new_rest] -> {new_rest, def_line + 1, 1, [], state.scope}
+            [?\r, ?\n | new_rest] -> {new_rest, def_line + 1, 1, [], state.scope}
+            _ -> {def_rest, def_line, def_col, [], state.scope}
+          end
+        else
+          {def_rest, def_line, def_col, [], state.scope}
+        end
+
+      _ ->
+        # Fallback to legacy message-based routing for remaining cases
+        message = Toxic.Error.format(reason_struct) |> IO.iodata_to_binary()
+        token_chars = List.wrap(reason_struct.token_display)
+
+        cond do
       invalid_char_error?(message) ->
         # For invalid character errors (null byte, control chars, etc.), consume only
         # the single invalid character to avoid merging multiple consecutive invalid
@@ -1176,8 +1207,9 @@ defmodule Toxic.Driver do
         semi_token = {:";", meta_semi}
         {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
 
-      true ->
-        {def_rest, def_line, def_col, [], state.scope}
+          true ->
+            {def_rest, def_line, def_col, [], state.scope}
+        end
     end
   end
 
@@ -1263,9 +1295,9 @@ defmodule Toxic.Driver do
   defp starts_with_delimiter?([cp | _]), do: is_delimiter_char?(cp)
   defp starts_with_delimiter?(_), do: false
 
-  defp is_delimiter_char?(cp) when cp in '()[]{}', do: true
-  defp is_delimiter_char?(cp) when cp in ':+-*/%=;,.|&^', do: true
-  defp is_delimiter_char?(cp) when cp in ':<>', do: true
+  defp is_delimiter_char?(cp) when cp in ~c'()[]{}', do: true
+  defp is_delimiter_char?(cp) when cp in ~c':+-*/%=;,.|&^', do: true
+  defp is_delimiter_char?(cp) when cp in ~c':<>', do: true
   defp is_delimiter_char?(?#), do: true
   defp is_delimiter_char?(_), do: false
 
@@ -1717,22 +1749,4 @@ defmodule Toxic.Driver do
   end
 
   defp actual_closer_from_reason(_), do: nil
-
-  # Advance over a list of characters (handles grapheme clusters and newlines)
-  defp advance_over_chars(chars, line, col) do
-    do_advance_over_chars(List.wrap(chars), line, col)
-  end
-
-  defp do_advance_over_chars([], line, col), do: {line, col}
-  defp do_advance_over_chars(list, line, col) do
-    case :unicode_util.gc(list) do
-      [cluster | rest2] when is_list(cluster) ->
-        {nline, ncol} = advance_pos_cluster(cluster, line, col)
-        do_advance_over_chars(rest2, nline, ncol)
-      [codepoint | rest2] when is_integer(codepoint) ->
-        {nline, ncol} = advance_pos(codepoint, line, col)
-        do_advance_over_chars(rest2, nline, ncol)
-      [] -> {line, col}
-    end
-  end
 end

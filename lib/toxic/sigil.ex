@@ -21,8 +21,6 @@ defmodule Toxic.Sigil do
     tokenize_upper_sigil_name(t, [s], line, column + 1, scope, tokens)
   end
 
-  @sigil_name_error ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: "
-
   def tokenize_lower_sigil_name(
         [s | _t] = original,
         [_ | _] = name_acc,

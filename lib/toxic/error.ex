@@ -116,6 +116,22 @@ defmodule Toxic.Error do
     :io_lib.format(~c"missing terminator: ~ts", [chars])
   end
 
+  def format(%__MODULE__{code: :string_missing_terminator, details: details}) do
+    expected = Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter))
+    chars = terminator_chars(expected)
+    msg = :io_lib.format(~c"missing terminator: ~ts", [chars])
+    suffix = Map.get(details, :suffix_iolist, [])
+    [msg, suffix]
+  end
+
+  def format(%__MODULE__{code: :heredoc_missing_terminator, details: details}) do
+    expected = Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter))
+    chars = terminator_chars(expected)
+    msg = :io_lib.format(~c"missing terminator: ~ts", [chars])
+    suffix = Map.get(details, :suffix_iolist, [])
+    [msg, suffix]
+  end
+
   def format(%__MODULE__{code: :interpolation_missing_terminator}) do
     :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]] )
   end
@@ -124,12 +140,17 @@ defmodule Toxic.Error do
     ~c"keyword argument must be followed by space after:"
   end
 
-  def format(%__MODULE__{code: :map_invalid_open_delimiter, details: %{got: got}}) do
-    [~c"expected %{ to define a map, got %", List.wrap(got)]
+  def format(%__MODULE__{code: :map_invalid_open_delimiter}) do
+    ~c"expected %{ to define a map, got: "
   end
 
   def format(%__MODULE__{code: :map_unexpected_space_after_percent}) do
-    ~c"unexpected space between % and {"
+    [
+      ~c"unexpected space between % and {\n\n",
+      ~c"If you want to define a map, write %{...}, with no spaces.\n",
+      ~c"If you want to define a struct, write %StructName{...}.\n\n",
+      ~c"Syntax error before: "
+    ]
   end
 
   def format(%__MODULE__{code: :reserved_unexpected_end}) do
@@ -149,11 +170,46 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :number_trailing_garbage}) do
-    ~c"invalid character after number"
+    Map.get(%{}, :noop, nil)
+    # For this code we preserve prebuilt message in details
+    Map.get(:erlang.map_get(:details, %{}), :msg_iolist)
   end
 
   def format(%__MODULE__{code: :number_invalid_float}) do
     ~c"invalid float number"
+  end
+
+  def format(%__MODULE__{code: :sigil_invalid_name}) do
+    ~c"invalid sigil name, it should be either a one-letter lowercase letter or an uppercase letter optionally followed by uppercase letters and digits, got: "
+  end
+
+  def format(%__MODULE__{code: :sigil_invalid_delimiter}) do
+    ~c"invalid sigil delimiter: "
+  end
+
+  def format(%__MODULE__{code: :comment_invalid_bidi}) do
+    ~c"invalid bidirectional formatting character in comment: "
+  end
+
+  def format(%__MODULE__{code: :comment_invalid_linebreak}) do
+    ~c"invalid line break character in comment: "
+  end
+
+  def format(%__MODULE__{code: :vc_merge_conflict_marker}) do
+    ~c"found an unexpected version control marker, please resolve the conflicts: "
+  end
+
+  def format(%__MODULE__{code: :identifier_invalid_char, details: d}) do
+    Map.get(d, :msg_iolist, ~c"invalid character in identifier: ")
+  end
+
+  def format(%__MODULE__{code: :reserved_token_used}) do
+    ~c"reserved token: "
+  end
+
+  def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: d}) do
+    # Message uses tuple {prefix, help}
+    {~c"unexpected reserved word: ", Map.get(d, :help_iolist, [])}
   end
 
   def format(%__MODULE__{code: :unexpected_token, token_display: tok}) do
@@ -170,14 +226,30 @@ defmodule Toxic.Error do
   """
   @spec to_reason_tuple(t()) :: {keyword(), iodata(), iodata() | []}
   def to_reason_tuple(%__MODULE__{} = error) do
+    validate_details!(error)
     meta_kv = meta_from(error)
 
-    message = format(error)
+    message =
+      case error.code do
+        :keyword_do_with_fn_invalid -> format(error)
+        :reserved_unexpected_end -> {~c"unexpected reserved word: ", Map.get(error.details, :suffix_iolist, [])}
+        _ -> format(error)
+      end
 
     # Decide whether to place separator/token in `token_chars` per legacy conventions
     token_chars =
       case error.code do
         :terminator_mismatched_closer -> List.wrap(error.token_display)
+        :heredoc_invalid_header -> List.wrap(error.token_display)
+        :sigil_invalid_name -> List.wrap(error.token_display)
+        :sigil_invalid_delimiter -> List.wrap(error.token_display)
+        :map_invalid_open_delimiter -> List.wrap(error.token_display)
+        :map_unexpected_space_after_percent -> List.wrap(error.token_display)
+        :number_trailing_garbage -> List.wrap(error.token_display)
+        :number_invalid_float -> List.wrap(error.token_display)
+        :identifier_invalid_char -> List.wrap(error.token_display)
+        :reserved_token_used -> List.wrap(error.token_display)
+        :vc_merge_conflict_marker -> List.wrap(error.token_display)
         :unexpected_token -> List.wrap(error.token_display)
         _ -> []
       end
@@ -224,6 +296,12 @@ defmodule Toxic.Error do
 
         message_starts_with?(message, "keyword argument must be followed by space") ->
           :keyword_missing_space_after_colon
+
+        message_starts_with?(message, "unexpected space between % and {") ->
+          :map_unexpected_space_after_percent
+
+        message_starts_with?(message, "invalid float number") ->
+          :number_invalid_float
 
         true ->
           :syntax_error
@@ -338,39 +416,39 @@ defmodule Toxic.Error do
     end
   end
 
-  defp infer_domain(:terminator_unexpected_closer), do: :terminator
+  # defp infer_domain(:terminator_unexpected_closer), do: :terminator
   defp infer_domain(:terminator_mismatched_closer), do: :terminator
   defp infer_domain(:terminator_missing_closer), do: :terminator
-  defp infer_domain(:reserved_unexpected_end), do: :reserved
+  # defp infer_domain(:reserved_unexpected_end), do: :reserved
   defp infer_domain(:interpolation_missing_terminator), do: :interpolation
-  defp infer_domain(:interpolation_not_allowed_in_quoted_identifier), do: :interpolation
-  defp infer_domain(:string_missing_terminator), do: :string
-  defp infer_domain(:heredoc_missing_terminator), do: :heredoc
-  defp infer_domain(:heredoc_invalid_header), do: :heredoc
-  defp infer_domain(:sigil_invalid_name), do: :sigil
-  defp infer_domain(:sigil_invalid_delimiter), do: :sigil
+  # defp infer_domain(:interpolation_not_allowed_in_quoted_identifier), do: :interpolation
+  # defp infer_domain(:string_missing_terminator), do: :string
+  # defp infer_domain(:heredoc_missing_terminator), do: :heredoc
+  # defp infer_domain(:heredoc_invalid_header), do: :heredoc
+  # defp infer_domain(:sigil_invalid_name), do: :sigil
+  # defp infer_domain(:sigil_invalid_delimiter), do: :sigil
   defp infer_domain(:map_unexpected_space_after_percent), do: :map
   defp infer_domain(:map_invalid_open_delimiter), do: :map
   defp infer_domain(:keyword_missing_space_after_colon), do: :keyword
-  defp infer_domain(:keyword_do_with_fn_invalid), do: :keyword
-  defp infer_domain(:identifier_empty), do: :identifier
-  defp infer_domain(:identifier_mixed_script), do: :identifier
-  defp infer_domain(:identifier_confusable), do: :identifier
-  defp infer_domain(:identifier_nfkc_needed), do: :identifier
-  defp infer_domain(:identifier_unexpected_token), do: :identifier
-  defp infer_domain(:identifier_invalid_char), do: :identifier
-  defp infer_domain(:identifier_atom_length_limit), do: :identifier
-  defp infer_domain(:identifier_nonexistent_atom_when_existing_only), do: :identifier
-  defp infer_domain(:alias_invalid_character), do: :alias
+  # defp infer_domain(:keyword_do_with_fn_invalid), do: :keyword
+  # defp infer_domain(:identifier_empty), do: :identifier
+  # defp infer_domain(:identifier_mixed_script), do: :identifier
+  # defp infer_domain(:identifier_confusable), do: :identifier
+  # defp infer_domain(:identifier_nfkc_needed), do: :identifier
+  # defp infer_domain(:identifier_unexpected_token), do: :identifier
+  # defp infer_domain(:identifier_invalid_char), do: :identifier
+  # defp infer_domain(:identifier_atom_length_limit), do: :identifier
+  # defp infer_domain(:identifier_nonexistent_atom_when_existing_only), do: :identifier
+  # defp infer_domain(:alias_invalid_character), do: :alias
   defp infer_domain(:alias_unexpected_paren), do: :alias
-  defp infer_domain(:reserved_token_used), do: :reserved
-  defp infer_domain(:number_trailing_garbage), do: :number
+  # defp infer_domain(:reserved_token_used), do: :reserved
+  # defp infer_domain(:number_trailing_garbage), do: :number
   defp infer_domain(:number_invalid_float), do: :number
-  defp infer_domain(:encoding_invalid), do: :encoding
-  defp infer_domain(:comment_invalid_bidi), do: :comment
-  defp infer_domain(:comment_invalid_linebreak), do: :comment
-  defp infer_domain(:vc_merge_conflict_marker), do: :vc
-  defp infer_domain(:unexpected_token), do: :general
+  # defp infer_domain(:encoding_invalid), do: :encoding
+  # defp infer_domain(:comment_invalid_bidi), do: :comment
+  # defp infer_domain(:comment_invalid_linebreak), do: :comment
+  # defp infer_domain(:vc_merge_conflict_marker), do: :vc
+  # defp infer_domain(:unexpected_token), do: :general
   defp infer_domain(:syntax_error), do: :general
 
   defp infer_code_from_atom(:vc_marker), do: :vc_merge_conflict_marker
@@ -410,4 +488,26 @@ defmodule Toxic.Error do
   end
 
   defp terminator_chars(delimiter) when is_list(delimiter), do: delimiter
+
+  # -- Details validation -----------------------------------------------------
+  defp validate_details!(%__MODULE__{code: :terminator_mismatched_closer, details: d}),
+    do: require_keys!(d, [:opening_delimiter, :closing_delimiter, :expected_delimiter])
+
+  defp validate_details!(%__MODULE__{code: :terminator_missing_closer, details: d}),
+    do: require_keys!(d, [:opening_delimiter, :expected_delimiter])
+
+  defp validate_details!(%__MODULE__{code: :map_invalid_open_delimiter, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: :string_missing_terminator, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: _}), do: :ok
+
+  defp require_keys!(map, keys) do
+    Enum.each(keys, fn k ->
+      unless Map.has_key?(map, k) do
+        raise ArgumentError, "Missing required details key: #{inspect(k)}"
+      end
+    end)
+    :ok
+  end
 end

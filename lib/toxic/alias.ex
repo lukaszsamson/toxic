@@ -18,8 +18,6 @@ defmodule Toxic.Alias do
           ~c"alias (only ASCII characters, without punctuation, are allowed)" ++
           ~c": "
 
-      reason = {[line: line, column: column], message, unencoded}
-      # Keep legacy reason to leverage Driver bridge, but also provide structured form
       err = %Toxic.Error{
         code: :alias_invalid_character,
         domain: :alias,

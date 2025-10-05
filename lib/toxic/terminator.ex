@@ -148,7 +148,4 @@ defmodule Toxic.Terminator do
   defp terminator(:"["), do: :"]"
   defp terminator(:"{"), do: :"}"
   defp terminator(:"<<"), do: :">>"
-
-  defp unexpected_token_or_reserved(:end), do: ~c"unexpected reserved word: "
-  defp unexpected_token_or_reserved(_), do: ~c"unexpected token: "
 end
