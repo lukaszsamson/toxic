@@ -300,12 +300,8 @@ defmodule Toxic.Driver do
         # Emit charlist deprecation warning for list heredocs
         updated_scope =
           if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
-            Toxic.Scope.prepend_warning(
-              start_info.line,
-              start_info.column,
-              ~c"single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead",
-              scope
-            )
+            warning = Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+            Toxic.Scope.prepend_warning(warning, scope)
           else
             scope
           end
@@ -407,12 +403,13 @@ defmodule Toxic.Driver do
                 false ->
                   # Quotes are necessary - check if single quotes deprecated
                   if delim == ?' do
-                    Toxic.Scope.prepend_warning(
-                      start_info.line,
-                      start_info.column,
-                      ~c"single quotes around keywords are deprecated. Use double quotes instead",
-                      scope
-                    )
+                    warning =
+                      Toxic.Warning.deprecated_single_quote_keyword(
+                        start_info.line,
+                        start_info.column
+                      )
+
+                    Toxic.Scope.prepend_warning(warning, scope)
                   else
                     scope
                   end
@@ -474,15 +471,10 @@ defmodule Toxic.Driver do
               else
                 # For charlists, emit deprecation warning
                 if end_token_type == :list_string_end and delim == ?' do
-                  Toxic.Scope.prepend_warning(
-                    start_info.line,
-                    start_info.column,
-                    ~c"using single-quoted strings to represent charlists is deprecated.\n" ++
-                      ~c"Use ~c\"\" if you indeed want a charlist or use \"\" instead.\n" ++
-                      ~c"You may run \"mix format --migrate\" to change all single-quoted\n" ++
-                      ~c"strings to use the ~c sigil and fix this warning.",
-                    scope
-                  )
+                  warning =
+                    Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+
+                  Toxic.Scope.prepend_warning(warning, scope)
                 else
                   scope
                 end
@@ -1623,16 +1615,10 @@ defmodule Toxic.Driver do
 
   @doc false
   def maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
-    msg =
+    warning =
       case kind do
         k when k in [:atom_safe, :atom_unsafe] ->
-          :io_lib.format(
-            ~c"found quoted atom \"~ts\" but the quotes are not required. " ++
-              ~c"Atoms made exclusively of ASCII letters, numbers, underscores, " ++
-              ~c"beginning with a letter or underscore, and optionally ending with ! or ? " ++
-              ~c"do not require quotes",
-            [content]
-          )
+          Toxic.Warning.unnecessary_quoted_atom(line, column, content)
 
         k
         when k in [
@@ -1641,25 +1627,13 @@ defmodule Toxic.Driver do
                :kw_identifier_safe_end,
                :kw_identifier_unsafe_end
              ] ->
-          :io_lib.format(
-            ~c"found quoted keyword \"~ts\" but the quotes are not required. " ++
-              ~c"Note that keywords are always atoms, even when quoted. " ++
-              ~c"Similar to atoms, keywords made exclusively of ASCII " ++
-              ~c"letters, numbers, and underscores and not beginning with a " ++
-              ~c"number do not require quotes",
-            [content]
-          )
+          Toxic.Warning.unnecessary_quoted_keyword(line, column, content)
 
         :quoted_identifier ->
-          :io_lib.format(
-            ~c"found quoted call \"~ts\" but the quotes are not required. " ++
-              ~c"Calls made exclusively of Unicode letters, numbers, and underscores " ++
-              ~c"and not beginning with a number do not require quotes",
-            [content]
-          )
+          Toxic.Warning.unnecessary_quoted_call(line, column, content)
       end
 
-    Toxic.Scope.prepend_warning(line, column, msg, scope)
+    Toxic.Scope.prepend_warning(warning, scope)
   end
 
   # Phase 2: structural synthesis helpers

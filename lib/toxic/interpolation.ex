@@ -149,13 +149,8 @@ defmodule Toxic.Interpolation do
       ) do
     new_scope =
       if not interpol do
-        msg =
-          :io_lib.format(
-            ~c"using \\~ts to escape the closing of an uppercase sigil is deprecated, please use another delimiter or a lowercase sigil instead",
-            [[last]]
-          )
-
-        Toxic.Scope.prepend_warning(line, column, msg, scope)
+        warning = Toxic.Warning.deprecated_sigil_escape(line, column, last)
+        Toxic.Scope.prepend_warning(warning, scope)
       else
         scope
       end

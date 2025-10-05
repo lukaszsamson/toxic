@@ -394,9 +394,28 @@ defmodule Toxic.TokenStream do
   @doc """
   Get accumulated warnings from the tokenizer.
 
-  Returns a list of warnings in the format `{{line, column}, message}`.
+  Returns a list of structured warnings as `Toxic.Warning.t()` structs.
+  Each warning contains:
+  - `code`: Unique atom identifying the warning type
+  - `domain`: Category grouping (e.g., :deprecated, :ambiguous, :escape, :unicode)
+  - `token_display`: Visual representation of the problematic token
+  - `details`: Map containing line, column, and other contextual information
+
+  ## Example
+
+      stream = Toxic.TokenStream.new("'hello'", 1, 1)
+      {tokens, stream} = collect_all_tokens(stream)
+      {warnings, stream} = Toxic.TokenStream.warnings(stream)
+      # warnings = [
+      #   %Toxic.Warning{
+      #     code: :deprecated_single_quote_atom,
+      #     domain: :deprecated,
+      #     token_display: ~c":'atom'",
+      #     details: %{line: 1, column: 1, suggestion: ...}
+      #   }
+      # ]
   """
-  @spec warnings(t()) :: {[{{pos_integer(), pos_integer()}, charlist()}], t()}
+  @spec warnings(t()) :: {[Toxic.Warning.t()], t()}
   def warnings(%__MODULE__{driver: driver} = stream) do
     require Toxic.Scope
     warnings = Toxic.Scope.scope(driver.scope, :warnings)

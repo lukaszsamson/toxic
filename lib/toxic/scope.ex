@@ -38,7 +38,7 @@ defmodule Toxic.Scope do
             indentation: non_neg_integer(),
             column: pos_integer(),
             mismatch_hints: list(),
-            warnings: list(),
+            warnings: [Toxic.Warning.t()],
             elixir_compatibility: boolean()
           )
 
@@ -46,11 +46,56 @@ defmodule Toxic.Scope do
   def track_ascii(false, scope), do: scope(scope, ascii_identifiers_only: false)
 
   @doc """
-  Prepends a warning to the scope's warning list.
-  Warnings are stored as `{{line, column}, message}` tuples.
+  Prepends a structured warning to the scope's warning list.
+
+  Takes a `%Toxic.Warning{}` struct and adds it to the front of the warnings list.
+  This is the preferred way to add warnings.
+
+  ## Example
+
+      warning = Toxic.Warning.deprecated_single_quote_atom(1, 5)
+      scope = Toxic.Scope.prepend_warning(warning, scope)
   """
-  def prepend_warning(line, column, message, scope) do
+  def prepend_warning(%Toxic.Warning{} = warning, scope) do
     warnings = scope(scope, :warnings)
-    scope(scope, warnings: [{{line, column}, message} | warnings])
+    scope(scope, warnings: [warning | warnings])
+  end
+
+  @doc """
+  Legacy warning function for backward compatibility during migration.
+
+  This function creates an unstructured warning with a generic `:legacy_unstructured` code.
+  **This will be removed after migration is complete.**
+
+  Use `prepend_warning/2` with a structured `Toxic.Warning` instead.
+
+  ## Example
+
+      # Old way (deprecated)
+      scope = Toxic.Scope.prepend_warning_legacy(1, 5, ~c"some warning", scope)
+
+      # New way (preferred)
+      warning = Toxic.Warning.deprecated_single_quote_atom(1, 5)
+      scope = Toxic.Scope.prepend_warning(warning, scope)
+  """
+  def prepend_warning_legacy(line, column, message, scope) do
+    warning = %Toxic.Warning{
+      code: :legacy_unstructured,
+      domain: :general,
+      token_display: message,
+      details: %{line: line, column: column, message: message}
+    }
+
+    prepend_warning(warning, scope)
+  end
+
+  @doc """
+  **DEPRECATED:** Use `prepend_warning/2` with structured warnings instead.
+
+  This is maintained temporarily for backward compatibility.
+  """
+  def prepend_warning(line, column, message, scope)
+      when is_integer(line) and is_integer(column) do
+    prepend_warning_legacy(line, column, message, scope)
   end
 end

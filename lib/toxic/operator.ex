@@ -117,18 +117,16 @@ defmodule Toxic.Operator do
         new_scope =
           case op do
             :"^^^" ->
-              msg =
-                ~c"^^^ is deprecated. It is typically used as xor but it has the wrong precedence, use Bitwise.bxor/2 instead"
-
-              Toxic.Scope.prepend_warning(line, column, msg, scope)
+              warning = Toxic.Warning.deprecated_xor_operator(line, column)
+              Toxic.Scope.prepend_warning(warning, scope)
 
             :"~~~" ->
-              msg = ~c"~~~ is deprecated. Use Bitwise.bnot/1 instead for clarity"
-              Toxic.Scope.prepend_warning(line, column, msg, scope)
+              warning = Toxic.Warning.deprecated_bnot_operator(line, column)
+              Toxic.Scope.prepend_warning(warning, scope)
 
             :"<|>" ->
-              msg = ~c"<|> is deprecated. Use another pipe-like operator"
-              Toxic.Scope.prepend_warning(line, column, msg, scope)
+              warning = Toxic.Warning.deprecated_pipe_operator(line, column)
+              Toxic.Scope.prepend_warning(warning, scope)
 
             _ ->
               scope

@@ -49,10 +49,38 @@ defmodule ToxicWarningsTest do
   defp normalize_warnings(warnings) do
     warnings
     |> Enum.reverse()
-    |> Enum.map(fn {{line, column}, message} ->
-      msg_str = IO.iodata_to_binary(message)
-      {{line, column}, msg_str}
+    |> Enum.map(fn
+      # Handle structured warnings from Toxic
+      %Toxic.Warning{details: details} = warning ->
+        line = details.line
+        column = details.column
+        # Get message from details if present, otherwise construct from token_display
+        msg_str =
+          case details do
+            %{message: message} -> IO.iodata_to_binary(message)
+            _ -> format_warning_message(warning)
+          end
+        {{line, column}, msg_str}
+
+      # Handle legacy tuple format from Elixir tokenizer
+      {{line, column}, message} ->
+        msg_str = IO.iodata_to_binary(message)
+        {{line, column}, msg_str}
     end)
+  end
+
+  # Format a warning message when no explicit message is stored
+  defp format_warning_message(%Toxic.Warning{code: :deprecated_charlist, details: %{suggestion: _}}) do
+    "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"
+  end
+
+  defp format_warning_message(%Toxic.Warning{details: %{message: message}}) do
+    IO.iodata_to_binary(message)
+  end
+
+  defp format_warning_message(_warning) do
+    # Fallback for any other case
+    "unknown warning"
   end
 
   defp collect_all_tokens(stream, acc) do

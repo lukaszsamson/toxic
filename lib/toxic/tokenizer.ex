@@ -85,17 +85,12 @@ defmodule Toxic.Tokenizer do
       if h == char and h != ?\\ do
         case handle_char(char) do
           {escape, name} ->
-            msg =
-              :io_lib.format(
-                ~c"found ?\\ followed by code point 0x~.16B (~ts), please use ?~ts instead",
-                [char, name, escape]
-              )
-
-            Toxic.Scope.prepend_warning(line, column, msg, scope)
+            warning = Toxic.Warning.unnecessary_char_escape(line, column, char, escape, name)
+            Toxic.Scope.prepend_warning(warning, scope)
 
           false when is_downcase(h) or is_upcase(h) ->
-            msg = :io_lib.format(~c"unknown escape sequence ?\\~tc, use ?~tc instead", [h, h])
-            Toxic.Scope.prepend_warning(line, column, msg, scope)
+            warning = Toxic.Warning.invalid_char_escape(line, column, h)
+            Toxic.Scope.prepend_warning(warning, scope)
 
           false ->
             scope
@@ -123,13 +118,8 @@ defmodule Toxic.Tokenizer do
     new_scope =
       case handle_char(char) do
         {escape, name} ->
-          msg =
-            :io_lib.format(
-              ~c"found ? followed by code point 0x~.16B (~ts), please use ?~ts instead",
-              [char, name, escape]
-            )
-
-          Toxic.Scope.prepend_warning(line, column, msg, scope)
+          warning = Toxic.Warning.unnecessary_char_escape(line, column, char, escape, name)
+          Toxic.Scope.prepend_warning(warning, scope)
 
         false ->
           scope
@@ -208,8 +198,8 @@ defmodule Toxic.Tokenizer do
   # Two Token Operators
 
   def tokenize_single([?:, ?:, ?: | rest], line, column, scope, _tokens) do
-    message = ~c"atom ::: must be written between quotes, as in :\"::\", to avoid ambiguity"
-    new_scope = Toxic.Scope.prepend_warning(line, column, message, scope)
+    warning = Toxic.Warning.ambiguous_triple_colon_atom(line, column)
+    new_scope = Toxic.Scope.prepend_warning(warning, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
   end
@@ -874,16 +864,8 @@ defmodule Toxic.Tokenizer do
   Used to catch potentially confusing patterns like `&&&&` or `||||`.
   """
   def maybe_warn_too_many_of_same_char([t | _] = token, [t | _], line, column, scope) do
-    token_str = List.to_string(token)
-    char_str = List.to_string([t])
-
-    message =
-      :io_lib.format(
-        ~c"found \"~ts\" followed by \"~ts\", please use a space between \"~ts\" and the next \"~ts\"",
-        [token_str, char_str, token_str, char_str]
-      )
-
-    Toxic.Scope.prepend_warning(line, column, message, scope)
+    warning = Toxic.Warning.confusable_repeated_operator(line, column, token, t)
+    Toxic.Scope.prepend_warning(warning, scope)
   end
 
   def maybe_warn_too_many_of_same_char(_token, _rest, _line, _column, scope), do: scope
@@ -893,31 +875,20 @@ defmodule Toxic.Tokenizer do
   confused with `foo !=`.
   """
   def maybe_warn_for_ambiguous_bang_before_equals(kind, unencoded, [?= | _], line, column, scope) do
-    {what, identifier} =
+    identifier =
       case kind do
-        :atom -> {~c"atom", [?: | unencoded]}
-        :identifier -> {~c"identifier", unencoded}
+        :atom -> [?: | unencoded]
+        :identifier -> unencoded
       end
 
     case List.last(identifier) do
-      last when last == ?! or last == ?? ->
-        msg =
-          :io_lib.format(
-            ~c"found ~ts \"~ts\", ending with \"~ts\", followed by =. " ++
-              ~c"It is unclear if you mean \"~ts ~ts=\" or \"~ts =\". Please add " ++
-              ~c"a space before or after ~ts to remove the ambiguity",
-            [
-              what,
-              identifier,
-              [last],
-              :lists.droplast(identifier),
-              [last],
-              identifier,
-              [last]
-            ]
-          )
+      ?! ->
+        warning = Toxic.Warning.ambiguous_bang_before_equals(line, column, identifier, kind)
+        Toxic.Scope.prepend_warning(warning, scope)
 
-        Toxic.Scope.prepend_warning(line, column, msg, scope)
+      ?? ->
+        warning = Toxic.Warning.ambiguous_question_before_equals(line, column, identifier, kind)
+        Toxic.Scope.prepend_warning(warning, scope)
 
       _ ->
         scope

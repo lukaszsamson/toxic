@@ -68,12 +68,8 @@ defmodule Toxic.Dot do
   defp handle_dot([?., h | t], line, column, dot_info, base_scope, _tokens) when is_quote(h) do
     scope =
       if h == ?' do
-        Toxic.Scope.prepend_warning(
-          line,
-          column,
-          ~c"single quotes around calls are deprecated. Use double quotes instead",
-          base_scope
-        )
+        warning = Toxic.Warning.deprecated_single_quote_call(line, column)
+        Toxic.Scope.prepend_warning(warning, base_scope)
       else
         base_scope
       end
