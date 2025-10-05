@@ -46,20 +46,14 @@ defmodule Toxic.Identifier do
               suffix ++
                 ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
 
-            reason = {[line: line, column: column], {prefix, message_suffix}, wrong}
-            {:error, reason}
+            err = %Toxic.Error{
+              code: :identifier_mixed_script,
+              domain: :identifier,
+              token_display: wrong,
+              details: %{line: line, column: column, message_prefix: prefix, message_suffix: message_suffix}
+            }
+            {:error, err}
         end
-
-      # Wrongcolumn = column + length(Wrong) - 1,
-      # case suggest_simpler_unexpected_token_in_error(Wrong, line, Wrongcolumn, scope) of
-      #   no_suggestion ->
-      #     # we append a pointer to more info if we aren't appending a suggestion
-      #     MoreInfo = "\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information.",
-      #     {error, {?LOC(line, column), {Prefix, Suffix ++ MoreInfo}, Wrong}};
-
-      #   {_, {Location, _, SuggestionMessage}} = _SuggestionError ->
-      #     {error, {Location, {Prefix, Suffix ++ SuggestionMessage}, Wrong}}
-      # end
 
       {:error, {:unexpected_token, wrong}} ->
         wrong_column = column + length(wrong) - 1
@@ -79,19 +73,6 @@ defmodule Toxic.Identifier do
                 {:unexpected_token, length(wrong)}
             end
         end
-
-      # Wrongcolumn = column + length(Wrong) - 1,
-      # case suggest_simpler_unexpected_token_in_error(Wrong, line, Wrongcolumn, scope) of
-      #   no_suggestion ->
-      #     [T | _] = lists:reverse(Wrong),
-      #     case suggest_simpler_unexpected_token_in_error([T], line, Wrongcolumn, scope) of
-      #       no_suggestion -> {unexpected_token, length(Wrong)};
-      #       SuggestionError -> SuggestionError
-      #     end;
-
-      #   SuggestionError ->
-      #     SuggestionError
-      # end;
 
       {:error, :empty} ->
         :empty

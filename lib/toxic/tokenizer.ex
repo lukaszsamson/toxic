@@ -15,11 +15,14 @@ defmodule Toxic.Tokenizer do
   def tokenize_single([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _tokens) do
     first_line = Enum.take_while(original, fn c -> c != ?\n and c != ?\r end)
 
-    reason =
-      {[line: line, column: 1],
-       ~c"found an unexpected version control marker, please resolve the conflicts: ", first_line}
+    err = %Toxic.Error{
+      code: :vc_merge_conflict_marker,
+      domain: :vc,
+      token_display: first_line,
+      details: %{line: line, column: 1}
+    }
 
-    {:error, reason}
+    {:error, err}
   end
 
   # Base integers
@@ -48,11 +51,22 @@ defmodule Toxic.Tokenizer do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
       {:error, char, reason_str} ->
         token = :io_lib.format("\\u~4.16.0B", [char])
+        msg = IO.iodata_to_binary(reason_str)
+        code =
+          if String.starts_with?(msg, "invalid bidirectional formatting character") do
+            :comment_invalid_bidi
+          else
+            :comment_invalid_linebreak
+          end
 
-        reason =
-          {[line: line, column: column], reason_str, token}
+        err = %Toxic.Error{
+          code: code,
+          domain: :comment,
+          token_display: token,
+          details: %{line: line, column: column}
+        }
 
-        {:error, reason}
+        {:error, err}
 
       {rest, comment} ->
         preserve_comments(line, column, tokens, comment, rest, scope)
@@ -293,13 +307,13 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single([?{ | _rest], line, column, _scope, [{:%, _} | _] = _tokens) do
-    message =
-      ~c"unexpected space between % and {\n\n" ++
-        ~c"If you want to define a map, write %{...}, with no spaces.\n" ++
-        ~c"If you want to define a struct, write %StructName{...}.\n\n" ++
-        ~c"Syntax error before: "
-
-    {:error, {[line: line, column: column], message, [?{]}}
+    err = %Toxic.Error{
+      code: :map_unexpected_space_after_percent,
+      domain: :map,
+      token_display: [?{],
+      details: %{line: line, column: column}
+    }
+    {:error, err}
   end
 
   def tokenize_single([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
@@ -541,11 +555,23 @@ defmodule Toxic.Tokenizer do
   # Others
 
   def tokenize_single([?%, ?( | _rest], line, column, _scope, _tokens) do
-    {:error, {[line: line, column: column], ~c"expected %{ to define a map, got: ", [?%, ?(]}}
+    err = %Toxic.Error{
+      code: :map_invalid_open_delimiter,
+      domain: :map,
+      token_display: [?%, ?(],
+      details: %{line: line, column: column}
+    }
+    {:error, err}
   end
 
   def tokenize_single([?%, ?[ | _rest], line, column, _scope, _tokens) do
-    {:error, {[line: line, column: column], ~c"expected %{ to define a map, got: ", [?%, ?[]}}
+    err = %Toxic.Error{
+      code: :map_invalid_open_delimiter,
+      domain: :map,
+      token_display: [?%, ?[] ,
+      details: %{line: line, column: column}
+    }
+    {:error, err}
   end
 
   def tokenize_single(
@@ -606,11 +632,14 @@ defmodule Toxic.Tokenizer do
           [?: | t] when hd(t) != ?: ->
             atom_name = Atom.to_charlist(atom) ++ [?:]
 
-            reason =
-              {[line: line, column: column],
-               ~c"keyword argument must be followed by space after: ", atom_name}
+            err = %Toxic.Error{
+              code: :keyword_missing_space_after_colon,
+              domain: :keyword,
+              token_display: atom_name,
+              details: %{line: line, column: column}
+            }
 
-            {:error, reason}
+            {:error, err}
 
           _ when at? ->
             msg =
@@ -620,7 +649,13 @@ defmodule Toxic.Tokenizer do
             {:error, {[line: line, column: column], msg, Atom.to_charlist(atom)}}
 
           _ when atom in [:__aliases__, :__block__] ->
-            {:error, {[line: line, column: column], ~c"reserved token: ", Atom.to_charlist(atom)}}
+            {:error,
+             %Toxic.Error{
+               code: :reserved_token_used,
+               domain: :reserved,
+               token_display: Atom.to_charlist(atom),
+               details: %{line: line, column: column}
+             }}
 
           _ when kind == :alias ->
             Toxic.Alias.tokenize_alias(
@@ -705,7 +740,12 @@ defmodule Toxic.Tokenizer do
 
   defp unexpected_token_reason(char, line, column) do
     message = unexpected_token_message(char, column)
-    {[line: line, column: column], ~c"unexpected token: ", message}
+    %Toxic.Error{
+      code: :unexpected_token,
+      domain: :general,
+      token_display: message,
+      details: %{line: line, column: column}
+    }
   end
 
   defp unexpected_token_message(char, column) do

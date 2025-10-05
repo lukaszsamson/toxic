@@ -71,7 +71,13 @@ defmodule Toxic.Keyword do
       {~c"unexpected reserved word: ",
        ~c". Anonymous functions are written as:\n\n    fn pattern -> expression end\n\nPlease remove the \"do\" keyword"}
 
-    {:error, {[line: line, column: column], message, ~c"do"}}
+    {:error,
+     %Toxic.Error{
+       code: :keyword_do_with_fn_invalid,
+       domain: :keyword,
+       token_display: ~c"do",
+       details: %{line: line, column: column, help_iolist: message}
+     }}
   end
 
   defp tokenize_keyword_terminator(line, column, :do, length, tokens) do
@@ -84,7 +90,12 @@ defmodule Toxic.Keyword do
           ~c". In case you wanted to write a \"do\" expression, you must either use do-blocks or separate the keyword argument with comma. For example, you should either write:\n\n    if some_condition? do\n      :this\n    else\n      :that\n    end\n\nor the equivalent construct:\n\n    if(some_condition?, do: :this, else: :that)\n\nwhere \"some_condition?\" is the first argument and the second argument is a keyword list.\n\nYou may see this error if you forget a trailing comma before the \"do\" in a \"do\" block"
 
         {:error,
-         {[line: line, column: column], {~c"unexpected reserved word: ", help_message}, ~c"do"}}
+         %Toxic.Error{
+           code: :reserved_unexpected_end,
+           domain: :reserved,
+           token_display: ~c"do",
+           details: %{line: line, column: column, help_iolist: help_message}
+         }}
     end
   end
 

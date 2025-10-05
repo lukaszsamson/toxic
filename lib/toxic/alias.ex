@@ -19,7 +19,14 @@ defmodule Toxic.Alias do
           ~c": "
 
       reason = {[line: line, column: column], message, unencoded}
-      {:error, reason}
+      # Keep legacy reason to leverage Driver bridge, but also provide structured form
+      err = %Toxic.Error{
+        code: :alias_invalid_character,
+        domain: :alias,
+        token_display: unencoded,
+        details: %{line: line, column: column, message_iolist: message}
+      }
+      {:error, err}
     else
       aliases_token = alias_token(meta(line, column, length, unencoded), atom)
       emit(aliases_token, rest, line, column + length, scope)
