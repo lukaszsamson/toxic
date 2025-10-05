@@ -1060,7 +1060,14 @@ defmodule Toxic.TokenStreamTest do
       {:ok, token, stream} = TokenStream.next(stream)
       assert {:error_token, _, _} = token
 
-      # EOF after error recovery
+      # With synthesis enabled, we get synthetic { then actual }
+      {:ok, token2, stream} = TokenStream.next(stream)
+      assert {:"{", _} = token2
+
+      {:ok, token3, stream} = TokenStream.next(stream)
+      assert {:"}", _} = token3
+
+      # EOF after tokens
       assert {:eof, _} = TokenStream.next(stream)
     end
 
@@ -1137,12 +1144,14 @@ defmodule Toxic.TokenStreamTest do
     test "tolerant peek_n/2 at EOF with error" do
       stream = TokenStream.new("1 }", 1, 1, error_mode: :tolerant)
 
-      # Peek 5 tokens, but only 2 available (1 and error)
+      # Peek 5 tokens: 1, error, synthetic {, actual }
       {:eof, tokens, _stream} = TokenStream.peek_n(stream, 5)
 
-      assert length(tokens) == 2
+      assert length(tokens) == 4
       assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
       assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:"{", _} = Enum.at(tokens, 2)
+      assert {:"}", _} = Enum.at(tokens, 3)
     end
 
     test "tolerant position/1 recovers error for accurate position" do
