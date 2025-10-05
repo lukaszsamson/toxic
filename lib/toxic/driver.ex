@@ -183,7 +183,14 @@ defmodule Toxic.Driver do
     case handle_tokenize_result(state, result) do
       {:error, reason, state} ->
         case state.error_mode do
-          :strict -> {:error, reason, string, state}
+          :strict ->
+            reason_tuple =
+              reason
+              |> Toxic.Error.ensure_struct()
+              |> Toxic.Error.to_reason_tuple()
+
+            {:error, reason_tuple, string, state}
+
           :tolerant -> emit_error_and_advance(reason, string, state)
         end
 
@@ -213,7 +220,14 @@ defmodule Toxic.Driver do
          ) do
       {:error, reason} ->
         case state.error_mode do
-          :strict -> {:error, reason, string, state}
+          :strict ->
+            reason_tuple =
+              reason
+              |> Toxic.Error.ensure_struct()
+              |> Toxic.Error.to_reason_tuple()
+
+            {:error, reason_tuple, string, state}
+
           :tolerant -> emit_error_and_advance(reason, string, state)
         end
 

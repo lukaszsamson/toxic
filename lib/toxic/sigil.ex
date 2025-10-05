@@ -36,7 +36,13 @@ defmodule Toxic.Sigil do
     # Error position should be at the start of the sigil (~)
     error_column = column - length(name_acc) - 1
 
-    {:error, {[line: line, column: error_column], @sigil_name_error, sigil_name}}
+    err = %Toxic.Error{
+      code: :sigil_invalid_name,
+      domain: :sigil,
+      token_display: sigil_name,
+      details: %{line: line, column: error_column}
+    }
+    {:error, err}
   end
 
   def tokenize_lower_sigil_name(t, name_acc, line, column, scope, tokens) do
@@ -63,10 +69,13 @@ defmodule Toxic.Sigil do
     sigil_name = [?~ | Enum.reverse(name_acc)] ++ original
     error_column = column - length(name_acc) - 1
 
-    reason =
-      {[line: line, column: error_column], @sigil_name_error, sigil_name}
-
-    {:error, reason}
+    err = %Toxic.Error{
+      code: :sigil_invalid_name,
+      domain: :sigil,
+      token_display: sigil_name,
+      details: %{line: line, column: error_column}
+    }
+    {:error, err}
   end
 
   # We finished the letters, so the name is over.
@@ -95,12 +104,14 @@ defmodule Toxic.Sigil do
          line + 1, 1, scope}
 
       :error ->
-        message =
-          ~c"heredoc allows only whitespace characters followed by a new line after opening "
-
         error_column = column + 3
-        reason = {[line: line, column: error_column], message, [h, h, h]}
-        {:error, reason}
+        err = %Toxic.Error{
+          code: :heredoc_invalid_header,
+          domain: :heredoc,
+          token_display: [h, h, h],
+          details: %{line: line, column: error_column, delim: [h, h, h]}
+        }
+        {:error, err}
     end
   end
 
@@ -138,8 +149,13 @@ defmodule Toxic.Sigil do
         ~c"). The available delimiters are: //, ||, \"\", '', (), [], {}, <>"
 
     token = message_detail
-    reason = {[line: line, column: start_column], ~c"invalid sigil delimiter: ", token}
-    {:error, reason}
+    err = %Toxic.Error{
+      code: :sigil_invalid_delimiter,
+      domain: :sigil,
+      token_display: token,
+      details: %{line: line, column: start_column}
+    }
+    {:error, err}
   end
 
   # Incomplete sigil.

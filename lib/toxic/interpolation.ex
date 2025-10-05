@@ -321,18 +321,20 @@ defmodule Toxic.Interpolation do
             ~c"invalid line break character in string: "
           end
 
-        message =
-          prefix ++
-            token ++
-            ~c". If you want to use such character, use it in its escaped " ++
-            token ++ ~c" form instead"
-
         # Adjust line number for heredoc content (which has prepended newline)
         # If we're processing heredoc content and line > start_line, subtract 1
         # to account for the prepended newline
         adjusted_line = if line > start_line, do: line - 1, else: line
-        reason = {[line: adjusted_line, column: column], message, [token]}
-        {:error, reason}
+
+        code = if bidi(char), do: :comment_invalid_bidi, else: :comment_invalid_linebreak
+        domain = :string
+        err = %Toxic.Error{
+          code: code,
+          domain: domain,
+          token_display: token,
+          details: %{line: adjusted_line, column: column}
+        }
+        {:error, err}
 
       [char | new_rest] when is_list(char) ->
         tokenize_single(
