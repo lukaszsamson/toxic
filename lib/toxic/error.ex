@@ -110,10 +110,19 @@ defmodule Toxic.Error do
     [~c"unexpected token: ", List.wrap(tok)]
   end
 
+  def format(%__MODULE__{code: :terminator_unexpected_closer}) do
+    ~c"unexpected token: "
+  end
+
   def format(%__MODULE__{code: :terminator_missing_closer, details: details}) do
     expected = Map.fetch!(details, :expected_delimiter)
     chars = terminator_chars(expected)
-    :io_lib.format(~c"missing terminator: ~ts", [chars])
+    msg = :io_lib.format(~c"missing terminator: ~ts", [chars])
+
+    case Map.get(details, :hint_iolist) do
+      nil -> msg
+      hint -> [msg, hint]
+    end
   end
 
   def format(%__MODULE__{code: :string_missing_terminator, details: details}) do
@@ -239,6 +248,8 @@ defmodule Toxic.Error do
     token_chars =
       case error.code do
         :terminator_mismatched_closer -> List.wrap(error.token_display)
+        :terminator_unexpected_closer -> List.wrap(error.token_display)
+        :reserved_unexpected_end -> List.wrap(error.token_display)
         :heredoc_invalid_header -> List.wrap(error.token_display)
         :sigil_invalid_name -> List.wrap(error.token_display)
         :sigil_invalid_delimiter -> List.wrap(error.token_display)
@@ -370,20 +381,64 @@ defmodule Toxic.Error do
 
   defp meta_from(%__MODULE__{} = error) do
     # No explicit position; fall back to details if present
+    details = error.details
+
+    # Extract line/column from details with fallback to 1
+    line = Map.get(details, :line, 1)
+    column = Map.get(details, :column, 1)
+
+    # Only include end_line/end_column if explicitly in details
+    # Elixir doesn't add them for most simple errors
+    base_position = [line: line, column: column]
+
     case error.code do
       :terminator_missing_closer ->
-        details = error.details
+        # This needs explicit end position from details
         [
           opening_delimiter: Map.get(details, :opening_delimiter),
           expected_delimiter: Map.get(details, :expected_delimiter),
-          line: Map.get(details, :start_line, 1),
-          column: Map.get(details, :start_column, 1),
-          end_line: Map.get(details, :end_line, Map.get(details, :start_line, 1)),
-          end_column: Map.get(details, :end_column, Map.get(details, :start_column, 1))
+          line: Map.get(details, :start_line, line),
+          column: Map.get(details, :start_column, column),
+          end_line: Map.get(details, :end_line, line),
+          end_column: Map.get(details, :end_column, column)
+        ]
+
+      :terminator_mismatched_closer ->
+        # This code path shouldn't happen (should have position set)
+        # But if it does, include delimiter info
+        base_position ++
+          [
+            error_type: :mismatched_delimiter,
+            opening_delimiter: Map.get(details, :opening_delimiter),
+            closing_delimiter: Map.get(details, :closing_delimiter),
+            expected_delimiter: Map.get(details, :expected_delimiter)
+          ]
+
+      :interpolation_missing_terminator ->
+        # Uses start position from details if available
+        [
+          opening_delimiter: Map.get(details, :opening_delimiter, :"{"),
+          expected_delimiter: Map.get(details, :expected_delimiter, :"{"),
+          line: Map.get(details, :start_line, line),
+          column: Map.get(details, :start_column, column),
+          end_line: Map.get(details, :end_line, line),
+          end_column: Map.get(details, :end_column, column)
+        ]
+
+      code when code in [:string_missing_terminator, :heredoc_missing_terminator] ->
+        # String/heredoc/sigil missing terminators need delimiter info
+        [
+          opening_delimiter: Map.get(details, :opening_delimiter),
+          expected_delimiter: Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter)),
+          line: Map.get(details, :start_line, line),
+          column: Map.get(details, :start_column, column),
+          end_line: Map.get(details, :end_line, line),
+          end_column: Map.get(details, :end_column, column)
         ]
 
       _ ->
-        [line: 1, column: 1, end_line: 1, end_column: 1]
+        # Most errors: just [line: X, column: Y] to match Elixir
+        base_position
     end
   end
 

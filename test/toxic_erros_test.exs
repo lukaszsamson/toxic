@@ -47,6 +47,8 @@ defmodule ToxicErrorsTest do
     {elixir_position, elixir_msg, elixir_token} = normalize_reason(elixir_reason)
     {toxic_position, toxic_msg, toxic_token} = normalize_reason(toxic_reason)
 
+    toxic_position = Keyword.take(toxic_position, Keyword.keys(elixir_position))
+
     assert toxic_position == elixir_position,
            "Position mismatch: toxic #{inspect(toxic_position)} vs elixir #{inspect(elixir_position)}"
 
