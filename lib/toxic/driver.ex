@@ -1070,6 +1070,19 @@ defmodule Toxic.Driver do
   defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
        when is_list(token_chars) do
     cond do
+      escape_at_eof?(message, def_rest) ->
+        # Backslash-newline or backslash-CRLF at EOF: consume the newline as part of error
+        # so no trailing :eol token is emitted
+        case def_rest do
+          [?\n | new_rest] ->
+            {new_rest, def_line + 1, 1, [], state.scope}
+          [?\r, ?\n | new_rest] ->
+            {new_rest, def_line + 1, 1, [], state.scope}
+          _ ->
+            # Just backslash at EOF, use default
+            {def_rest, def_line, def_col, [], state.scope}
+        end
+
       heredoc_header_error?(message, token_chars) ->
         # Invalid heredoc header: still synthesize an appropriate heredoc end token
         # so downstream sees a balanced structure in tolerant mode.
@@ -1216,10 +1229,16 @@ defmodule Toxic.Driver do
   defp is_delimiter_char?(?#), do: true
   defp is_delimiter_char?(_), do: false
 
+  defp escape_at_eof?(message, rest) do
+    msg = parse_error_message(message)
+    String.starts_with?(msg, "invalid escape") and String.contains?(msg, "at end of file") and
+      (match?([?\n | _], rest) or match?([?\r, ?\n | _], rest))
+  end
+
   defp heredoc_header_error?(message, token_chars) do
     msg = parse_error_message(message)
     starts = String.starts_with?(msg, "heredoc allows only whitespace characters followed by a new line after opening ")
-    starts and (token_chars == [?' , ?', ?'] or token_chars == [?", ?", ?"]) 
+    starts and (token_chars == [?' , ?', ?'] or token_chars == [?", ?", ?"])
   end
 
   defp heredoc_end_from_token_chars([?', ?', ?'] = delim), do: {:list_heredoc_end, delim}
