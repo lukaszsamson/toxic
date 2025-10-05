@@ -72,7 +72,13 @@ defmodule Toxic.Util do
       {:ok, List.to_existing_atom(list)}
     rescue
       ArgumentError ->
-        {:error, {[line: line, column: column], "unsafe atom does not exist: ", list}}
+        {:error,
+         %Toxic.Error{
+           code: :identifier_nonexistent_atom_when_existing_only,
+           domain: :identifier,
+           token_display: list,
+           details: %{line: line, column: column}
+         }}
     end
   end
 

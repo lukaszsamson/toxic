@@ -153,7 +153,13 @@ defmodule Toxic.Identifier do
                 ~c"See https://hexdocs.pm/elixir/unicode-syntax.html for more information."
               )
 
-            {:error, {[line: line, column: wrong_column], ~c"unexpected token: ", message}}
+            {:error,
+             %Toxic.Error{
+               code: :identifier_unexpected_token,
+               domain: :identifier,
+               token_display: message,
+               details: %{line: line, column: wrong_column}
+             }}
 
           _other ->
             :no_suggestion
@@ -169,7 +175,13 @@ defmodule Toxic.Identifier do
             ~c"See https://hexdocs.pm/elixir/unicode-syntax.html for more information."
           )
 
-        {:error, {[line: line, column: wrong_column], ~c"unexpected token: ", message}}
+        {:error,
+         %Toxic.Error{
+           code: :identifier_unexpected_token,
+           domain: :identifier,
+           token_display: message,
+           details: %{line: line, column: wrong_column}
+         }}
     end
   end
 

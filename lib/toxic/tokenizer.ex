@@ -455,7 +455,13 @@ defmodule Toxic.Tokenizer do
 
     case Toxic.Number.tokenize_number(t, [h], 1, false) do
       {:error, reason, original} ->
-        {:error, {[line: line, column: column], reason, original}}
+        err = %Toxic.Error{
+          code: :number_invalid_float,
+          domain: :number,
+          token_display: original,
+          details: %{line: line, column: column, reason_iolist: reason}
+        }
+        {:error, err}
 
       {[i | rest], number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
         if number == 0 and i in [?x, ?0, ?b] and rest == [] and cursor_completion != false do
@@ -491,7 +497,13 @@ defmodule Toxic.Tokenizer do
               ~c"If you meant to write a function name or a variable, note that identifiers in " ++
               ~c"Elixir cannot start with numbers. Unexpected token: "
 
-          {:error, {[line: line, column: column], msg, [i]}}
+          {:error,
+           %Toxic.Error{
+             code: :number_trailing_garbage,
+             domain: :number,
+             token_display: [i],
+             details: %{line: line, column: column, msg_iolist: msg}
+           }}
         end
 
       {rest, number, original, length} when is_integer(number) ->
@@ -525,15 +537,33 @@ defmodule Toxic.Tokenizer do
   end
 
   def tokenize_single(~c"\\" = _original, line, column, _scope, _tokens) do
-    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
+    {:error,
+     %Toxic.Error{
+       code: :string_missing_terminator,
+       domain: :string,
+       token_display: [],
+       details: %{line: line, column: column, escape_at_eof?: true}
+     }}
   end
 
   def tokenize_single(~c"\\\n" = _original, line, column, _scope, _tokens) do
-    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
+    {:error,
+     %Toxic.Error{
+       code: :string_missing_terminator,
+       domain: :string,
+       token_display: [],
+       details: %{line: line, column: column, escape_at_eof?: true}
+     }}
   end
 
   def tokenize_single(~c"\\\r\n" = _original, line, column, _scope, _tokens) do
-    {:error, {[line: line, column: column], ~c"invalid escape \\ at end of file", []}}
+    {:error,
+     %Toxic.Error{
+       code: :string_missing_terminator,
+       domain: :string,
+       token_display: [],
+       details: %{line: line, column: column, escape_at_eof?: true}
+     }}
   end
 
   def tokenize_single([?\\, ?\n | rest], line, _column, scope, _tokens) do
@@ -646,7 +676,13 @@ defmodule Toxic.Tokenizer do
               ~c"invalid character \"@\" (code point U+0040) in " ++
                 to_charlist(to_string(kind)) ++ ~c": "
 
-            {:error, {[line: line, column: column], msg, Atom.to_charlist(atom)}}
+            {:error,
+             %Toxic.Error{
+               code: :identifier_invalid_char,
+               domain: :identifier,
+               token_display: Atom.to_charlist(atom),
+               details: %{line: line, column: column, msg_iolist: msg}
+             }}
 
           _ when atom in [:__aliases__, :__block__] ->
             {:error,
