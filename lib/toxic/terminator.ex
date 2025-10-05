@@ -6,17 +6,13 @@ defmodule Toxic.Terminator do
       when is_atom(alias) do
     {{line, column}, _, _} = meta
 
-    reason =
-      "unexpected ( after alias #{alias}. Function names and identifiers in Elixir " <>
-        "start with lowercase characters or underscore. For example:\n\n" <>
-        "    hello_world()\n" <>
-        "    _starting_with_underscore()\n" <>
-        "    numb3rs_are_allowed()\n" <>
-        "    may_finish_with_question_mark?()\n" <>
-        "    may_finish_with_exclamation_mark!()\n\n" <>
-        "Unexpected token: "
-
-    {:error, {[line: line, column: column], String.to_charlist(reason), [~c"("]}}
+    {:error,
+     %Toxic.Error{
+       code: :alias_unexpected_paren,
+       domain: :alias,
+       token_display: ~c"(",
+       details: %{line: line, column: column, alias: alias}
+     }}
   end
 
   # In elixir_tokenizer this clause is used only in eex
@@ -88,20 +84,18 @@ defmodule Toxic.Terminator do
       expected_end ->
         {{start_line, start_column}, _, _} = start_meta
         {{end_line, end_column}, _, _} = end_meta
-
-        meta = [
-          line: start_line,
-          column: start_column,
-          end_line: end_line,
-          end_column: end_column,
-          error_type: :mismatched_delimiter,
-          opening_delimiter: start_token,
-          closing_delimiter: end_token,
-          expected_delimiter: expected_end
-        ]
-
-        {:error,
-         {meta, unexpected_token_or_reserved(end_token), [String.to_charlist("#{end_token}")]}}
+        err = %Toxic.Error{
+          code: :terminator_mismatched_closer,
+          domain: :terminator,
+          token_display: String.to_charlist("#{end_token}"),
+          position: {{start_line, start_column}, {end_line, end_column}},
+          details: %{
+            opening_delimiter: start_token,
+            closing_delimiter: end_token,
+            expected_delimiter: expected_end
+          }
+        }
+        {:error, err}
     end
   end
 
@@ -123,13 +117,25 @@ defmodule Toxic.Terminator do
           []
       end
 
-    {:error, {[line: line, column: column], {~c"unexpected reserved word: ", suffix}, ~c"end"}}
+    {:error,
+     %Toxic.Error{
+       code: :reserved_unexpected_end,
+       domain: :reserved,
+       token_display: ~c"end",
+       details: %{line: line, column: column, suffix_iolist: suffix}
+     }}
   end
 
   def check_terminator({end_token, meta}, [], _scope)
       when end_token in ~w|) ] } >>|a do
     {{line, column}, _, _} = meta
-    {:error, {[line: line, column: column], ~c"unexpected token: ", [~c"#{end_token}"]}}
+    {:error,
+     %Toxic.Error{
+       code: :terminator_unexpected_closer,
+       domain: :terminator,
+       token_display: String.to_charlist("#{end_token}"),
+       details: %{line: line, column: column}
+     }}
   end
 
   # TODO: report dead code to elixir
