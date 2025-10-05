@@ -1126,13 +1126,13 @@ defmodule ToxicTolerantModeTest do
       types = token_types(tokens)
 
       # Should see:
-      # - begin_interpolation, identifier, (
+      # - begin_interpolation, paren_identifier (foo is before `(`), (
       # - error (missing )), synthetic )
       # - error (missing }), synthetic end_interpolation
       # - error (missing "), synthetic bin_string_end
 
       assert :begin_interpolation in types
-      assert :identifier in types
+      assert :paren_identifier in types
       assert :"(" in types
       assert :")" in types
       assert :end_interpolation in types
@@ -1146,8 +1146,8 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_with_synthesis("foo( + 1")
       types = token_types(tokens)
 
-      # Should have: identifier, (, error, ), +, int
-      assert :identifier in types
+      # Should have: paren_identifier (foo before `(`), (, error, ), +, int
+      assert :paren_identifier in types
       assert :")" in types
       assert :dual_op in types
       assert :int in types

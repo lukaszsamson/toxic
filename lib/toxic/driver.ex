@@ -1070,6 +1070,12 @@ defmodule Toxic.Driver do
   defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
        when is_list(token_chars) do
     cond do
+      invalid_char_error?(message) ->
+        # For invalid character errors (null byte, control chars, etc.), consume only
+        # the single invalid character to avoid merging multiple consecutive invalid
+        # chars into one error. This ensures each invalid char gets its own error token.
+        consume_one(rest, state)
+
       escape_at_eof?(message, def_rest) ->
         # Backslash-newline or backslash-CRLF at EOF: consume the newline as part of error
         # so no trailing :eol token is emitted
@@ -1228,6 +1234,19 @@ defmodule Toxic.Driver do
   defp is_delimiter_char?(cp) when cp in ':<>', do: true
   defp is_delimiter_char?(?#), do: true
   defp is_delimiter_char?(_), do: false
+
+  defp invalid_char_error?(message) do
+    msg = parse_error_message(message)
+    String.starts_with?(msg, "unexpected token:") and
+      (String.contains?(msg, "null byte") or
+       String.contains?(msg, "alert") or
+       String.contains?(msg, "backspace") or
+       String.contains?(msg, "delete") or
+       String.contains?(msg, "escape") or
+       String.contains?(msg, "form feed") or
+       String.contains?(msg, "carriage return") or
+       String.contains?(msg, "vertical tab"))
+  end
 
   defp escape_at_eof?(message, rest) do
     msg = parse_error_message(message)
