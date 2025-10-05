@@ -926,8 +926,9 @@ defmodule Toxic.Driver do
 
   defp emit_pending_error({:missing_interpolation, {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context}, state) do
     reason = missing_interpolation_reason(interp_context, state)
+    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_struct}
 
     inserted = if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
 
@@ -941,8 +942,9 @@ defmodule Toxic.Driver do
 
   defp emit_pending_error({:missing_context, {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context}, state) do
     reason = missing_terminator_reason(interp_context, state)
+    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_struct}
 
     inserted = if state.insert_structural_closers, do: [synthesize_end_for_kind(kind, delim, meta0)], else: []
 
@@ -955,8 +957,9 @@ defmodule Toxic.Driver do
 
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
     reason = missing_scope_terminator_reason(entry, state)
+    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_struct}
 
     # Pop one scope terminator
     scope(terminators: terms) = state.scope
@@ -995,11 +998,12 @@ defmodule Toxic.Driver do
 
   # Phase 1 tolerant mode helpers
   defp emit_error_and_advance(reason, rest, state) do
+    error = case reason do %Toxic.Error{} = e -> e; other -> Toxic.Error.ensure_struct(other) end
     {def_rest, def_line, def_col} = scan_to_sync(rest, state)
 
     # Phase 4: Context-specific minimal recovery (override default scan)
     {new_rest, new_line, new_column, recovery_tokens, scope_after_pre} =
-      adjust_recovery(reason, rest, state, def_rest, def_line, def_col)
+      adjust_recovery(error, rest, state, def_rest, def_line, def_col)
 
     # Separate pre_inserted (before error) from post_inserted (after error)
     {pre_inserted, post_inserted} = Enum.split_with(recovery_tokens, fn
@@ -1018,12 +1022,12 @@ defmodule Toxic.Driver do
       end
 
     error_meta = meta(state.line, state.column, new_line, new_column, nil)
-    error_token = {:error_token, error_meta, reason}
+    error_token = {:error_token, error_meta, error}
 
     # Optionally synthesize structural tokens for delimiter errors
     {synth_side, inserted_struct, scope_after_insert} =
       if state.insert_structural_closers do
-        synthesize_from_reason(reason, %{state | scope: scope_after_pre})
+        synthesize_from_reason(error, %{state | scope: scope_after_pre})
       else
         {:none, [], scope_after_pre}
       end
@@ -1042,7 +1046,7 @@ defmodule Toxic.Driver do
     # even when synthesis is disabled. This preserves expected [:error_token, synthetic_opener?, closer]
     # ordering. Use zero-length meta at the current position to avoid position drift.
     post_actual_closer =
-      case actual_closer_from_reason(reason) do
+      case actual_closer_from_reason(error) do
         nil -> []
         closer_atom -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
@@ -1067,8 +1071,11 @@ defmodule Toxic.Driver do
   end
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
-  defp adjust_recovery({_loc, message, token_chars} = _reason, rest, state, def_rest, def_line, def_col)
-       when is_list(token_chars) do
+  defp adjust_recovery(%Toxic.Error{code: _code} = reason_struct, rest, state, def_rest, def_line, def_col) do
+    # Phase 0 adapter: emulate existing message-based routing using formatted text
+    message = Toxic.Error.format(reason_struct) |> IO.iodata_to_binary()
+    token_chars = List.wrap(reason_struct.token_display)
+
     cond do
       invalid_char_error?(message) ->
         # For invalid character errors (null byte, control chars, etc.), consume only
@@ -1146,9 +1153,6 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp adjust_recovery(_reason, _rest, state, def_rest, def_line, def_col) do
-    {def_rest, def_line, def_col, [], state.scope}
-  end
 
   defp keyword_no_space?(message) do
     msg = parse_error_message(message)
@@ -1198,6 +1202,8 @@ defmodule Toxic.Driver do
         rescue
           _ -> ""
         end
+      bin when is_binary(bin) ->
+        bin
       {part1, part2} ->
         try do
           List.to_string(part1) <> List.to_string(part2)
@@ -1608,34 +1614,30 @@ defmodule Toxic.Driver do
   end
 
   # Phase 2: structural synthesis helpers
-  defp synthesize_from_reason({meta_list, _msg, token_chars}, state) when is_list(meta_list) do
-    case Keyword.get(meta_list, :error_type) do
-      :mismatched_delimiter ->
-        expected = Keyword.get(meta_list, :expected_delimiter)
-        case synthesize_closing(expected, state) do
-          {:ok, tok, new_scope} ->
-            tok = maybe_tag_zero_len(tok, state)
-            {:closer, [tok], new_scope}
-          _ -> {:none, [], state.scope}
-        end
+  defp synthesize_from_reason(%Toxic.Error{code: :terminator_mismatched_closer, details: %{expected_delimiter: expected}} = _err, state) do
+    case synthesize_closing(expected, state) do
+      {:ok, tok, new_scope} ->
+        tok = maybe_tag_zero_len(tok, state)
+        {:closer, [tok], new_scope}
+      _ -> {:none, [], state.scope}
+    end
+  end
 
-      _ ->
-        # Unexpected closer (no error_type) can be inferred from token_chars
-        # Flatten token_chars in case it's wrapped: [~c")"] -> ~c")"
-        flattened_chars = List.flatten(token_chars)
-        case closer_atom_from_chars(flattened_chars) do
+  defp synthesize_from_reason(%Toxic.Error{code: _code, token_display: token_display}, state) do
+    # Unexpected closer (or similar) can be inferred from token chars
+    flattened_chars = List.flatten(List.wrap(token_display))
+    case closer_atom_from_chars(flattened_chars) do
+      nil -> {:none, [], state.scope}
+      closer ->
+        case opening_for_closer(closer) do
           nil -> {:none, [], state.scope}
-          closer ->
-            case opening_for_closer(closer) do
-              nil -> {:none, [], state.scope}
-              opening ->
-                # Insert synthetic opener and push to stack
-                case synthesize_opening(opening, state) do
-                  {:ok, tok, new_scope} ->
-                    tok = maybe_tag_zero_len(tok, state)
-                    {:opener, [tok], new_scope}
-                  _ -> {:none, [], state.scope}
-                end
+          opening ->
+            # Insert synthetic opener and push to stack
+            case synthesize_opening(opening, state) do
+              {:ok, tok, new_scope} ->
+                tok = maybe_tag_zero_len(tok, state)
+                {:opener, [tok], new_scope}
+              _ -> {:none, [], state.scope}
             end
         end
     end
@@ -1682,8 +1684,8 @@ defmodule Toxic.Driver do
   end
 
   # Extract an actual closer atom from an error reason, if present
-  defp actual_closer_from_reason({_meta_list, _msg, token_chars}) when is_list(token_chars) do
-    closer_atom_from_chars(List.flatten(token_chars))
+  defp actual_closer_from_reason(%Toxic.Error{} = err) do
+    closer_atom_from_chars(List.flatten(List.wrap(err.token_display)))
   end
 
   defp actual_closer_from_reason(_), do: nil
