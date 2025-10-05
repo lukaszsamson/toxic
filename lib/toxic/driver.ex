@@ -1099,8 +1099,8 @@ defmodule Toxic.Driver do
   end
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
-  defp adjust_recovery(%Toxic.Error{code: code, details: details} = reason_struct, rest, state, def_rest, def_line, def_col) do
-    # Phase 1.5: Introduce initial code-based routing for common cases, then fallback
+  # Code-based recovery only; no message parsing
+  defp adjust_recovery(%Toxic.Error{code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case code do
       :keyword_missing_space_after_colon ->
         case rest do
@@ -1130,204 +1130,44 @@ defmodule Toxic.Driver do
           {def_rest, def_line, def_col, [], state.scope}
         end
 
-      _ ->
-        # Fallback to legacy message-based routing for remaining cases
-        message = Toxic.Error.format(reason_struct) |> IO.iodata_to_binary()
-        token_chars = List.wrap(reason_struct.token_display)
-
-        cond do
-      invalid_char_error?(message) ->
-        # For invalid character errors (null byte, control chars, etc.), consume only
-        # the single invalid character to avoid merging multiple consecutive invalid
-        # chars into one error. This ensures each invalid char gets its own error token.
-        consume_one(rest, state)
-
-      escape_at_eof?(message, def_rest) ->
-        # Backslash-newline or backslash-CRLF at EOF: consume the newline as part of error
-        # so no trailing :eol token is emitted
-        case def_rest do
-          [?\n | new_rest] ->
-            {new_rest, def_line + 1, 1, [], state.scope}
-          [?\r, ?\n | new_rest] ->
-            {new_rest, def_line + 1, 1, [], state.scope}
-          _ ->
-            # Just backslash at EOF, use default
-            {def_rest, def_line, def_col, [], state.scope}
-        end
-
-      heredoc_header_error?(message, token_chars) ->
-        # Invalid heredoc header: still synthesize an appropriate heredoc end token
-        # so downstream sees a balanced structure in tolerant mode.
-        {end_kind, delim} = heredoc_end_from_token_chars(token_chars)
+      :heredoc_invalid_header ->
         meta_end = meta(state.line, state.column, state.line, state.column, nil)
-        end_token = {end_kind, meta_end, delim, 0}
-        {def_rest, def_line, def_col, [{:post_error, end_token}], state.scope}
+        # Infer end token from delimiter in token_display (already set)
+        end_token =
+          case List.wrap(err.token_display) do
+            [?', ?', ?'] = delim -> {:list_heredoc_end, meta_end, delim, 0}
+            [?", ?", ?"] = delim -> {:bin_heredoc_end, meta_end, delim, 0}
+            _ -> nil
+          end
+        inserts = if end_token, do: [{:post_error, end_token}], else: []
+        {def_rest, def_line, def_col, inserts, state.scope}
 
-      ternary_missing_slash?(rest) ->
-        # Ternary identifier should come AFTER error, but we return it from adjust_recovery
-        # which puts it in pre_inserted. We'll handle this specially below.
-        meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
-        op_token = {:identifier, meta_op, :..//}
-        # Mark with special flag that this should go after error
-        {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
-
-      state.insert_identifier_sanitization and (identifier_sanitization_candidate?(message) or unexpected_identifier_token?(message, rest)) ->
-        # Build sanitized identifier for the erroneous span. Prefer the default
-        # scan window (to sync point) as the span when token_chars isn't reliable
-        # (e.g., identifier suggestions encode message in token_chars).
-        span_chars = take_prefix_until(rest, def_rest)
-        # Fall back to provided token_chars if prefix is empty
-        base_chars = if span_chars == [], do: List.flatten(token_chars), else: span_chars
-        id_token = sanitize_identifier_from_chars(base_chars, state.line, state.column)
-        {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
-
-      keyword_no_space?(message) and match?([?: | _], rest) ->
-        # Consume only ':' so the following identifier is preserved
-        {tl(rest), state.line, state.column + 1, [], state.scope}
-
-      map_expected_error?(message, token_chars) and match?([?% | _], rest) ->
-        # Emit standalone '%' and consume it
-        meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
-        percent_token = {:%, meta_percent}
-        rest_after_percent = tl(rest)
-        {rest_no_ws, l_after, c_after} = consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
-        {rest_no_ws, l_after, c_after, [percent_token], state.scope}
-
-      alias_after_paren?(message, token_chars) and match?([?( | _], rest) ->
-        # Insert '(' opener and consume it, updating the terminator stack
-        case synthesize_opening(:"(", state) do
-          {:ok, tok, new_scope} ->
-            {tl(rest), state.line, state.column + 1, [tok], new_scope}
-          _ ->
-            {tl(rest), state.line, state.column + 1, [], state.scope}
+      code when code in [:identifier_mixed_script, :identifier_unexpected_token, :identifier_invalid_char, :identifier_atom_length_limit, :identifier_nonexistent_atom_when_existing_only] ->
+        if state.insert_identifier_sanitization do
+          span_chars = take_prefix_until(rest, def_rest)
+          id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
+          {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
+        else
+          {def_rest, def_line, def_col, [], state.scope}
         end
 
-      consecutive_semicolons?(rest) ->
-        meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
-        semi_token = {:";", meta_semi}
-        {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
+      _ ->
+        cond do
+          ternary_missing_slash?(rest) ->
+            meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
+            op_token = {:identifier, meta_op, :..//}
+            {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}], state.scope}
+
+          consecutive_semicolons?(rest) ->
+            meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
+            semi_token = {:";", meta_semi}
+            {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
 
           true ->
             {def_rest, def_line, def_col, [], state.scope}
         end
     end
   end
-
-
-  defp keyword_no_space?(message) do
-    msg = parse_error_message(message)
-    String.starts_with?(msg, "keyword argument must be followed by space")
-  end
-
-  defp map_expected_error?(message, token_chars) do
-    msg = parse_error_message(message)
-    token_chars == [?%, ?(] or token_chars == [?%, ?[] or
-      String.starts_with?(msg, "unexpected space between % and {")
-  end
-
-  defp alias_after_paren?(message, token_chars) do
-    # token_chars from Terminator is usually [~c"("]
-    match_paren = (token_chars == [~c"("])
-    msg = parse_error_message(message)
-    match_paren and String.starts_with?(msg, "unexpected ( after alias")
-  end
-
-  defp identifier_sanitization_candidate?(message) do
-    # Only sanitize for explicit identifier/atom errors
-    # Message might be charlist, iodata, or tuple of charlists
-    msg = parse_error_message(message)
-
-    # Intentionally no logging here to keep test output clean
-
-    is_id_error =
-      String.contains?(msg, "mixed script") or
-        String.contains?(msg, "mixed-script") or
-        String.contains?(msg, "confusable") or
-        String.contains?(msg, "NFKC") or
-        String.contains?(msg, "NFC") or
-        String.contains?(msg, "Codepoint failed identifier tokenization") or
-        String.contains?(msg, "Elixir expects unquoted Unicode atoms, variables, and calls") or
-        String.contains?(msg, "atom length must be less") or
-        String.contains?(msg, "unsafe atom does not exist")
-
-    # Sanitize whenever we have an identifier error (do not depend on `rest`)
-    is_id_error
-  end
-
-  defp parse_error_message(message) do
-    case message do
-      l when is_list(l) ->
-        try do
-          List.to_string(l)
-        rescue
-          _ -> ""
-        end
-      bin when is_binary(bin) ->
-        bin
-      {part1, part2} ->
-        try do
-          List.to_string(part1) <> List.to_string(part2)
-        rescue
-          _ -> ""
-        end
-      _ -> ""
-    end
-  end
-
-  defp unexpected_identifier_token?(message, rest) do
-    msg = parse_error_message(message)
-    String.contains?(msg, "unexpected token") and starts_like_identifier?(rest)
-  end
-
-  defp starts_like_identifier?(list) do
-    case :unicode_util.gc(list) do
-      [cluster | _] when is_list(cluster) ->
-        # Treat any non-space cluster that isn't an obvious delimiter as identifier-ish
-        not contains_space?(cluster) and not starts_with_delimiter?(cluster)
-      [codepoint | _] when is_integer(codepoint) ->
-        not is_space(codepoint) and not is_delimiter_char?(codepoint)
-      _ -> false
-    end
-  end
-
-  defp contains_space?(cluster), do: Enum.any?(cluster, &is_space/1)
-
-  defp starts_with_delimiter?([cp | _]), do: is_delimiter_char?(cp)
-  defp starts_with_delimiter?(_), do: false
-
-  defp is_delimiter_char?(cp) when cp in ~c'()[]{}', do: true
-  defp is_delimiter_char?(cp) when cp in ~c':+-*/%=;,.|&^', do: true
-  defp is_delimiter_char?(cp) when cp in ~c':<>', do: true
-  defp is_delimiter_char?(?#), do: true
-  defp is_delimiter_char?(_), do: false
-
-  defp invalid_char_error?(message) do
-    msg = parse_error_message(message)
-    String.starts_with?(msg, "unexpected token:") and
-      (String.contains?(msg, "null byte") or
-       String.contains?(msg, "alert") or
-       String.contains?(msg, "backspace") or
-       String.contains?(msg, "delete") or
-       String.contains?(msg, "escape") or
-       String.contains?(msg, "form feed") or
-       String.contains?(msg, "carriage return") or
-       String.contains?(msg, "vertical tab"))
-  end
-
-  defp escape_at_eof?(message, rest) do
-    msg = parse_error_message(message)
-    String.starts_with?(msg, "invalid escape") and String.contains?(msg, "at end of file") and
-      (match?([?\n | _], rest) or match?([?\r, ?\n | _], rest))
-  end
-
-  defp heredoc_header_error?(message, token_chars) do
-    msg = parse_error_message(message)
-    starts = String.starts_with?(msg, "heredoc allows only whitespace characters followed by a new line after opening ")
-    starts and (token_chars == [?' , ?', ?'] or token_chars == [?", ?", ?"])
-  end
-
-  defp heredoc_end_from_token_chars([?', ?', ?'] = delim), do: {:list_heredoc_end, delim}
-  defp heredoc_end_from_token_chars([?", ?", ?"] = delim), do: {:bin_heredoc_end, delim}
 
   defp sanitize_identifier_from_chars(chars, line, col) do
     # Normalize original erroneous identifier and build ASCII-friendly skeleton
