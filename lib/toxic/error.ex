@@ -164,6 +164,10 @@ defmodule Toxic.Error do
     [base, suffix]
   end
 
+  def format(%__MODULE__{code: :interpolation_not_allowed_in_quoted_identifier}) do
+    ~c"interpolation is not allowed when calling function/macro. Found interpolation in a call starting with: "
+  end
+
   def format(%__MODULE__{code: :keyword_missing_space_after_colon}) do
     ~c"keyword argument must be followed by space after: "
   end
@@ -181,8 +185,19 @@ defmodule Toxic.Error do
     ]
   end
 
-  def format(%__MODULE__{code: :reserved_unexpected_end}) do
-    ~c"unexpected reserved word: end"
+  def format(%__MODULE__{code: :reserved_unexpected_end, token_display: ~c"do", details: d}) do
+    # Special extended help for stray do (non-fn case)
+    suffix = Map.get(d, :help_iolist, [])
+    {~c"unexpected reserved word: ", suffix}
+  end
+
+  def format(%__MODULE__{code: :reserved_unexpected_end, details: d}) do
+    # Check for help text (e.g., indentation hint for "end")
+    case Map.get(d, :help_iolist) do
+      nil -> ~c"unexpected reserved word: end"
+      [] -> ~c"unexpected reserved word: end"
+      help -> {~c"unexpected reserved word: ", help}
+    end
   end
 
   def format(%__MODULE__{code: :heredoc_invalid_header, details: %{delim: delim} = d}) do
@@ -194,8 +209,21 @@ defmodule Toxic.Error do
     end
   end
 
-  def format(%__MODULE__{code: :alias_unexpected_paren}) do
-    ~c"unexpected ( after alias"
+  def format(%__MODULE__{code: :alias_unexpected_paren, details: d}) do
+    alias_name = Map.get(d, :alias, "")
+    alias_str = if alias_name != "", do: " #{alias_name}", else: ""
+
+    [
+      ~c"unexpected ( after alias",
+      String.to_charlist(alias_str),
+      ~c". Function names and identifiers in Elixir start with lowercase characters or underscore. For example:\n\n",
+      ~c"    hello_world()\n",
+      ~c"    _starting_with_underscore()\n",
+      ~c"    numb3rs_are_allowed()\n",
+      ~c"    may_finish_with_question_mark?()\n",
+      ~c"    may_finish_with_exclamation_mark!()\n\n",
+      ~c"Unexpected token: "
+    ]
   end
 
   def format(%__MODULE__{code: :alias_invalid_character, details: d, token_display: _tok}) do
@@ -268,13 +296,12 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: d}) do
     # Message uses tuple {prefix, help}
-    {~c"unexpected reserved word: ", Map.get(d, :help_iolist, [])}
-  end
-
-  def format(%__MODULE__{code: :reserved_unexpected_end, token_display: ~c"do", details: d}) do
-    # Special extended help for stray do (non-fn case)
-    suffix = Map.get(d, :help_iolist, [])
-    {~c"unexpected reserved word: ", suffix}
+    # Note: help_iolist may incorrectly contain the full tuple from producer; extract second element if so
+    help = case Map.get(d, :help_iolist, []) do
+      {_prefix, actual_help} -> actual_help
+      other -> other
+    end
+    {~c"unexpected reserved word: ", help}
   end
 
   def format(%__MODULE__{code: :unexpected_token, token_display: tok}) do
@@ -283,6 +310,14 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :identifier_nonexistent_atom_when_existing_only}) do
     ~c"unsafe atom does not exist: "
+  end
+
+  def format(%__MODULE__{code: :identifier_unexpected_token}) do
+    ~c"unexpected token: "
+  end
+
+  def format(%__MODULE__{code: :identifier_atom_length_limit}) do
+    ~c"atom length must be less than system limit: "
   end
 
   def format(%__MODULE__{}) do
@@ -301,7 +336,7 @@ defmodule Toxic.Error do
     message =
       case error.code do
         :keyword_do_with_fn_invalid -> format(error)
-        :reserved_unexpected_end -> {~c"unexpected reserved word: ", Map.get(error.details, :suffix_iolist, [])}
+        :reserved_unexpected_end -> format(error)
         _ -> format(error)
       end
 
@@ -311,9 +346,12 @@ defmodule Toxic.Error do
         :terminator_mismatched_closer -> List.wrap(error.token_display)
         :terminator_unexpected_closer -> List.wrap(error.token_display)
         :interpolation_missing_terminator -> []
+        :interpolation_not_allowed_in_quoted_identifier -> List.wrap(error.token_display)
         :reserved_unexpected_end -> List.wrap(error.token_display)
         :string_missing_terminator -> []
         :heredoc_invalid_header -> List.wrap(error.token_display)
+        :keyword_missing_space_after_colon -> List.wrap(error.token_display)
+        :keyword_do_with_fn_invalid -> List.wrap(error.token_display)
         :comment_invalid_bidi -> List.wrap(error.token_display)
         :comment_invalid_linebreak -> List.wrap(error.token_display)
         :sigil_invalid_name -> List.wrap(error.token_display)
@@ -324,6 +362,8 @@ defmodule Toxic.Error do
         :number_invalid_float -> List.wrap(error.token_display)
         :identifier_mixed_script -> List.wrap(error.token_display)
         :identifier_invalid_char -> List.wrap(error.token_display)
+        :identifier_unexpected_token -> List.wrap(error.token_display)
+        :identifier_atom_length_limit -> List.wrap(error.token_display)
         :identifier_nonexistent_atom_when_existing_only -> List.wrap(error.token_display)
         :alias_invalid_character -> List.wrap(error.token_display)
         :alias_unexpected_paren -> List.wrap(error.token_display)
@@ -381,6 +421,9 @@ defmodule Toxic.Error do
 
         message_starts_with?(message, "invalid float number") ->
           :number_invalid_float
+
+        message_starts_with?(message, "atom length must be less than system limit:") ->
+          :identifier_atom_length_limit
 
         true ->
           :syntax_error
@@ -505,6 +548,13 @@ defmodule Toxic.Error do
           end_column: Map.get(details, :end_column, column)
         ]
 
+      :interpolation_not_allowed_in_quoted_identifier ->
+        # Use start_line and start_column from details (position of interpolation start)
+        [
+          line: Map.get(details, :start_line, line),
+          column: Map.get(details, :start_column, column)
+        ]
+
       _ ->
         # Most errors: just [line: X, column: Y] to match Elixir
         base_position
@@ -560,7 +610,7 @@ defmodule Toxic.Error do
   # defp infer_domain(:identifier_nfkc_needed), do: :identifier
   # defp infer_domain(:identifier_unexpected_token), do: :identifier
   # defp infer_domain(:identifier_invalid_char), do: :identifier
-  # defp infer_domain(:identifier_atom_length_limit), do: :identifier
+  defp infer_domain(:identifier_atom_length_limit), do: :identifier
   # defp infer_domain(:identifier_nonexistent_atom_when_existing_only), do: :identifier
   # defp infer_domain(:alias_invalid_character), do: :alias
   defp infer_domain(:alias_unexpected_paren), do: :alias
