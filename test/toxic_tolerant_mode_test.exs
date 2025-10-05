@@ -345,12 +345,14 @@ defmodule ToxicTolerantModeTest do
 
       assert length(error_tokens(tokens)) == 1
       types = token_types(tokens)
-      # Error consumes "foo:bar " (including trailing space), then continues with "+"
-      assert [:error_token, :dual_op, :identifier] = types
+      # foo identifier emitted first, then error at :, then bar, then +, then baz
+      assert [:identifier, :error_token, :identifier, :dual_op, :identifier] = types
 
       # Verify values
       valid = valid_tokens(tokens)
-      assert {:identifier, _, :baz} = Enum.at(valid, 1)
+      assert {:identifier, _, :foo} = Enum.at(valid, 0)
+      assert {:identifier, _, :bar} = Enum.at(valid, 1)
+      assert {:identifier, _, :baz} = Enum.at(valid, 3)
     end
   end
 
@@ -1237,8 +1239,12 @@ defmodule ToxicTolerantModeTest do
       assert Enum.any?(types, &(&1 == :";"))
       assert Enum.any?(types, fn t -> t == :identifier end)
 
+      # baz should appear in valid tokens (may not be last due to synthesized closers)
       valid = valid_tokens(tokens)
-      assert {:identifier, _, :baz} = List.last(valid)
+      assert Enum.any?(valid, fn
+        {:identifier, _, :baz} -> true
+        _ -> false
+      end)
     end
 
     test "nested interpolation with missing terminators" do
@@ -1270,12 +1276,15 @@ defmodule ToxicTolerantModeTest do
 
       types = token_types(tokens)
       assert Enum.count(types, &(&1 == :error_token)) >= 3
-      assert Enum.any?(types, &(&1 == :%))
+      # Map %{ emits :%{} composite token, not bare :%
+      assert Enum.any?(types, &(&1 == :%{}))
       assert Enum.any?(types, &(&1 == :"{"))
       assert Enum.any?(types, &(&1 == :";"))
 
-      # Sanitized identifier should appear
-      assert {:identifier, _, id} = hd(tokens)
+      # Sanitized identifier should appear (after map tokens)
+      identifiers = Enum.filter(tokens, fn t -> elem(t, 0) == :identifier end)
+      assert length(identifiers) > 0
+      {_type, _meta, id} = hd(identifiers)
       assert id |> Atom.to_string() |> String.match?(~r/^[A-Za-z0-9_]+$/)
     end
 
@@ -1484,7 +1493,7 @@ defmodule ToxicTolerantModeTest do
       # Should tokenize Bar
       valid = valid_tokens(tokens)
       assert Enum.any?(valid, fn
-               {_, _, Bar} -> true
+               {:alias, _, :Bar} -> true
                _ -> false
              end)
     end

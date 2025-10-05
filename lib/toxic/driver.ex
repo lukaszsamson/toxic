@@ -1108,20 +1108,31 @@ defmodule Toxic.Driver do
     # actual closer token after any synthesized tokens so the stream includes it
     # even when synthesis is disabled. This preserves expected [:error_token, synthetic_opener?, closer]
     # ordering. Use zero-length meta at the current position to avoid position drift.
+    # Exception: for unexpected end, we already consumed it in recovery, so don't emit it here.
     post_actual_closer =
-      case actual_closer do
-        nil -> []
-        closer_atom -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+      case {error.code, actual_closer} do
+        {:reserved_unexpected_end, _} -> []
+        {_, nil} -> []
+        {_, closer_atom} -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 
     # If the error span crossed a newline, drop any deferred :eol to avoid
     # emitting a stale end-of-line prior to the error token.
+    # Also drop :end tokens when error is unexpected end.
     deferrals_to_emit =
       if new_line > state.line do
         Enum.reject(state.deferrals, fn tok -> elem(tok, 0) == :eol end)
       else
         state.deferrals
       end
+      |> then(fn defs ->
+        # Remove :end token if error is unexpected end
+        if match?(%Toxic.Error{code: :reserved_unexpected_end}, error) do
+          Enum.reject(defs, fn tok -> elem(tok, 0) == :end end)
+        else
+          defs
+        end
+      end)
 
     # Flush deferrals BEFORE error to preserve ordering; merge synthesized tokens on proper sides
     # Order: deferrals + pre_inserted + pre_synth + error + post_inserted + post_synth
@@ -1174,12 +1185,14 @@ defmodule Toxic.Driver do
         end
 
       {:vc, :vc_merge_conflict_marker} ->
-        # Consume the newline at end of the conflict marker line so the error
-        # span covers the whole line and does not emit a stale :eol before it.
-        case def_rest do
-          [?\n | new_rest] -> {new_rest, state.line + 1, 1, [], state.scope}
-          [?\r, ?\n | new_rest] -> {new_rest, state.line + 1, 1, [], state.scope}
-          _ -> {def_rest, def_line, def_col, [], state.scope}
+        # Consume the entire conflict marker line including the newline.
+        # scan_to_sync may have stopped at whitespace, so we need to scan forward to find the newline.
+        case consume_until_newline(def_rest) do
+          {new_rest, consumed_newline?} when consumed_newline? ->
+            {new_rest, state.line + 1, 1, [], state.scope}
+          _ ->
+            # No newline found (EOF on same line), use def_rest as-is
+            {def_rest, def_line, def_col, [], state.scope}
         end
 
       {_, :unexpected_token} ->
@@ -1351,6 +1364,11 @@ defmodule Toxic.Driver do
 
   defp consecutive_semicolons?([?;, ?; | _]), do: true
   defp consecutive_semicolons?(_), do: false
+
+  defp consume_until_newline([?\n | rest]), do: {rest, true}
+  defp consume_until_newline([?\r, ?\n | rest]), do: {rest, true}
+  defp consume_until_newline([_ | rest]), do: consume_until_newline(rest)
+  defp consume_until_newline([]), do: {[], false}
 
   defp consume_leading_spaces(rest, line, column) do
     consume_leading_spaces(rest, line, column, 0)
