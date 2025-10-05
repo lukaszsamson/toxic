@@ -1064,23 +1064,43 @@ defmodule Toxic.Driver do
         {:none, [], scope_after_pre}
       end
 
+    # For mismatched closers, also synthesize an opener for the actual closer
+    # so the stream shows `(:)`. We'll pop it immediately after emitting the
+    # actual closer below to keep the stack balanced.
+    actual_closer = actual_closer_from_reason(error)
+    {extra_synth_openers, scope_after_extra} =
+      case {error.code, actual_closer} do
+        {:terminator_mismatched_closer, closer} when closer != nil ->
+          case opening_for_closer(closer) do
+            nil -> {[], scope_after_insert}
+            opening ->
+              case synthesize_opening(opening, %{state | scope: scope_after_insert}) do
+                {:ok, tok, new_scope} ->
+                  tok = maybe_tag_zero_len(tok, state)
+                  {[tok], new_scope}
+                _ -> {[], scope_after_insert}
+              end
+          end
+        _ -> {[], scope_after_insert}
+      end
+
     scope_for_state =
-      if synth_side == :opener do
-        # This is the "unexpected closer" case. We just synthesized an opener
-        # and are about to emit the actual closer. Pop the synthetic opener
-        # immediately to keep the stack balanced for subsequent EOF checks.
-        scope(terminators: [_ | popped_terms]) = scope_after_insert
-        scope(scope_after_insert, terminators: popped_terms)
+      if synth_side == :opener or extra_synth_openers != [] do
+        # Pop one opener we just pushed (either from unexpected closer case,
+        # or the extra opener synthesized for mismatched closer).
+        scope(terminators: [_ | popped_terms]) = scope_after_extra
+        scope(scope_after_extra, terminators: popped_terms)
       else
-        scope_after_insert
+        scope_after_extra
       end
 
     {pre_synth, post_synth} =
       case synth_side do
         # For unexpected closers, synthesize opener AFTER error (per finalized plan/tests)
-        :opener -> {[], inserted_struct}
-        # For mismatches/missing closers, synthesize closer AFTER error
-        :closer -> {[], inserted_struct}
+        :opener -> {[], inserted_struct ++ extra_synth_openers}
+        # For mismatches/missing closers, synthesize closer AFTER error,
+        # and also include any extra synthesized opener for the actual closer
+        :closer -> {[], inserted_struct ++ extra_synth_openers}
         _ -> {[], []}
       end
 
@@ -1089,7 +1109,7 @@ defmodule Toxic.Driver do
     # even when synthesis is disabled. This preserves expected [:error_token, synthetic_opener?, closer]
     # ordering. Use zero-length meta at the current position to avoid position drift.
     post_actual_closer =
-      case actual_closer_from_reason(error) do
+      case actual_closer do
         nil -> []
         closer_atom -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
