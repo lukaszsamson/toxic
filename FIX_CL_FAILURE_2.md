@@ -8,3 +8,15 @@
 
   We likely need to include the newline in scan_to_sync’s default result for this error (so def_rest begins at the
   newline), or detect the case where newline remains in rest and handle it similarly.
+
+
+  Implemented consuming the reserved word end during recovery:
+  • In adjust_recovery/6, added a {:reserved, :reserved_unexpected_end} case that:
+    • Eats end from rest; if followed by \n or \r\n, it advances to the next line and column 1; otherwise advances
+      column by 3.
+    • Returns no inserted tokens and the same scope.
+
+  Test impact:
+  • The “unexpected end with continuation” test now no longer emits a standalone :end token, but still shows :end in
+    the sequence for one variant; full suite remains at 13 failures. Further tuning may be needed around where the
+    :end token is being emitted from deferrals vs. direct tokenization.

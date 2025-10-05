@@ -1127,6 +1127,15 @@ defmodule Toxic.Driver do
   # Code-based recovery only; no message parsing
   defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case {domain, code} do
+      {:reserved, :reserved_unexpected_end} ->
+        # Consume the "end" keyword and an immediate newline if present
+        case rest do
+          [?e, ?n, ?d, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
+          [?e, ?n, ?d, ?\r, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
+          [?e, ?n, ?d | tail] -> {tail, state.line, state.column + 3, [], state.scope}
+          _ -> {def_rest, def_line, def_col, [], state.scope}
+        end
+
       {:alias, :alias_unexpected_paren} ->
         case rest do
           [?( | tail] ->
