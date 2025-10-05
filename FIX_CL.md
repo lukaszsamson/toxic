@@ -404,3 +404,57 @@ Likely related to P0.1 greedy scan issue.
 - Some failures may be related (e.g., string continuation may be fixed by greedy scan fix)
 
 **Next Steps**: Implement P0.3 first (safest change), then P0.1, then reassess test results before proceeding.
+
+---
+
+## Addendum: Gaps Found + Plan Updates (post-run review)
+
+This addendum refines the plan based on the current `lib/toxic/driver.ex` behavior and the exact test failures seen in `test/toxic_tolerant_mode_test.exs`.
+
+### A. Missing “token-start” stop heuristic (new P0 requirement)
+- Problem: `do_scan_to_sync/3` only stops at `;`, newline, closer, comma, `#`, or whitespace. It does not stop at the next token start, causing valid tokens to be swallowed (e.g., `foo\rbar` drops `bar`; `<<0...>>ok` drops `ok`).
+- Action: Add stop conditions for token starts and for another invalid/control char:
+  - identifier start: `A..Z | a..z | _`
+  - number start: `0..9`
+  - openers: `(`, `[`, `{`, `<<`
+  - atom start: `:`
+  - another invalid/control char (e.g., `\0`) – stop to allow a new error
+- Impact: Unblocks “continuation after errors” and “forward progress reaches EOF” tests.
+
+### B. Remove direct emission of actual closers (confirm P0.3)
+- Verified cause: `emit_error_and_advance/3` appends `post_actual_closer` directly to `output`. This bypasses stack updates and leaves a synthetic opener unmatched, leading to an extra EOF “missing closer” error.
+- Action: Remove `post_actual_closer` emission. Leave the closer in `new_rest` so it is processed by normal tokenization and the stack is updated.
+- Impact: Fixes duplicate-error scenarios for unexpected closers and removes stray EOF errors.
+
+### C. Alias followed by `(` ordering (new P0.5)
+- Problem: For `Foo(1 + 2)`, tests expect `[:alias, :"(", :error_token, ...]`. Current recovery emits the error but does not ensure `"("` appears before the error.
+- Action: In `adjust_recovery/6`, add a case for `:alias_unexpected_paren` that inserts `:"("` as a pre-error token (zero-length meta). Keep the actual `"("` in `new_rest` so it is also seen by the tokenizer.
+- Impact: Fixes ordering in “unexpected token after alias” tests.
+
+### D. EOL deferral cleanup when newline is in error span (confirm P1.2)
+- Problem: When an error consumes a newline (e.g., VC conflict marker line), a deferred `:eol` can be incorrectly emitted before the error.
+- Action: If `new_line > state.line`, drop any `:eol` from deferrals before building `new_output`.
+- Impact: Stops spurious `:eol` in continuation tests.
+
+### E. Tighten minimal-progress fallback (refine P0.1)
+- Problem: Fallback currently consumes one grapheme but returns the full `new_rest`, making the error span ambiguous and occasionally over-broad.
+- Action: Keep the span to exactly one grapheme by returning `{rest, advanced_line, advanced_col}` (not `new_rest`) so the error meta end is precise without swallowing subsequent tokens.
+
+### F. Strings/interpolation character errors (clarify P2.1)
+- Problem: After string char errors (bidi/break), continuation (`+ 1`) should still be tokenized.
+- Action: With the improved stop-heuristics, rely on `stop_at_closer?/2` (already implemented) to stop at the string/atom/sigil closer. Ensure the fallback does not pre-consume the closer so the next step can close the context and continue.
+
+### G. Updated Implementation Order
+1) Remove duplicate closer emission (P0.3)
+2) Add token-start/invalid-char stop + tighten fallback (P0.1)
+3) Multiple consecutive errors via new stop rules (P0.2)
+4) Alias `(` pre-insert in `adjust_recovery/6` (P0.5)
+5) Consume `end` in recovery (P1.1)
+6) Clear `:eol` when newline is in error span (P1.2)
+7) Keyword spacing pre-error emission (P0.4)
+8) Atom end token type audit (P1.3)
+9) Mismatched closer synthesis audit (P1.4)
+10) String continuation validation (P2.1)
+11) Complex ordering + map follow-ups (P2.2/P2.3)
+
+These changes align the plan with `@TOLERANT_MODE_GPT.md` and `@TOLERANT_FINISH_PLAN.md`, while covering uncovered areas surfaced by the current failures.
