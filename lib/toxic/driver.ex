@@ -1127,6 +1127,23 @@ defmodule Toxic.Driver do
   # Code-based recovery only; no message parsing
   defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case {domain, code} do
+      {:alias, :alias_unexpected_paren} ->
+        case rest do
+          [?( | tail] ->
+            # Pre-insert "(" token before error and consume it from input.
+            meta_paren = meta(state.line, state.column, state.line, state.column + 1, nil)
+            paren_token = {:"(", meta_paren}
+
+            # Also push the opening paren onto the terminator stack so the
+            # subsequent ")" is properly matched by normal tokenization.
+            {:ok, _tok, new_scope} = synthesize_opening(:"(", state)
+
+            {tail, state.line, state.column + 1, [paren_token], new_scope}
+
+          _ ->
+            {def_rest, def_line, def_col, [], state.scope}
+        end
+
       {:vc, :vc_merge_conflict_marker} ->
         # Consume the newline at end of the conflict marker line so the error
         # span covers the whole line and does not emit a stale :eol before it.
