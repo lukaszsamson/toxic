@@ -34,26 +34,31 @@ defmodule Toxic.Identifier do
         end
 
       {:error, {:mixed_script, wrong, {prefix, suffix}}} ->
+        # Elixir behavior: reports END position if confusable exists, START otherwise
+        # Check if a confusable/simpler form exists to determine position
         wrong_column = column + length(wrong) - 1
 
-        case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
-          {:error, %Toxic.Error{} = err} ->
-            # Merge suffix into message using existing error format fields
-            {:error, err}
+        has_suggestion? =
+          case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
+            {:error, %Toxic.Error{}} -> true
+            :no_suggestion -> false
+          end
 
-          :no_suggestion ->
-            message_suffix =
-              suffix ++
-                ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+        # Use END position if suggestion exists, START otherwise (matching Elixir)
+        error_column = if has_suggestion?, do: wrong_column, else: column
 
-            err = %Toxic.Error{
-              code: :identifier_mixed_script,
-              domain: :identifier,
-              token_display: wrong,
-              details: %{line: line, column: column, message_prefix: prefix, message_suffix: message_suffix}
-            }
-            {:error, err}
-        end
+        # Always preserve :identifier_mixed_script code, even with suggestion
+        message_suffix =
+          suffix ++
+            ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+
+        err = %Toxic.Error{
+          code: :identifier_mixed_script,
+          domain: :identifier,
+          token_display: wrong,
+          details: %{line: line, column: error_column, message_prefix: prefix, message_suffix: message_suffix}
+        }
+        {:error, err}
 
       {:error, {:unexpected_token, wrong}} ->
         wrong_column = column + length(wrong) - 1

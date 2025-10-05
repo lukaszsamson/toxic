@@ -192,11 +192,11 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :reserved_unexpected_end, details: d}) do
-    # Check for help text (e.g., indentation hint for "end")
-    case Map.get(d, :help_iolist) do
+    # Check for suffix (e.g., indentation hint for "end")
+    case Map.get(d, :suffix_iolist) do
       nil -> ~c"unexpected reserved word: end"
       [] -> ~c"unexpected reserved word: end"
-      help -> {~c"unexpected reserved word: ", help}
+      suffix -> {~c"unexpected reserved word: ", suffix}
     end
   end
 
@@ -617,7 +617,6 @@ defmodule Toxic.Error do
   # defp infer_domain(:reserved_token_used), do: :reserved
   # defp infer_domain(:number_trailing_garbage), do: :number
   defp infer_domain(:number_invalid_float), do: :number
-  defp infer_domain(:alias_invalid_character), do: :alias
   # defp infer_domain(:encoding_invalid), do: :encoding
   # defp infer_domain(:comment_invalid_bidi), do: :comment
   # defp infer_domain(:comment_invalid_linebreak), do: :comment
