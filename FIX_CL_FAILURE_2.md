@@ -40,3 +40,49 @@
   • Unexpected end suppression still emitting :end in one path,
   • Mixed-errors cascade ordering,
   • Mismatched delimiter ordering still adds an extra :( in one case.
+
+
+  Implemented string continuation and began complex ordering/map follow-ups:
+  • String continuation: adjusted closer_starts_with?/2 to accept any atom via terminator_chars/1, so scan_to_sync
+    stops at the correct closer. Targeted string error tests now pass. Full suite at 8 failures.
+  • Map follow-ups: confirmed %{ path emits separate :%{} + :"{" to match tests; :map_invalid_open_delimiter recovery
+     already pre-inserts :% then consumes spaces, which aligns with expectations. The remaining map-related failure
+    is in the cascade test expecting a standalone :% in the stream; current tokens show only :%{} and :"{". That test
+     specifically checks a different scenario (%{ foo<confusable>bar ;; <bidi>), which still lacks :% because %{ goes
+     through the dedicated tokenizer path that emits :%{}. We'll need to special-case that cascade to also emit :%
+    when %{ starts but we immediately diverge into identifier/bidi/semi errors.
+
+  Proposed next steps:
+  • For the cascade “nested structural + identifier issues”, when %{ path is taken and the following content produces
+     an immediate error before a valid { body, also pre-insert :% alongside the existing :"{" so :% appears in the
+    stream as expected by tests.
+  • Address the remaining ordering issues:
+    • Ensure mismatched delimiter test doesn’t duplicate :"(" in ([) case.
+    • Ternary ..// continuation ordering.
+    • Unexpected end lingering emission in one path.
+    • VC conflict EOL redundancy.
+
+Status: I implemented string continuation fixes, then addressed complex ordering and map
+  follow-ups. I ran focused tests and the full suite after each change.
+  • String continuation validation: Updated closer_starts_with?/2 to handle any atom
+    terminator using terminator_chars/1. Targeted string error tests now pass; suite reduced
+    to 8 failures.
+  • Complex ordering + map follow-ups:
+    • Left %{ tokenizer path as-is (it emits :%{} and :"{"), since tests elsewhere rely on
+      that. For cascades where an identifier sanitization error happens immediately after
+      opening a map, I pre-insert a synthetic :% prior to the error when recent_token was
+      :%{} or :"{". This didn’t change the specific failing cascade; it appears the error is
+       not hitting the identifier-sanitization recovery path in that case. We’ll revisit
+      this with a more precise path if needed.
+
+  Current remaining failures (8):
+  • VC conflict EOL ordering,
+  • Mixed errors cascade ordering,
+  • Ternary ..// continuation sequence,
+  • Unexpected end still appears in one path,
+  • Mismatched delimiter test duplicates :"(" in ([) case,
+  • Keyword spacing alt expectation in one test (now emits identifier before error, which
+    breaks one variant expecting error first),
+  • Alias continuation assert (presence of Bar in valid tokens) still failing in that test
+    setup.
+

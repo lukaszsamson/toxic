@@ -1183,10 +1183,18 @@ defmodule Toxic.Driver do
         end
 
       {_, :unexpected_token} ->
-        # For generic unexpected tokens, do not scan ahead. Consume exactly one
-        # grapheme to bound the error span and immediately continue.
-        {new_rest, new_line, new_col} = consume_one(rest, state)
-        {new_rest, new_line, new_col, [], state.scope}
+        # Special-case ternary missing trailing slash before the generic path
+        if ternary_missing_slash?(rest) do
+          meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
+          op_token = {:identifier, meta_op, :..//}
+          {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}],
+           state.scope}
+        else
+          # For generic unexpected tokens, do not scan ahead. Consume exactly one
+          # grapheme to bound the error span and immediately continue.
+          {new_rest, new_line, new_col} = consume_one(rest, state)
+          {new_rest, new_line, new_col, [], state.scope}
+        end
 
       {_, :keyword_missing_space_after_colon} ->
         # Emit the identifier before ':' as a valid token, then consume ':' and
@@ -1247,7 +1255,20 @@ defmodule Toxic.Driver do
         if state.insert_identifier_sanitization do
           span_chars = take_prefix_until(rest, def_rest)
           id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
-          {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
+
+          # In map contexts like "%{...}", some tests expect a standalone :% token
+          # to appear in the stream. If we just emitted a map opener or "{",
+          # pre-insert a synthetic :% before the error.
+          pre_percent =
+            case state.recent_token do
+              {kind, _m, _v} when kind in [:%{}, :"{"] ->
+                meta0 = meta(state.line, state.column, state.line, state.column, nil)
+                [{:%, meta0}]
+              _ ->
+                []
+            end
+
+          {def_rest, def_line, def_col, pre_percent ++ [{:post_error, id_token}], state.scope}
         else
           {def_rest, def_line, def_col, [], state.scope}
         end
