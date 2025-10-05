@@ -169,10 +169,9 @@ defmodule Toxic.Error do
     ~c"unexpected ( after alias"
   end
 
-  def format(%__MODULE__{code: :number_trailing_garbage}) do
-    Map.get(%{}, :noop, nil)
-    # For this code we preserve prebuilt message in details
-    Map.get(:erlang.map_get(:details, %{}), :msg_iolist)
+  def format(%__MODULE__{code: :number_trailing_garbage, details: d}) do
+    # Use prebuilt message captured at error site; fallback to generic
+    Map.get(d, :msg_iolist, ~c"invalid character after number")
   end
 
   def format(%__MODULE__{code: :number_invalid_float}) do
