@@ -1094,11 +1094,20 @@ defmodule Toxic.Driver do
         closer_atom -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 
+    # If the error span crossed a newline, drop any deferred :eol to avoid
+    # emitting a stale end-of-line prior to the error token.
+    deferrals_to_emit =
+      if new_line > state.line do
+        Enum.reject(state.deferrals, fn tok -> elem(tok, 0) == :eol end)
+      else
+        state.deferrals
+      end
+
     # Flush deferrals BEFORE error to preserve ordering; merge synthesized tokens on proper sides
     # Order: deferrals + pre_inserted + pre_synth + error + post_inserted + post_synth
     new_output =
       state.output ++
-        Enum.reverse(state.deferrals) ++
+        Enum.reverse(deferrals_to_emit) ++
         pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth ++ post_actual_closer
 
     new_state = %{
@@ -1118,6 +1127,15 @@ defmodule Toxic.Driver do
   # Code-based recovery only; no message parsing
   defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case {domain, code} do
+      {:vc, :vc_merge_conflict_marker} ->
+        # Consume the newline at end of the conflict marker line so the error
+        # span covers the whole line and does not emit a stale :eol before it.
+        case def_rest do
+          [?\n | new_rest] -> {new_rest, state.line + 1, 1, [], state.scope}
+          [?\r, ?\n | new_rest] -> {new_rest, state.line + 1, 1, [], state.scope}
+          _ -> {def_rest, def_line, def_col, [], state.scope}
+        end
+
       {_, :unexpected_token} ->
         # For generic unexpected tokens, do not scan ahead. Consume exactly one
         # grapheme to bound the error span and immediately continue.
