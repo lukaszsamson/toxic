@@ -1048,51 +1048,52 @@ defmodule Toxic.Driver do
     error_meta = meta(state.line, state.column, new_line, new_column, nil)
     error_token = {:error_token, error_meta, error}
 
-    # Optionally synthesize structural tokens for delimiter errors
+    # Optionally synthesize structural tokens for delimiter errors.
+    # Always compute proposal, but only keep it if appropriate:
+    # - Keep synthesized closers for mismatches even when insert_structural_closers is false
+    # - Keep synthesized openers for unexpected closers only when flag is true
+    {synth_side_all, inserted_all, scope_after_all} =
+      synthesize_from_reason(error, %{state | scope: scope_after_pre})
+
+    keep_synth =
+      case synth_side_all do
+        :closer -> true
+        :opener -> state.insert_structural_closers
+        _ -> false
+      end
+
     {synth_side, inserted_struct, scope_after_insert} =
-      if state.insert_structural_closers do
-        synthesize_from_reason(error, %{state | scope: scope_after_pre})
+      if keep_synth do
+        {synth_side_all, inserted_all, scope_after_all}
       else
         {:none, [], scope_after_pre}
       end
 
-    # For mismatched closers, also synthesize an opener for the actual closer
-    # so the stream shows `(:)`. We'll pop it immediately after emitting the
-    # actual closer below to keep the stack balanced.
+    # Decide final scope updates
     actual_closer = actual_closer_from_reason(error)
-    {extra_synth_openers, scope_after_extra} =
-      case {error.code, actual_closer} do
-        {:terminator_mismatched_closer, closer} when closer != nil ->
-          case opening_for_closer(closer) do
-            nil -> {[], scope_after_insert}
-            opening ->
-              case synthesize_opening(opening, %{state | scope: scope_after_insert}) do
-                {:ok, tok, new_scope} ->
-                  tok = maybe_tag_zero_len(tok, state)
-                  {[tok], new_scope}
-                _ -> {[], scope_after_insert}
-              end
-          end
-        _ -> {[], scope_after_insert}
-      end
-
     scope_for_state =
-      if synth_side == :opener or extra_synth_openers != [] do
-        # Pop one opener we just pushed (either from unexpected closer case,
-        # or the extra opener synthesized for mismatched closer).
-        scope(terminators: [_ | popped_terms]) = scope_after_extra
-        scope(scope_after_extra, terminators: popped_terms)
-      else
-        scope_after_extra
+      cond do
+        # If we synthesized an opener for an unexpected closer, pop it now
+        synth_side == :opener ->
+          scope(terminators: [_ | popped_terms]) = scope_after_insert
+          scope(scope_after_insert, terminators: popped_terms)
+
+        # For mismatched closer, if we will emit the actual closer, also pop the
+        # matching opener to keep the stack balanced
+        error.code == :terminator_mismatched_closer and actual_closer != nil ->
+          scope(terminators: [_ | popped_terms]) = scope_after_insert
+          scope(scope_after_insert, terminators: popped_terms)
+
+        true ->
+          scope_after_insert
       end
 
     {pre_synth, post_synth} =
       case synth_side do
         # For unexpected closers, synthesize opener AFTER error (per finalized plan/tests)
-        :opener -> {[], inserted_struct ++ extra_synth_openers}
-        # For mismatches/missing closers, synthesize closer AFTER error,
-        # and also include any extra synthesized opener for the actual closer
-        :closer -> {[], inserted_struct ++ extra_synth_openers}
+        :opener -> {[], inserted_struct}
+        # For mismatches/missing closers, synthesize closer AFTER error only
+        :closer -> {[], inserted_struct}
         _ -> {[], []}
       end
 
@@ -1105,6 +1106,10 @@ defmodule Toxic.Driver do
       case {error.code, actual_closer} do
         {:reserved_unexpected_end, _} -> []
         {_, nil} -> []
+        # Always emit actual closer for mismatched closer, so stream shows both
+        # the synthesized expected closer and the actual one
+        {:terminator_mismatched_closer, closer_atom} ->
+          [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
         {_, closer_atom} -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 

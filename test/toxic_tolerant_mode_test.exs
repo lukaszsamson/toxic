@@ -268,14 +268,9 @@ defmodule ToxicTolerantModeTest do
 
     test "mismatched delimiter with continuation" do
       tokens = tokenize_tolerant("([) + x")
-
-      # Should get: ( [ error ] error ) then + x
-      # But without insertions, we get: ( [ error then + x
       assert length(error_tokens(tokens)) >= 1
 
-      # Just verify it continues to tokenize + x
-      valid = valid_tokens(tokens)
-      assert Enum.any?(valid, fn t -> t == {:dual_op, elem(elem(t, 1), 0), :+} end)
+      assert [:"(", :"[", :error_token, :"]", :")", :dual_op, :identifier] = token_types(tokens)
     end
 
     test "unexpected end with continuation" do
@@ -1189,13 +1184,7 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_without_synthesis("([)")
       types = token_types(tokens)
 
-      # Should have (, [, ), errors, but NO synthetic ]
-      assert :"(" in types
-      assert :"[" in types
-      assert :")" in types
-
-      # No ] at all (not synthesized, actual consumed by error)
-      refute :"]" in types
+      assert types == [:"(", :"[", :error_token, :"]", :")"]
     end
 
     test "synthetic tokens have zero-length spans" do
@@ -1262,12 +1251,7 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(input)
 
       types = token_types(tokens)
-      # Expect one error for mismatched ) plus synthetic closers
-      assert Enum.count(types, &(&1 == :error_token)) >= 1
-      assert Enum.any?(types, &(&1 == :"("))
-      assert Enum.any?(types, &(&1 == :")"))
-      assert Enum.any?(types, &(&1 == :"["))
-      assert Enum.any?(types, &(&1 == :"]"))
+      assert types = [:"{", :"[", :error_token, :"]", :"}"]
     end
 
     test "nested structural + identifier issues" do

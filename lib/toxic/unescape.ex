@@ -188,6 +188,7 @@ defmodule Toxic.Unescape do
     try do
       unescape_chars(rest, map_fun, <<acc::binary, codepoint::utf8>>)
     rescue
+      # TODO: check if covered \\uD800
       ArgumentError ->
         throw({:error, ~c"invalid or reserved Unicode code point \\u{" ++ list ++ ~c"}", ~c"\\u"})
     end
