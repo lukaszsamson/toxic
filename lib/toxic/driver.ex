@@ -1081,8 +1081,11 @@ defmodule Toxic.Driver do
         # For mismatched closer, if we will emit the actual closer, also pop the
         # matching opener to keep the stack balanced
         error.code == :terminator_mismatched_closer and actual_closer != nil ->
-          scope(terminators: [_ | popped_terms]) = scope_after_insert
-          scope(scope_after_insert, terminators: popped_terms)
+          scope(terminators: terms) = scope_after_insert
+          case terms do
+            [] -> scope_after_insert  # Already popped during synthesis
+            [_ | popped_terms] -> scope(scope_after_insert, terminators: popped_terms)
+          end
 
         true ->
           scope_after_insert
