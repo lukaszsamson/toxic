@@ -69,9 +69,11 @@ defmodule Toxic.Error do
           | :comment_invalid_bidi
           | :comment_invalid_linebreak
           | :vc_merge_conflict_marker
-          # General fallback
+          # General fallback and syntax errors
           | :unexpected_token
           | :syntax_error
+          | :syntax_consecutive_semicolons
+          | :operator_ternary_missing_slash
 
   @typedoc "Start and end positions for a range (inclusive start, exclusive end)"
   @type position :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}}
@@ -388,7 +390,10 @@ defmodule Toxic.Error do
   Unknown shapes fall back to `%Toxic.Error{code: :syntax_error, details: %{legacy: term}}`.
   """
   @spec ensure_struct(term()) :: t()
-  def ensure_struct(%__MODULE__{} = err), do: err
+  def ensure_struct(%__MODULE__{} = err) do
+    validate_details!(err)
+    err
+  end
 
   def ensure_struct({meta_kv, message, token_chars}) when is_list(meta_kv) do
     code =
@@ -663,17 +668,51 @@ defmodule Toxic.Error do
   defp terminator_chars(delimiter) when is_list(delimiter), do: delimiter
 
   # -- Details validation -----------------------------------------------------
+  # Validators check that required details keys are present for each error code.
+  # This catches malformed errors at construction time rather than during formatting.
+
+  # Terminator errors
   defp validate_details!(%__MODULE__{code: :terminator_mismatched_closer, details: d}),
     do: require_keys!(d, [:opening_delimiter, :closing_delimiter, :expected_delimiter])
 
   defp validate_details!(%__MODULE__{code: :terminator_missing_closer, details: d}),
-    do: require_keys!(d, [:opening_delimiter, :expected_delimiter])
+    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column])
 
+  defp validate_details!(%__MODULE__{code: :terminator_unexpected_closer, details: _d}), do: :ok
+
+  # :reserved_unexpected_end may or may not have opening_delimiter/expected_delimiter
+  # (genuinely unexpected end has no opener, mismatched end has opener from driver)
+  defp validate_details!(%__MODULE__{code: :reserved_unexpected_end, details: _d}), do: :ok
+
+  # String/Interpolation/Heredoc errors
+  defp validate_details!(%__MODULE__{code: :string_missing_terminator, details: d}) do
+    # Special case: escape-at-EOF errors have minimal details
+    if Map.get(d, :escape_at_eof?, false) do
+      require_keys!(d, [:line, :column])
+    else
+      require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column, :suffix_iolist])
+    end
+  end
+
+  defp validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: d}),
+    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column, :suffix_iolist])
+
+  defp validate_details!(%__MODULE__{code: :interpolation_missing_terminator, details: d}),
+    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :start_line, :start_column, :end_line, :end_column, :suffix_iolist])
+
+  defp validate_details!(%__MODULE__{code: :interpolation_not_allowed_in_quoted_identifier, details: d}),
+    do: require_keys!(d, [:start_line, :start_column])
+
+  # Map and keyword errors
   defp validate_details!(%__MODULE__{code: :map_invalid_open_delimiter, details: _d}), do: :ok
   defp validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
-  defp validate_details!(%__MODULE__{code: :string_missing_terminator, details: _d}), do: :ok
-  defp validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: _d}), do: :ok
+  defp validate_details!(%__MODULE__{code: :keyword_missing_space_after_colon, details: _d}), do: :ok
+
+  # Alias errors
   defp validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}), do: require_keys!(d, [:message_iolist])
+  defp validate_details!(%__MODULE__{code: :alias_unexpected_paren, details: _d}), do: :ok
+
+  # Catch-all for codes without specific validation requirements
   defp validate_details!(%__MODULE__{code: _}), do: :ok
 
   defp require_keys!(map, keys) do

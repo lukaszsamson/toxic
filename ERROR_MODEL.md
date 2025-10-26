@@ -100,6 +100,18 @@ Documented in `Toxic.Error` as typespecs and `@doc` clauses; validate at creatio
   start_column: pos_integer
 }
 
+# Missing string terminator (may include escape at EOF flag)
+@type string_missing_details :: %{
+  opening_delimiter: atom,
+  expected_delimiter: atom,
+  line: pos_integer,
+  column: pos_integer,
+  end_line: pos_integer,
+  end_column: pos_integer,
+  suffix_iolist: iolist,
+  escape_at_eof?: boolean  # Optional: true if error was triggered by backslash at EOF
+}
+
 # Interpolation not allowed in quoted identifier
 @type interpolation_in_qid_details :: %{
   delim: charlist() | integer(),
@@ -133,13 +145,14 @@ Documenting recovery removes ambiguity and lets tests assert behavior directly.
 | terminator_unexpected_closer | Emit error; if synthesis enabled, synthesize matching opener AFTER error; then emit actual closer; do not consume closer during error span. |
 | terminator_mismatched_closer | Emit error; if synthesis enabled, synthesize expected closer AFTER error; leave actual closer to be processed normally next. |
 | terminator_missing_closer | At EOF or pending error: emit error; if enabled, synthesize expected closer and pop one stack frame; repeat until cleared. |
-| reserved_unexpected_end | Emit error; still emit `:end` token after error. |
+| reserved_unexpected_end | Emit error; consume `end` keyword (and optional newline) to prevent stray `:end` token in stream. |
 | interpolation_missing_terminator | Emit error; if enabled, synthesize `{:end_interpolation, ...}` AFTER error and pop frame. |
 | interpolation_not_allowed_in_quoted_identifier | Emit error; consume interpolation sequence minimally; continue quoted identifier. |
 | string_missing_terminator | Emit error; if enabled, synthesize `{:_end, ...}` (bin/list/sigil/quoted identifier end) AFTER error. |
 | heredoc_invalid_header | Emit error; if enabled, synthesize appropriate heredoc end AFTER error. |
 | map_unexpected_space_after_percent | Emit `%` token BEFORE error; error spans the offending `{}` header; resume normally. |
 | map_invalid_open_delimiter | Emit `%` token BEFORE error; error consumes the invalid `(` or `[`; subsequent `(` or `[` tokenizes normally. |
+| identifier errors in map context | When identifier error follows `%{}` or `{` token: pre-insert synthetic `%` token before error to preserve map structure for downstream tools. |
 | keyword_missing_space_after_colon | Emit error at `:`; consume only `:` so following identifier remains. |
 | alias_unexpected_paren | Emit error at `(`; still emit `:(` token after error to preserve call boundary. |
 | number_trailing_garbage | Emit error covering the full malformed number span; do not salvage partial numeric token; resume at sync. |
@@ -148,8 +161,9 @@ Documenting recovery removes ambiguity and lets tests assert behavior directly.
 | consecutive semicolons | Emit error at the second `;`; then emit a single `;` token and consume extra. |
 
 Notes:
-- “AFTER error” means tokens appear in the stream after the `:error_token` (zero-length metas for synthetic tokens).
+- "AFTER error" means tokens appear in the stream after the `:error_token` (zero-length metas for synthetic tokens).
 - When synthesis is disabled, synthetic tokens are omitted; ordering of remaining tokens remains consistent.
+- **Closer consumption**: To guarantee forward progress, unexpected and mismatched closers may be consumed during error recovery. The actual closer is then re-inserted with zero-length meta after the error and any synthetic tokens. This ensures the stream is balanced while maintaining deterministic advancement.
 
 ### How messages are built (parity with Elixir)
 - Provide a formatter clause per `error.code` matching current text. Where Elixir versions differ (e.g., bidi/linebreak messages), document version notes and gate tests accordingly.

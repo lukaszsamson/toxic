@@ -1178,7 +1178,12 @@ defmodule Toxic.Driver do
   defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
     case {domain, code} do
       {:reserved, :reserved_unexpected_end} ->
-        # Consume the "end" keyword and an immediate newline if present
+        # Consume the "end" keyword and an immediate newline if present.
+        # We do NOT re-emit the :end token after the error because:
+        # 1) It prevents stray :end from appearing in the stream and confusing downstream tools
+        # 2) The error itself documents the unexpected end
+        # 3) Re-emitting would require synthesizing a matching opener (do/fn), which is ambiguous
+        # The error_token's position already captures the "end" location for diagnostics.
         case rest do
           [?e, ?n, ?d, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
           [?e, ?n, ?d, ?\r, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
@@ -1314,21 +1319,18 @@ defmodule Toxic.Driver do
         {new_rest, new_line, new_col} = consume_one(rest, state)
         {new_rest, new_line, new_col, [], state.scope}
 
+      # Consecutive semicolons - detected via pattern matching
+      # TODO: Update tokenizer to emit :syntax_consecutive_semicolons directly
       {_, _} ->
-        cond do
-          ternary_missing_slash?(rest) ->
-            meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
-            op_token = {:identifier, meta_op, :..//}
-
-            {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}],
-             state.scope}
-
-          consecutive_semicolons?(rest) ->
+        case rest do
+          [?;, ?; | _] ->
+            # Consecutive semicolons: emit single ; token and consume both
             meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
             semi_token = {:";", meta_semi}
             {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
 
-          true ->
+          _ ->
+            # Default recovery for all other unhandled error codes
             {def_rest, def_line, def_col, [], state.scope}
         end
     end
@@ -1384,9 +1386,6 @@ defmodule Toxic.Driver do
       _ -> false
     end
   end
-
-  defp consecutive_semicolons?([?;, ?; | _]), do: true
-  defp consecutive_semicolons?(_), do: false
 
   defp consume_until_newline([?\n | rest]), do: {rest, true}
   defp consume_until_newline([?\r, ?\n | rest]), do: {rest, true}
