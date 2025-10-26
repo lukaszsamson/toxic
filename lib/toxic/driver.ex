@@ -1071,6 +1071,19 @@ defmodule Toxic.Driver do
 
     # Decide final scope updates
     actual_closer = actual_closer_from_reason(error)
+
+    # Check if we'll emit the actual closer for mismatched case
+    will_emit_actual_closer? =
+      case {error.code, actual_closer} do
+        {:terminator_mismatched_closer, closer_atom} ->
+          scope(terminators: terms) = scope_after_insert
+          case terms do
+            [] -> false
+            [{opener, _, _} | _] -> closing_for(opener) == closer_atom
+          end
+        _ -> false
+      end
+
     scope_for_state =
       cond do
         # If we synthesized an opener for an unexpected closer, pop it now
@@ -1078,14 +1091,10 @@ defmodule Toxic.Driver do
           scope(terminators: [_ | popped_terms]) = scope_after_insert
           scope(scope_after_insert, terminators: popped_terms)
 
-        # For mismatched closer, if we will emit the actual closer, also pop the
-        # matching opener to keep the stack balanced
-        error.code == :terminator_mismatched_closer and actual_closer != nil ->
-          scope(terminators: terms) = scope_after_insert
-          case terms do
-            [] -> scope_after_insert  # Already popped during synthesis
-            [_ | popped_terms] -> scope(scope_after_insert, terminators: popped_terms)
-          end
+        # For mismatched closer, pop the stack if we'll emit the matching closer
+        will_emit_actual_closer? ->
+          scope(terminators: [_ | popped_terms]) = scope_after_insert
+          scope(scope_after_insert, terminators: popped_terms)
 
         true ->
           scope_after_insert
@@ -1105,14 +1114,24 @@ defmodule Toxic.Driver do
     # even when synthesis is disabled. This preserves expected [:error_token, synthetic_opener?, closer]
     # ordering. Use zero-length meta at the current position to avoid position drift.
     # Exception: for unexpected end, we already consumed it in recovery, so don't emit it here.
+    # For mismatched closers, only emit if it matches the updated stack; otherwise leave
+    # it to be detected as missing/unexpected at EOF.
     post_actual_closer =
       case {error.code, actual_closer} do
         {:reserved_unexpected_end, _} -> []
         {_, nil} -> []
-        # Always emit actual closer for mismatched closer, so stream shows both
-        # the synthesized expected closer and the actual one
         {:terminator_mismatched_closer, closer_atom} ->
-          [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+          # Check if the closer matches the updated stack after synthesis (before final pop)
+          scope(terminators: updated_terms) = scope_after_insert
+          case updated_terms do
+            [] -> []  # No match, will be handled at EOF
+            [{opener, _, _} | _] ->
+              if closing_for(opener) == closer_atom do
+                [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+              else
+                []  # Doesn't match, will be handled at EOF or next iteration
+              end
+          end
         {_, closer_atom} -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 
@@ -1238,6 +1257,10 @@ defmodule Toxic.Driver do
             {rest_no_ws, l_after, c_after, [percent_token], state.scope}
           _ -> {def_rest, def_line, def_col, [], state.scope}
         end
+
+      {_, :terminator_mismatched_closer} ->
+        # For mismatched closers, consume normally and let post_actual_closer emit it
+        {def_rest, def_line, def_col, [], state.scope}
 
       {_, :string_missing_terminator} ->
         if Map.get(details, :escape_at_eof?, false) do

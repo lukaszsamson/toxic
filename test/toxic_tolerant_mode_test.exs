@@ -1100,8 +1100,8 @@ defmodule ToxicTolerantModeTest do
       bracket_count = Enum.count(types, &(&1 == :"]"))
       assert bracket_count == 1
 
-      # Two errors: one for mismatch, one for unexpected )
-      assert length(error_tokens(tokens)) == 2
+      # One error for mismatch
+      assert length(error_tokens(tokens)) == 1
     end
 
     test "nested missing terminators synthesize multiple closers" do
