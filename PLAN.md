@@ -10,7 +10,7 @@ Action Items:
 	•	Change the token record to include an explicit end offset {start, end} (e.g. column+length or absolute character index).
 	•	Update every clause of tokenize/5 to compute and store the end position before recursing.
 
-2. Graceful Error Recovery (Non–Fail-Fast)
+2. Graceful Error Recovery (Non–Fail-Fast) - Done
 
 Current: on first lexical error, the lexer returns {error, …} and stops.
 Why it matters: an error-tolerant Pratt parser must see a token stream that includes error tokens so it can skip, insert missing braces, and continue parsing beyond bad fragments.

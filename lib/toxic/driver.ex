@@ -835,17 +835,16 @@ defmodule Toxic.Driver do
          column: end_column
        }) do
     expected = closing_for(start)
-    is_end = closing == :end
     closing_chars = terminator_chars(closing)
 
     {{start_line, start_column}, _end_pos, _extra} = meta
 
-    code = if is_end, do: :reserved_unexpected_end, else: :terminator_mismatched_closer
-    token_display = if is_end, do: ~c"end", else: closing_chars
+    code = :terminator_mismatched_closer
+    token_display = closing_chars
 
     %Toxic.Error{
       code: code,
-      domain: if(is_end, do: :reserved, else: :terminator),
+      domain: :terminator,
       token_display: token_display,
       position: {{start_line, start_column}, {end_line, end_column}},
       details: %{
@@ -1560,7 +1559,6 @@ defmodule Toxic.Driver do
   defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
   defp closer_starts_with?(list, expected) when is_atom(expected),
     do: starts_with_list?(list, terminator_chars(expected))
-  defp closer_starts_with?(_list, _other), do: false
 
   defp starts_with_char?([h | _], ch), do: h == ch
   defp starts_with_char?(_, _), do: false
@@ -1716,12 +1714,9 @@ defmodule Toxic.Driver do
 
   # Phase 2: structural synthesis helpers
   defp synthesize_from_reason(%Toxic.Error{code: :terminator_mismatched_closer, details: %{expected_delimiter: expected}} = _err, state) do
-    case synthesize_closing(expected, state) do
-      {:ok, tok, new_scope} ->
+    {:ok, tok, new_scope} = synthesize_closing(expected, state)
         tok = maybe_tag_zero_len(tok, state)
         {:closer, [tok], new_scope}
-      _ -> {:none, [], state.scope}
-    end
   end
 
   defp synthesize_from_reason(%Toxic.Error{code: _code, token_display: token_display}, state) do
@@ -1734,12 +1729,9 @@ defmodule Toxic.Driver do
           nil -> {:none, [], state.scope}
           opening ->
             # Insert synthetic opener and push to stack
-            case synthesize_opening(opening, state) do
-              {:ok, tok, new_scope} ->
-                tok = maybe_tag_zero_len(tok, state)
-                {:opener, [tok], new_scope}
-              _ -> {:none, [], state.scope}
-            end
+            {:ok, tok, new_scope} = synthesize_opening(opening, state)
+            tok = maybe_tag_zero_len(tok, state)
+            {:opener, [tok], new_scope}
         end
     end
   end
@@ -1758,7 +1750,6 @@ defmodule Toxic.Driver do
   defp opening_for_closer(:"}"), do: :"{"
   defp opening_for_closer(:">>"), do: :"<<"
   defp opening_for_closer(:end), do: nil
-  defp opening_for_closer(_), do: nil
 
   defp synthesize_closing(closer, state) do
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
@@ -1789,5 +1780,4 @@ defmodule Toxic.Driver do
     closer_atom_from_chars(List.flatten(List.wrap(err.token_display)))
   end
 
-  defp actual_closer_from_reason(_), do: nil
 end
