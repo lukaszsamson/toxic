@@ -435,7 +435,6 @@ defmodule Toxic.Driver do
                   :list_string_end
 
                 :atom_safe ->
-                  # TODO: no test coverage
                   :atom_safe_end
 
                 :atom_unsafe ->
@@ -904,11 +903,6 @@ defmodule Toxic.Driver do
   end
 
   defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
-
-  # TODO: no coverage, not possible?
-  # defp delimiter_charlist(delim) when is_binary(delim) do
-  #   String.to_charlist(delim)
-  # end
 
   defp delimiter_charlist(delim) when is_list(delim), do: delim
 
