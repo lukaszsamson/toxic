@@ -170,7 +170,9 @@ defmodule Toxic.TokenStream do
 
           stream.error ->
             case Keyword.get(stream.opts, :error_mode, :tolerant) do
-              :strict -> {:error, stream.error, stream}
+              :strict ->
+                {:error, stream.error, stream}
+
               :tolerant ->
                 stream = recover_into_buffer(stream)
                 peek(stream)
@@ -618,16 +620,20 @@ defmodule Toxic.TokenStream do
       {:ok, token, new_source, new_driver} ->
         pre_pos = start_pos(token)
         entry = {token, pre_terms, pre_pos}
+
         new_stream =
-          %{stream |
-              driver: new_driver,
+          %{
+            stream
+            | driver: new_driver,
               source: new_source,
               error: nil,
-              last_emitted_entry: entry}
+              last_emitted_entry: entry
+          }
 
         {:ok, token, new_stream}
 
-      other -> other
+      other ->
+        other
     end
   end
 

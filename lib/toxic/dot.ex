@@ -10,8 +10,10 @@ defmodule Toxic.Dot do
     case strip_horizontal_space(t, 0) do
       {[?# | r], _} ->
         case tokenize_comment(r, [?#]) do
-          {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
+          {:error, {code, char}}
+          when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
             token = :io_lib.format("\\u~4.16.0B", [char])
+
             {:error,
              %Toxic.Error{
                code: code,

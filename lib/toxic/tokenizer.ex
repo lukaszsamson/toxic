@@ -51,12 +51,14 @@ defmodule Toxic.Tokenizer do
     case Toxic.Comment.tokenize_comment(string, [?#]) do
       {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
         token = :io_lib.format("\\u~4.16.0B", [char])
+
         err = %Toxic.Error{
           code: code,
           domain: :comment,
           token_display: token,
           details: %{line: line, column: column}
         }
+
         {:error, err}
 
       {rest, comment} ->
@@ -294,6 +296,7 @@ defmodule Toxic.Tokenizer do
       token_display: [?{],
       details: %{line: line, column: column}
     }
+
     {:error, err}
   end
 
@@ -442,6 +445,7 @@ defmodule Toxic.Tokenizer do
           token_display: original,
           details: %{line: line, column: column, reason_iolist: reason}
         }
+
         {:error, err}
 
       {[i | rest], number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
@@ -511,9 +515,18 @@ defmodule Toxic.Tokenizer do
       when elem(top, 0) == :";" do
     # Match Elixir's token format: ";" (column N, code point U+003B)
     token_display = [
-      ?\", ?;, ?\", ?\s, ?(, ~c"column ", Integer.to_charlist(column), ~c", ",
-      ~c"code point U+003B", ?)
+      ?\",
+      ?;,
+      ?\",
+      ?\s,
+      ?(,
+      ~c"column ",
+      Integer.to_charlist(column),
+      ~c", ",
+      ~c"code point U+003B",
+      ?)
     ]
+
     {:error,
      %Toxic.Error{
        code: :syntax_consecutive_semicolons,
@@ -589,6 +602,7 @@ defmodule Toxic.Tokenizer do
       token_display: [?%, ?(],
       details: %{line: line, column: column}
     }
+
     {:error, err}
   end
 
@@ -596,9 +610,10 @@ defmodule Toxic.Tokenizer do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
-      token_display: [?%, ?[] ,
+      token_display: [?%, ?[],
       details: %{line: line, column: column}
     }
+
     {:error, err}
   end
 
@@ -774,6 +789,7 @@ defmodule Toxic.Tokenizer do
 
   defp unexpected_token_reason(char, line, column) do
     message = unexpected_token_message(char, column)
+
     %Toxic.Error{
       code: :unexpected_token,
       domain: :general,

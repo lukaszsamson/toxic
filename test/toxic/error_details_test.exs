@@ -14,7 +14,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("([)")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :terminator_mismatched_closer, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :terminator_mismatched_closer, details: d}} =
+               error_token
 
       assert d[:opening_delimiter] == :"["
       assert d[:closing_delimiter] == :")"
@@ -25,7 +27,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("(")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :terminator_missing_closer, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :terminator_missing_closer, details: d}} =
+               error_token
 
       assert d[:opening_delimiter] == :"("
       assert d[:expected_delimiter] == :")"
@@ -40,7 +44,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant(input)
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :string_missing_terminator, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :string_missing_terminator, details: d}} =
+               error_token
 
       assert d[:opening_delimiter] == :"\""
       assert d[:expected_delimiter] == :"\""
@@ -67,7 +73,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("0x")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :number_trailing_garbage, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :number_trailing_garbage, details: d}} =
+               error_token
 
       assert is_list(d[:msg_iolist])
       msg_str = IO.iodata_to_binary(d[:msg_iolist])
@@ -78,7 +86,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("%( )")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :map_invalid_open_delimiter, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :map_invalid_open_delimiter, details: d}} =
+               error_token
 
       # Map errors may have position details
       assert is_map(d)
@@ -88,7 +98,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("[foo:bar]")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :keyword_missing_space_after_colon, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :keyword_missing_space_after_colon, details: d}} =
+               error_token
 
       # Keyword errors may have position details
       assert is_map(d)
@@ -99,7 +111,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("foo\u{0410}bar")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :identifier_mixed_script, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :identifier_mixed_script, details: d}} =
+               error_token
 
       # Should have message details about the mixed script
       assert is_list(d[:message_prefix]) or is_list(d[:message_iolist])
@@ -111,7 +125,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant(input)
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :heredoc_missing_terminator, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :heredoc_missing_terminator, details: d}} =
+               error_token
 
       assert d[:opening_delimiter] == :"\"\"\""
       assert d[:expected_delimiter] == :"\"\"\""
@@ -124,7 +140,9 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant("Foo()")
 
       error_token = find_error_token(tokens)
-      assert {:error_token, _meta, %Error{code: :alias_unexpected_paren, details: d}} = error_token
+
+      assert {:error_token, _meta, %Error{code: :alias_unexpected_paren, details: d}} =
+               error_token
 
       # Alias errors have position details
       assert is_map(d)
@@ -189,7 +207,8 @@ defmodule ToxicErrorDetailsTest do
       # Should emit: error_token, synthesized opener, actual closer
       assert length(tokens) >= 2
 
-      assert {:error_token, _meta, %Error{code: :terminator_unexpected_closer}} = Enum.at(tokens, 0)
+      assert {:error_token, _meta, %Error{code: :terminator_unexpected_closer}} =
+               Enum.at(tokens, 0)
 
       # Find the synthesized opener (should be :( with zero-length meta)
       synthesized = Enum.at(tokens, 1)
@@ -236,9 +255,10 @@ defmodule ToxicErrorDetailsTest do
       tokens = tokenize_tolerant(input, synthesis: true)
 
       # Find the string end token (synthesized)
-      string_end = Enum.find(tokens, fn t ->
-        match?({:bin_string, _meta, _content}, t) or match?({:bin_string_end, _meta}, t)
-      end)
+      string_end =
+        Enum.find(tokens, fn t ->
+          match?({:bin_string, _meta, _content}, t) or match?({:bin_string_end, _meta}, t)
+        end)
 
       # The bin_string_end should have been synthesized with zero-length meta
       if string_end != nil do
@@ -247,7 +267,9 @@ defmodule ToxicErrorDetailsTest do
             assert {{line, col}, {end_line, end_col}, _} = meta
             assert line == end_line
             assert col == end_col
-          _ -> :ok
+
+          _ ->
+            :ok
         end
       end
     end
@@ -260,7 +282,8 @@ defmodule ToxicErrorDetailsTest do
       assert_raise ArgumentError, ~r/Missing required details key/, fn ->
         %Toxic.Error{
           code: :terminator_mismatched_closer,
-          details: %{opening_delimiter: :"("}  # Missing expected_delimiter and closing_delimiter
+          # Missing expected_delimiter and closing_delimiter
+          details: %{opening_delimiter: :"("}
         }
         |> Toxic.Error.validate_details!()
       end
@@ -270,7 +293,8 @@ defmodule ToxicErrorDetailsTest do
       assert_raise ArgumentError, ~r/Missing required details key/, fn ->
         %Toxic.Error{
           code: :terminator_missing_closer,
-          details: %{opening_delimiter: :"("}  # Missing line, column, end_line, end_column
+          # Missing line, column, end_line, end_column
+          details: %{opening_delimiter: :"("}
         }
         |> Toxic.Error.validate_details!()
       end
@@ -280,7 +304,8 @@ defmodule ToxicErrorDetailsTest do
       assert_raise ArgumentError, ~r/Missing required details key/, fn ->
         %Toxic.Error{
           code: :string_missing_terminator,
-          details: %{opening_delimiter: :"\""}  # Missing other required keys
+          # Missing other required keys
+          details: %{opening_delimiter: :"\""}
         }
         |> Toxic.Error.validate_details!()
       end
@@ -288,38 +313,42 @@ defmodule ToxicErrorDetailsTest do
 
     test "validation allows escape_at_eof string errors with minimal details" do
       # Should not raise - escape_at_eof? errors have different requirements
-      assert :ok = %Toxic.Error{
-        code: :string_missing_terminator,
-        details: %{escape_at_eof?: true, line: 1, column: 5}
-      }
-      |> Toxic.Error.validate_details!()
+      assert :ok =
+               %Toxic.Error{
+                 code: :string_missing_terminator,
+                 details: %{escape_at_eof?: true, line: 1, column: 5}
+               }
+               |> Toxic.Error.validate_details!()
     end
 
     test "validation allows codes with no required details" do
       # Should not raise for codes with empty/optional details
-      assert :ok = %Toxic.Error{
-        code: :map_invalid_open_delimiter,
-        details: %{}
-      }
-      |> Toxic.Error.validate_details!()
+      assert :ok =
+               %Toxic.Error{
+                 code: :map_invalid_open_delimiter,
+                 details: %{}
+               }
+               |> Toxic.Error.validate_details!()
 
-      assert :ok = %Toxic.Error{
-        code: :keyword_missing_space_after_colon,
-        details: %{}
-      }
-      |> Toxic.Error.validate_details!()
+      assert :ok =
+               %Toxic.Error{
+                 code: :keyword_missing_space_after_colon,
+                 details: %{}
+               }
+               |> Toxic.Error.validate_details!()
     end
 
     test "validation passes for well-formed terminator errors" do
-      assert :ok = %Toxic.Error{
-        code: :terminator_mismatched_closer,
-        details: %{
-          opening_delimiter: :"(",
-          expected_delimiter: :")",
-          closing_delimiter: :"]"
-        }
-      }
-      |> Toxic.Error.validate_details!()
+      assert :ok =
+               %Toxic.Error{
+                 code: :terminator_mismatched_closer,
+                 details: %{
+                   opening_delimiter: :"(",
+                   expected_delimiter: :")",
+                   closing_delimiter: :"]"
+                 }
+               }
+               |> Toxic.Error.validate_details!()
     end
   end
 

@@ -316,12 +316,14 @@ defmodule Toxic.Interpolation do
 
         code = if bidi(char), do: :comment_invalid_bidi, else: :comment_invalid_linebreak
         domain = :string
+
         err = %Toxic.Error{
           code: code,
           domain: domain,
           token_display: token,
           details: %{line: adjusted_line, column: column}
         }
+
         {:error, err}
 
       [char | new_rest] when is_list(char) ->

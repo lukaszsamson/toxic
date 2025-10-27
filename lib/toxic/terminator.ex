@@ -84,6 +84,7 @@ defmodule Toxic.Terminator do
       expected_end ->
         {{start_line, start_column}, _, _} = start_meta
         {{end_line, end_column}, _, _} = end_meta
+
         err = %Toxic.Error{
           code: :terminator_mismatched_closer,
           domain: :terminator,
@@ -95,6 +96,7 @@ defmodule Toxic.Terminator do
             expected_delimiter: expected_end
           }
         }
+
         {:error, err}
     end
   end
@@ -129,6 +131,7 @@ defmodule Toxic.Terminator do
   def check_terminator({end_token, meta}, [], _scope)
       when end_token in ~w|) ] } >>|a do
     {{line, column}, _, _} = meta
+
     {:error,
      %Toxic.Error{
        code: :terminator_unexpected_closer,

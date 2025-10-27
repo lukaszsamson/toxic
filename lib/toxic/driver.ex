@@ -191,7 +191,8 @@ defmodule Toxic.Driver do
 
             {:error, reason_tuple, string, state}
 
-          :tolerant -> emit_error_and_advance(reason, string, state)
+          :tolerant ->
+            emit_error_and_advance(reason, string, state)
         end
 
       {rest, state} ->
@@ -228,7 +229,8 @@ defmodule Toxic.Driver do
 
             {:error, reason_tuple, string, state}
 
-          :tolerant -> emit_error_and_advance(reason, string, state)
+          :tolerant ->
+            emit_error_and_advance(reason, string, state)
         end
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
@@ -300,7 +302,9 @@ defmodule Toxic.Driver do
         # Emit charlist deprecation warning for list heredocs
         updated_scope =
           if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
-            warning = Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+            warning =
+              Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+
             Toxic.Scope.prepend_warning(warning, scope)
           else
             scope
@@ -491,7 +495,9 @@ defmodule Toxic.Driver do
 
       {:begin_interpolation, meta, rest, line, column, scope} ->
         if kind == :quoted_identifier do
-          reason = interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+          reason =
+            interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+
           {:error, Toxic.Error.to_reason_tuple(reason), rest, state}
         else
           # Mark that we saw interpolation in the parent context
@@ -947,35 +953,62 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
-  defp emit_pending_error({:missing_interpolation, {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context}, state) do
+  defp emit_pending_error(
+         {:missing_interpolation,
+          {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context},
+         state
+       ) do
     reason = missing_interpolation_reason(interp_context, state)
     error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_struct}
 
-    inserted = if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
+    inserted =
+      if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
 
     # Pop the leading :normal that represents being inside interpolation, but
     # keep the parent {:interp, ...} context so we can subsequently emit the
     # missing string/sigil/atom terminator on the next pending error.
     new_contexts = drop_first_normal_before_interp(state.contexts)
     new_output = state.output ++ [error_token | inserted]
-    {:ok, hd(new_output), [], %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}}
+
+    {:ok, hd(new_output), [],
+     %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}}
   end
 
-  defp emit_pending_error({:missing_context, {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context}, state) do
+  defp emit_pending_error(
+         {:missing_context,
+          {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context},
+         state
+       ) do
     reason = missing_terminator_reason(interp_context, state)
     error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_struct}
 
-    inserted = if state.insert_structural_closers, do: [synthesize_end_for_kind(kind, delim, meta0)], else: []
+    inserted =
+      if state.insert_structural_closers,
+        do: [synthesize_end_for_kind(kind, delim, meta0)],
+        else: []
 
-    parent_terms_list = case parent_terms do :none -> []; list when is_list(list) -> list end
+    parent_terms_list =
+      case parent_terms do
+        :none -> []
+        list when is_list(list) -> list
+      end
+
     new_scope = scope(state.scope, terminators: parent_terms_list)
     new_contexts = drop_first_interp(state.contexts)
     new_output = state.output ++ [error_token | inserted]
-    {:ok, hd(new_output), [], %{state | contexts: new_contexts, scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
+
+    {:ok, hd(new_output), [],
+     %{
+       state
+       | contexts: new_contexts,
+         scope: new_scope,
+         output: tl(new_output),
+         recent_token: hd(new_output)
+     }}
   end
 
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
@@ -986,13 +1019,21 @@ defmodule Toxic.Driver do
 
     # Pop one scope terminator
     scope(terminators: terms) = state.scope
-    new_terms = case terms do [] -> []; [_ | rest] -> rest end
+
+    new_terms =
+      case terms do
+        [] -> []
+        [_ | rest] -> rest
+      end
+
     new_scope = scope(state.scope, terminators: new_terms)
 
     inserted = if state.insert_structural_closers, do: [{closing_for(start), meta0}], else: []
 
     new_output = state.output ++ [error_token | inserted]
-    {:ok, hd(new_output), [], %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
+
+    {:ok, hd(new_output), [],
+     %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
   end
 
   defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
@@ -1012,8 +1053,13 @@ defmodule Toxic.Driver do
 
   defp synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
   defp synthesize_end_for_kind(:bin_heredoc, delim, meta), do: {:bin_heredoc_end, meta, delim, 0}
-  defp synthesize_end_for_kind(:list_heredoc, delim, meta), do: {:list_heredoc_end, meta, delim, 0}
-  defp synthesize_end_for_kind(:quoted_identifier, delim, meta), do: {:quoted_identifier_end, meta, delim}
+
+  defp synthesize_end_for_kind(:list_heredoc, delim, meta),
+    do: {:list_heredoc_end, meta, delim, 0}
+
+  defp synthesize_end_for_kind(:quoted_identifier, delim, meta),
+    do: {:quoted_identifier_end, meta, delim}
+
   defp synthesize_end_for_kind(:charlist, delim, meta), do: {:list_string_end, meta, delim}
   defp synthesize_end_for_kind(:string, delim, meta), do: {:bin_string_end, meta, delim}
   defp synthesize_end_for_kind(:atom_safe, delim, meta), do: {:atom_safe_end, meta, delim}
@@ -1065,7 +1111,12 @@ defmodule Toxic.Driver do
   # Always advances at least one codepoint if recovery didn't move forward, preventing infinite loops.
   #
   defp emit_error_and_advance(reason, rest, state) do
-    error = case reason do %Toxic.Error{} = e -> e; other -> Toxic.Error.ensure_struct(other) end
+    error =
+      case reason do
+        %Toxic.Error{} = e -> e
+        other -> Toxic.Error.ensure_struct(other)
+      end
+
     {def_rest, def_line, def_col} = scan_to_sync(rest, state)
 
     # Phase 4: Context-specific minimal recovery (override default scan)
@@ -1073,10 +1124,12 @@ defmodule Toxic.Driver do
       adjust_recovery(error, rest, state, def_rest, def_line, def_col)
 
     # Separate pre_inserted (before error) from post_inserted (after error)
-    {pre_inserted, post_inserted} = Enum.split_with(recovery_tokens, fn
-      {:post_error, _} -> false
-      _ -> true
-    end)
+    {pre_inserted, post_inserted} =
+      Enum.split_with(recovery_tokens, fn
+        {:post_error, _} -> false
+        _ -> true
+      end)
+
     # Unwrap post_error markers
     post_inserted = Enum.map(post_inserted, fn {:post_error, tok} -> tok end)
 
@@ -1120,11 +1173,14 @@ defmodule Toxic.Driver do
       case {error.code, actual_closer} do
         {:terminator_mismatched_closer, closer_atom} ->
           scope(terminators: terms) = scope_after_insert
+
           case terms do
             [] -> false
             [{opener, _, _} | _] -> closing_for(opener) == closer_atom
           end
-        _ -> false
+
+        _ ->
+          false
       end
 
     scope_for_state =
@@ -1161,21 +1217,32 @@ defmodule Toxic.Driver do
     # it to be detected as missing/unexpected at EOF.
     post_actual_closer =
       case {error.code, actual_closer} do
-        {:reserved_unexpected_end, _} -> []
-        {_, nil} -> []
+        {:reserved_unexpected_end, _} ->
+          []
+
+        {_, nil} ->
+          []
+
         {:terminator_mismatched_closer, closer_atom} ->
           # Check if the closer matches the updated stack after synthesis (before final pop)
           scope(terminators: updated_terms) = scope_after_insert
+
           case updated_terms do
-            [] -> []  # No match, will be handled at EOF
+            # No match, will be handled at EOF
+            [] ->
+              []
+
             [{opener, _, _} | _] ->
               if closing_for(opener) == closer_atom do
                 [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
               else
-                []  # Doesn't match, will be handled at EOF or next iteration
+                # Doesn't match, will be handled at EOF or next iteration
+                []
               end
           end
-        {_, closer_atom} -> [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+
+        {_, closer_atom} ->
+          [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
       end
 
     # If the error span crossed a newline, drop any deferred :eol to avoid
@@ -1201,7 +1268,8 @@ defmodule Toxic.Driver do
     new_output =
       state.output ++
         Enum.reverse(deferrals_to_emit) ++
-        pre_inserted ++ pre_synth ++ [error_token] ++ post_inserted ++ post_synth ++ post_actual_closer
+        pre_inserted ++
+        pre_synth ++ [error_token] ++ post_inserted ++ post_synth ++ post_actual_closer
 
     new_state = %{
       state
@@ -1218,7 +1286,14 @@ defmodule Toxic.Driver do
 
   # Phase 4: adjust scan target and optionally insert context-specific tokens
   # Code-based recovery only; no message parsing
-  defp adjust_recovery(%Toxic.Error{domain: domain, code: code, details: details} = err, rest, state, def_rest, def_line, def_col) do
+  defp adjust_recovery(
+         %Toxic.Error{domain: domain, code: code, details: details} = err,
+         rest,
+         state,
+         def_rest,
+         def_line,
+         def_col
+       ) do
     case {domain, code} do
       {:reserved, :reserved_unexpected_end} ->
         # Consume the "end" keyword and an immediate newline if present.
@@ -1257,6 +1332,7 @@ defmodule Toxic.Driver do
         case consume_until_newline(def_rest) do
           {new_rest, consumed_newline?} when consumed_newline? ->
             {new_rest, state.line + 1, 1, [], state.scope}
+
           _ ->
             # No newline found (EOF on same line), use def_rest as-is
             {def_rest, def_line, def_col, [], state.scope}
@@ -1267,6 +1343,7 @@ defmodule Toxic.Driver do
         if ternary_missing_slash?(rest) do
           meta_op = meta(state.line, state.column, state.line, state.column + 4, nil)
           op_token = {:identifier, meta_op, :..//}
+
           {Enum.drop(rest, 4), state.line, state.column + 4, [{:post_error, op_token}],
            state.scope}
         else
@@ -1303,7 +1380,9 @@ defmodule Toxic.Driver do
               consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
 
             {rest_no_ws, l_after, c_after, [percent_token], state.scope}
-          _ -> {def_rest, def_line, def_col, [], state.scope}
+
+          _ ->
+            {def_rest, def_line, def_col, [], state.scope}
         end
 
       {_, :terminator_mismatched_closer} ->
@@ -1357,6 +1436,7 @@ defmodule Toxic.Driver do
               {kind, _m, _v} when kind in [:%{}, :"{"] ->
                 meta0 = meta(state.line, state.column, state.line, state.column, nil)
                 [{:%, meta0}]
+
               _ ->
                 []
             end
@@ -1386,6 +1466,7 @@ defmodule Toxic.Driver do
   defp sanitize_identifier_from_chars(chars, line, col) do
     # Normalize original erroneous identifier and build ASCII-friendly skeleton
     bin = Toxic.Util.characters_to_binary(chars)
+
     skeleton =
       try do
         String.Tokenizer.Security.confusable_skeleton(bin)
@@ -1394,6 +1475,7 @@ defmodule Toxic.Driver do
       end
 
     nfkc = :unicode.characters_to_nfkc_list(skeleton)
+
     filtered =
       nfkc
       |> Enum.map(fn c -> if allowed_ident_char?(c), do: c, else: ?_ end)
@@ -1416,7 +1498,7 @@ defmodule Toxic.Driver do
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
   defp allowed_ident_char?(c) when c in ?A..?Z, do: true
   defp allowed_ident_char?(c) when c in ?a..?z, do: true
-  defp allowed_ident_char?(?_ ), do: true
+  defp allowed_ident_char?(?_), do: true
   defp allowed_ident_char?(_), do: false
 
   defp ensure_ident_start([]), do: [?x]
@@ -1425,12 +1507,14 @@ defmodule Toxic.Driver do
 
   defp ternary_missing_slash?(rest) do
     case rest do
-      [?. , ?., ?/, ?/ | tail] ->
+      [?., ?., ?/, ?/ | tail] ->
         case tail do
           [?/ | _] -> false
           _ -> true
         end
-      _ -> false
+
+      _ ->
+        false
     end
   end
 
@@ -1557,6 +1641,7 @@ defmodule Toxic.Driver do
   defp closer_starts_with?(list, :"}"), do: starts_with_char?(list, ?})
   defp closer_starts_with?(list, :">>"), do: starts_with_list?(list, [?>, ?>])
   defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
+
   defp closer_starts_with?(list, expected) when is_atom(expected),
     do: starts_with_list?(list, terminator_chars(expected))
 
@@ -1713,20 +1798,31 @@ defmodule Toxic.Driver do
   end
 
   # Phase 2: structural synthesis helpers
-  defp synthesize_from_reason(%Toxic.Error{code: :terminator_mismatched_closer, details: %{expected_delimiter: expected}} = _err, state) do
+  defp synthesize_from_reason(
+         %Toxic.Error{
+           code: :terminator_mismatched_closer,
+           details: %{expected_delimiter: expected}
+         } = _err,
+         state
+       ) do
     {:ok, tok, new_scope} = synthesize_closing(expected, state)
-        tok = maybe_tag_zero_len(tok, state)
-        {:closer, [tok], new_scope}
+    tok = maybe_tag_zero_len(tok, state)
+    {:closer, [tok], new_scope}
   end
 
   defp synthesize_from_reason(%Toxic.Error{code: _code, token_display: token_display}, state) do
     # Unexpected closer (or similar) can be inferred from token chars
     flattened_chars = List.flatten(List.wrap(token_display))
+
     case closer_atom_from_chars(flattened_chars) do
-      nil -> {:none, [], state.scope}
+      nil ->
+        {:none, [], state.scope}
+
       closer ->
         case opening_for_closer(closer) do
-          nil -> {:none, [], state.scope}
+          nil ->
+            {:none, [], state.scope}
+
           opening ->
             # Insert synthetic opener and push to stack
             {:ok, tok, new_scope} = synthesize_opening(opening, state)
@@ -1756,10 +1852,13 @@ defmodule Toxic.Driver do
     token = {closer, meta0}
     # Pop one if matches current opener; we will conservatively pop regardless
     scope(terminators: terms) = state.scope
-    new_terms = case terms do
-      [] -> []
-      [_ | rest] -> rest
-    end
+
+    new_terms =
+      case terms do
+        [] -> []
+        [_ | rest] -> rest
+      end
+
     {:ok, token, scope(state.scope, terminators: new_terms)}
   end
 
@@ -1779,5 +1878,4 @@ defmodule Toxic.Driver do
   defp actual_closer_from_reason(%Toxic.Error{} = err) do
     closer_atom_from_chars(List.flatten(List.wrap(err.token_display)))
   end
-
 end

@@ -10,7 +10,11 @@ defmodule ToxicTolerantModeTest do
         preserve_comments: false
       ]
       |> Keyword.merge(
-        Keyword.take(opts, [:existing_atoms_only, :insert_structural_closers, :insert_identifier_sanitization])
+        Keyword.take(opts, [
+          :existing_atoms_only,
+          :insert_structural_closers,
+          :insert_identifier_sanitization
+        ])
       )
 
     stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
@@ -128,6 +132,7 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant("foo" <> <<0>> <> "bar" <> <<0>> <> "baz")
 
       assert length(error_tokens(tokens)) == 2
+
       assert [:identifier, :error_token, :identifier, :error_token, :identifier] =
                token_types(tokens)
 
@@ -292,6 +297,7 @@ defmodule ToxicTolerantModeTest do
 
       # But should tokenize the :ok atom
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
                {:atom, _, :ok} -> true
                _ -> false
@@ -359,7 +365,8 @@ defmodule ToxicTolerantModeTest do
     test "mixed script Latin+Cyrillic triggers sanitization" do
       # Using Cyrillic 'а' (U+0430) which looks like Latin 'a'
       # This should trigger "mixed script" error
-      mixed = "varа + 1"  # Cyrillic а in "varа"
+      # Cyrillic а in "varа"
+      mixed = "varа + 1"
       tokens = tokenize_tolerant(mixed, insert_identifier_sanitization: true)
 
       types = token_types(tokens)
@@ -372,7 +379,8 @@ defmodule ToxicTolerantModeTest do
     test "confusable Greek omicron in identifier" do
       # Greek omicron (ο, U+03BF) looks like Latin o
       # This should trigger confusable character error
-      confusable = "foο + bar"  # Greek ο in "foο"
+      # Greek ο in "foο"
+      confusable = "foο + bar"
       tokens = tokenize_tolerant(confusable, insert_identifier_sanitization: true)
 
       types = token_types(tokens)
@@ -397,7 +405,8 @@ defmodule ToxicTolerantModeTest do
 
     test "identifier with excessive length triggers sanitization" do
       # Very long identifier
-      long_name = String.duplicate("variable", 50)  # 400 chars
+      # 400 chars
+      long_name = String.duplicate("variable", 50)
       tokens = tokenize_tolerant("#{long_name} = 1", insert_identifier_sanitization: true)
 
       # Behavior depends on whether String.Tokenizer rejects this
@@ -411,7 +420,8 @@ defmodule ToxicTolerantModeTest do
     test "NFKC normalization with compatibility characters" do
       # Compatibility characters that should normalize (e.g., ﬁ ligature)
       # Note: This may or may not trigger an error depending on String.Tokenizer
-      nfkc_test = "ﬁle + 1"  # ﬁ is U+FB01 (fi ligature)
+      # ﬁ is U+FB01 (fi ligature)
+      nfkc_test = "ﬁle + 1"
       tokens = tokenize_tolerant(nfkc_test, insert_identifier_sanitization: true)
 
       # Should tokenize successfully (NFKC normalizes to "file")
@@ -423,7 +433,8 @@ defmodule ToxicTolerantModeTest do
 
     test "sanitization disabled does not create synthetic identifiers" do
       # With sanitization off, errors should just be errors
-      mixed = "varа + 1"  # Cyrillic а
+      # Cyrillic а
+      mixed = "varа + 1"
       tokens = tokenize_tolerant(mixed, insert_identifier_sanitization: false)
 
       types = token_types(tokens)
@@ -445,7 +456,8 @@ defmodule ToxicTolerantModeTest do
 
     test "sanitization creates valid ASCII skeleton" do
       # Mixed with confusables should produce ASCII-safe identifier
-      mixed = "tеst"  # Cyrillic е (U+0435) instead of Latin e
+      # Cyrillic е (U+0435) instead of Latin e
+      mixed = "tеst"
       tokens = tokenize_tolerant("#{mixed} = 1", insert_identifier_sanitization: true)
 
       # Should have error + continue with assignment
@@ -455,6 +467,7 @@ defmodule ToxicTolerantModeTest do
 
       # If sanitized identifier is created, it should be ASCII-only
       identifiers = Enum.filter(tokens, fn t -> elem(t, 0) == :identifier end)
+
       if length(identifiers) > 0 do
         # Check that sanitized identifier is present
         assert length(identifiers) >= 1
@@ -480,6 +493,7 @@ defmodule ToxicTolerantModeTest do
       assert length(error_tokens(tokens)) >= 1
       # Should continue and tokenize :ok
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
                {:atom, _, :ok} -> true
                _ -> false
@@ -1254,10 +1268,11 @@ defmodule ToxicTolerantModeTest do
 
       # baz should appear in valid tokens (may not be last due to synthesized closers)
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
-        {:identifier, _, :baz} -> true
-        _ -> false
-      end)
+               {:identifier, _, :baz} -> true
+               _ -> false
+             end)
     end
 
     test "nested interpolation with missing terminators" do
@@ -1307,6 +1322,7 @@ defmodule ToxicTolerantModeTest do
       assert Enum.any?(types, &(&1 == :bin_string_end))
       # Position should advance to line 2
       foo_token = Enum.find(tokens, fn t -> match?({:identifier, _, :foo}, t) end)
+
       if foo_token do
         {:identifier, {{line, _}, _, _}, _} = foo_token
         assert line >= 2
@@ -1353,6 +1369,7 @@ defmodule ToxicTolerantModeTest do
       # Should get multiple errors, then successfully tokenize 'ok'
       assert length(error_tokens(tokens)) >= 1
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
                {:identifier, _, :ok} -> true
                {:atom, _, :ok} -> true
@@ -1471,6 +1488,7 @@ defmodule ToxicTolerantModeTest do
 
       # bar should be tokenized
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
                {_, _, :bar} -> true
                _ -> false
@@ -1500,6 +1518,7 @@ defmodule ToxicTolerantModeTest do
 
       # Should tokenize Bar
       valid = valid_tokens(tokens)
+
       assert Enum.any?(valid, fn
                {:alias, _, :Bar} -> true
                _ -> false

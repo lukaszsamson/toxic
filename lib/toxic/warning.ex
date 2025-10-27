@@ -33,8 +33,8 @@ defmodule Toxic.Warning do
           | :identifier
           | :atom
 
+  # Deprecated
   @type code ::
-          # Deprecated
           :deprecated_single_quote_atom
           | :deprecated_charlist
           | :deprecated_xor_operator
@@ -202,7 +202,11 @@ defmodule Toxic.Warning do
       :deprecated_bnot_operator,
       :deprecated,
       ~c"~~~",
-      %{line: line, column: column, message: ~c"~~~ is deprecated. Use Bitwise.bnot/1 instead for clarity"}
+      %{
+        line: line,
+        column: column,
+        message: ~c"~~~ is deprecated. Use Bitwise.bnot/1 instead for clarity"
+      }
     )
   end
 
@@ -221,7 +225,11 @@ defmodule Toxic.Warning do
       :deprecated_pipe_operator,
       :deprecated,
       ~c"<|>",
-      %{line: line, column: column, message: ~c"<|> is deprecated. Use another pipe-like operator"}
+      %{
+        line: line,
+        column: column,
+        message: ~c"<|> is deprecated. Use another pipe-like operator"
+      }
     )
   end
 

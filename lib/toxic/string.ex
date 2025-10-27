@@ -22,8 +22,14 @@ defmodule Toxic.String do
           code: :heredoc_invalid_header,
           domain: :heredoc,
           token_display: [h, h, h],
-          details: %{line: line, column: column + 3, delim: [h, h, h], message_excludes_delim?: true}
+          details: %{
+            line: line,
+            column: column + 3,
+            delim: [h, h, h],
+            message_excludes_delim?: true
+          }
         }
+
         {:error, err}
 
         # Message = "heredoc allows only whitespace characters followed by a new line after opening ",

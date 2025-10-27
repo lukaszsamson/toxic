@@ -40,6 +40,7 @@ defmodule Toxic.Sigil do
       token_display: sigil_name,
       details: %{line: line, column: error_column}
     }
+
     {:error, err}
   end
 
@@ -73,6 +74,7 @@ defmodule Toxic.Sigil do
       token_display: sigil_name,
       details: %{line: line, column: error_column}
     }
+
     {:error, err}
   end
 
@@ -103,12 +105,19 @@ defmodule Toxic.Sigil do
 
       :error ->
         error_column = column + 3
+
         err = %Toxic.Error{
           code: :heredoc_invalid_header,
           domain: :heredoc,
           token_display: [h, h, h],
-          details: %{line: line, column: error_column, delim: [h, h, h], message_excludes_delim?: true}
+          details: %{
+            line: line,
+            column: error_column,
+            delim: [h, h, h],
+            message_excludes_delim?: true
+          }
         }
+
         {:error, err}
     end
   end
@@ -147,12 +156,14 @@ defmodule Toxic.Sigil do
         ~c"). The available delimiters are: //, ||, \"\", '', (), [], {}, <>"
 
     token = message_detail
+
     err = %Toxic.Error{
       code: :sigil_invalid_delimiter,
       domain: :sigil,
       token_display: token,
       details: %{line: line, column: start_column}
     }
+
     {:error, err}
   end
 

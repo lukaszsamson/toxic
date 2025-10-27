@@ -30,8 +30,8 @@ defmodule Toxic.Error do
   @type severity :: :error | :warning
 
   @typedoc "Canonical machine-readable error codes"
+  # Terminators
   @type code ::
-          # Terminators
           :terminator_unexpected_closer
           | :terminator_mismatched_closer
           | :terminator_missing_closer
@@ -161,7 +161,7 @@ defmodule Toxic.Error do
   end
 
   def format(%__MODULE__{code: :interpolation_missing_terminator, details: d}) do
-    base = :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]] )
+    base = :io_lib.format(~c"missing interpolation terminator: \"~ts\"", [[?}]])
     suffix = Map.get(d, :suffix_iolist, [])
     [base, suffix]
   end
@@ -204,6 +204,7 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :heredoc_invalid_header, details: %{delim: delim} = d}) do
     base = ~c"heredoc allows only whitespace characters followed by a new line after opening "
+
     if Map.get(d, :message_excludes_delim?, false) do
       base
     else
@@ -299,10 +300,12 @@ defmodule Toxic.Error do
   def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: d}) do
     # Message uses tuple {prefix, help}
     # Note: help_iolist may incorrectly contain the full tuple from producer; extract second element if so
-    help = case Map.get(d, :help_iolist, []) do
-      {_prefix, actual_help} -> actual_help
-      other -> other
-    end
+    help =
+      case Map.get(d, :help_iolist, []) do
+        {_prefix, actual_help} -> actual_help
+        other -> other
+      end
+
     {~c"unexpected reserved word: ", help}
   end
 
@@ -407,12 +410,12 @@ defmodule Toxic.Error do
           :terminator_mismatched_closer
 
         Keyword.has_key?(meta_kv, :opening_delimiter) and
-            Keyword.has_key?(meta_kv, :expected_delimiter) and
+          Keyword.has_key?(meta_kv, :expected_delimiter) and
             message_starts_with?(message, "missing interpolation terminator:") ->
           :interpolation_missing_terminator
 
         Keyword.has_key?(meta_kv, :opening_delimiter) and
-            Keyword.has_key?(meta_kv, :expected_delimiter) and
+          Keyword.has_key?(meta_kv, :expected_delimiter) and
             message_starts_with?(message, "missing terminator:") ->
           :terminator_missing_closer
 
@@ -466,6 +469,7 @@ defmodule Toxic.Error do
     case error.code do
       :terminator_mismatched_closer ->
         details = error.details
+
         base ++
           [
             error_type: :mismatched_delimiter,
@@ -476,6 +480,7 @@ defmodule Toxic.Error do
 
       :terminator_missing_closer ->
         details = error.details
+
         [
           opening_delimiter: Map.get(details, :opening_delimiter),
           expected_delimiter: Map.get(details, :expected_delimiter),
@@ -551,7 +556,8 @@ defmodule Toxic.Error do
         # String/heredoc/sigil missing terminators need delimiter info
         [
           opening_delimiter: Map.get(details, :opening_delimiter),
-          expected_delimiter: Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter)),
+          expected_delimiter:
+            Map.get(details, :expected_delimiter, Map.get(details, :opening_delimiter)),
           line: Map.get(details, :start_line, line),
           column: Map.get(details, :start_column, column),
           end_line: Map.get(details, :end_line, line),
@@ -688,7 +694,15 @@ defmodule Toxic.Error do
     do: require_keys!(d, [:opening_delimiter, :closing_delimiter, :expected_delimiter])
 
   def validate_details!(%__MODULE__{code: :terminator_missing_closer, details: d}),
-    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column])
+    do:
+      require_keys!(d, [
+        :opening_delimiter,
+        :expected_delimiter,
+        :line,
+        :column,
+        :end_line,
+        :end_column
+      ])
 
   def validate_details!(%__MODULE__{code: :terminator_unexpected_closer, details: _d}), do: :ok
 
@@ -702,26 +716,61 @@ defmodule Toxic.Error do
     if Map.get(d, :escape_at_eof?, false) do
       require_keys!(d, [:line, :column])
     else
-      require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column, :suffix_iolist])
+      require_keys!(d, [
+        :opening_delimiter,
+        :expected_delimiter,
+        :line,
+        :column,
+        :end_line,
+        :end_column,
+        :suffix_iolist
+      ])
     end
   end
 
   def validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: d}),
-    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column, :suffix_iolist])
+    do:
+      require_keys!(d, [
+        :opening_delimiter,
+        :expected_delimiter,
+        :line,
+        :column,
+        :end_line,
+        :end_column,
+        :suffix_iolist
+      ])
 
   def validate_details!(%__MODULE__{code: :interpolation_missing_terminator, details: d}),
-    do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :start_line, :start_column, :end_line, :end_column, :suffix_iolist])
+    do:
+      require_keys!(d, [
+        :opening_delimiter,
+        :expected_delimiter,
+        :start_line,
+        :start_column,
+        :end_line,
+        :end_column,
+        :suffix_iolist
+      ])
 
-  def validate_details!(%__MODULE__{code: :interpolation_not_allowed_in_quoted_identifier, details: d}),
-    do: require_keys!(d, [:start_line, :start_column])
+  def validate_details!(%__MODULE__{
+        code: :interpolation_not_allowed_in_quoted_identifier,
+        details: d
+      }),
+      do: require_keys!(d, [:start_line, :start_column])
 
   # Map and keyword errors
   def validate_details!(%__MODULE__{code: :map_invalid_open_delimiter, details: _d}), do: :ok
-  def validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
-  def validate_details!(%__MODULE__{code: :keyword_missing_space_after_colon, details: _d}), do: :ok
+
+  def validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}),
+    do: :ok
+
+  def validate_details!(%__MODULE__{code: :keyword_missing_space_after_colon, details: _d}),
+    do: :ok
 
   # Alias errors
-  def validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}), do: require_keys!(d, [:message_iolist])
+  def validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}),
+    do: require_keys!(d, [:message_iolist])
+
   def validate_details!(%__MODULE__{code: :alias_unexpected_paren, details: _d}), do: :ok
 
   # Catch-all for codes without specific validation requirements
@@ -733,6 +782,7 @@ defmodule Toxic.Error do
         raise ArgumentError, "Missing required details key: #{inspect(k)}"
       end
     end)
+
     :ok
   end
 end

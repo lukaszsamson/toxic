@@ -60,6 +60,7 @@ defmodule ToxicWarningsTest do
             %{message: message} -> IO.iodata_to_binary(message)
             _ -> format_warning_message(warning)
           end
+
         {{line, column}, msg_str}
 
       # Handle legacy tuple format from Elixir tokenizer
@@ -70,7 +71,10 @@ defmodule ToxicWarningsTest do
   end
 
   # Format a warning message when no explicit message is stored
-  defp format_warning_message(%Toxic.Warning{code: :deprecated_charlist, details: %{suggestion: _}}) do
+  defp format_warning_message(%Toxic.Warning{
+         code: :deprecated_charlist,
+         details: %{suggestion: _}
+       }) do
     "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"
   end
 

@@ -56,8 +56,14 @@ defmodule Toxic.Identifier do
           code: :identifier_mixed_script,
           domain: :identifier,
           token_display: wrong,
-          details: %{line: line, column: error_column, message_prefix: prefix, message_suffix: message_suffix}
+          details: %{
+            line: line,
+            column: error_column,
+            message_prefix: prefix,
+            message_suffix: message_suffix
+          }
         }
+
         {:error, err}
 
       {:error, {:unexpected_token, wrong}} ->

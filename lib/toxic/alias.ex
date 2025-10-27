@@ -27,6 +27,7 @@ defmodule Toxic.Alias do
         token_display: unencoded,
         details: %{line: line, column: column, message_iolist: message}
       }
+
       {:error, err}
     else
       aliases_token = alias_token(meta(line, column, length, unencoded), atom)
