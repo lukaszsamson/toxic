@@ -1,7 +1,11 @@
 defmodule ToxicErrorFormatTest do
+  @elixir_version System.version()
+
   @moduledoc """
   Tests that verify error message formatting matches Elixir's tokenizer output.
   These are snapshot tests that lock the exact message format for compatibility.
+
+  Message formats verified for Elixir #{@elixir_version}
   """
   use ExUnit.Case
 

@@ -676,21 +676,28 @@ defmodule Toxic.Error do
   # Validators check that required details keys are present for each error code.
   # This catches malformed errors at construction time rather than during formatting.
 
-  # Terminator errors
-  defp validate_details!(%__MODULE__{code: :terminator_mismatched_closer, details: d}),
+  @doc """
+  Validates that required details are present for the given error code.
+  Raises ArgumentError if required keys are missing.
+
+  Called automatically by to_reason_tuple/1 and ensure_struct/1.
+  Can also be called directly to verify error construction.
+  """
+  @spec validate_details!(t()) :: :ok
+  def validate_details!(%__MODULE__{code: :terminator_mismatched_closer, details: d}),
     do: require_keys!(d, [:opening_delimiter, :closing_delimiter, :expected_delimiter])
 
-  defp validate_details!(%__MODULE__{code: :terminator_missing_closer, details: d}),
+  def validate_details!(%__MODULE__{code: :terminator_missing_closer, details: d}),
     do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column])
 
-  defp validate_details!(%__MODULE__{code: :terminator_unexpected_closer, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :terminator_unexpected_closer, details: _d}), do: :ok
 
   # :reserved_unexpected_end may or may not have opening_delimiter/expected_delimiter
   # (genuinely unexpected end has no opener, mismatched end has opener from driver)
-  defp validate_details!(%__MODULE__{code: :reserved_unexpected_end, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :reserved_unexpected_end, details: _d}), do: :ok
 
   # String/Interpolation/Heredoc errors
-  defp validate_details!(%__MODULE__{code: :string_missing_terminator, details: d}) do
+  def validate_details!(%__MODULE__{code: :string_missing_terminator, details: d}) do
     # Special case: escape-at-EOF errors have minimal details
     if Map.get(d, :escape_at_eof?, false) do
       require_keys!(d, [:line, :column])
@@ -699,26 +706,26 @@ defmodule Toxic.Error do
     end
   end
 
-  defp validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: d}),
+  def validate_details!(%__MODULE__{code: :heredoc_missing_terminator, details: d}),
     do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :line, :column, :end_line, :end_column, :suffix_iolist])
 
-  defp validate_details!(%__MODULE__{code: :interpolation_missing_terminator, details: d}),
+  def validate_details!(%__MODULE__{code: :interpolation_missing_terminator, details: d}),
     do: require_keys!(d, [:opening_delimiter, :expected_delimiter, :start_line, :start_column, :end_line, :end_column, :suffix_iolist])
 
-  defp validate_details!(%__MODULE__{code: :interpolation_not_allowed_in_quoted_identifier, details: d}),
+  def validate_details!(%__MODULE__{code: :interpolation_not_allowed_in_quoted_identifier, details: d}),
     do: require_keys!(d, [:start_line, :start_column])
 
   # Map and keyword errors
-  defp validate_details!(%__MODULE__{code: :map_invalid_open_delimiter, details: _d}), do: :ok
-  defp validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
-  defp validate_details!(%__MODULE__{code: :keyword_missing_space_after_colon, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :map_invalid_open_delimiter, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :map_unexpected_space_after_percent, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :keyword_missing_space_after_colon, details: _d}), do: :ok
 
   # Alias errors
-  defp validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}), do: require_keys!(d, [:message_iolist])
-  defp validate_details!(%__MODULE__{code: :alias_unexpected_paren, details: _d}), do: :ok
+  def validate_details!(%__MODULE__{code: :alias_invalid_character, details: d}), do: require_keys!(d, [:message_iolist])
+  def validate_details!(%__MODULE__{code: :alias_unexpected_paren, details: _d}), do: :ok
 
   # Catch-all for codes without specific validation requirements
-  defp validate_details!(%__MODULE__{code: _}), do: :ok
+  def validate_details!(%__MODULE__{code: _}), do: :ok
 
   defp require_keys!(map, keys) do
     Enum.each(keys, fn k ->

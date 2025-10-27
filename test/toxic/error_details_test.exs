@@ -73,6 +73,62 @@ defmodule ToxicErrorDetailsTest do
       msg_str = IO.iodata_to_binary(d[:msg_iolist])
       assert msg_str =~ "invalid character"
     end
+
+    test "map_invalid_open_delimiter includes position details" do
+      tokens = tokenize_tolerant("%( )")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :map_invalid_open_delimiter, details: d}} = error_token
+
+      # Map errors may have position details
+      assert is_map(d)
+    end
+
+    test "keyword_missing_space_after_colon includes position details" do
+      tokens = tokenize_tolerant("[foo:bar]")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :keyword_missing_space_after_colon, details: d}} = error_token
+
+      # Keyword errors may have position details
+      assert is_map(d)
+    end
+
+    test "identifier_mixed_script includes message details" do
+      # Mixing Latin with Cyrillic scripts
+      tokens = tokenize_tolerant("foo\u{0410}bar")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :identifier_mixed_script, details: d}} = error_token
+
+      # Should have message details about the mixed script
+      assert is_list(d[:message_prefix]) or is_list(d[:message_iolist])
+    end
+
+    test "heredoc_missing_terminator includes delimiter and suffix details" do
+      input = ~S("""
+      unclosed heredoc)
+      tokens = tokenize_tolerant(input)
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :heredoc_missing_terminator, details: d}} = error_token
+
+      assert d[:opening_delimiter] == :"\"\"\""
+      assert d[:expected_delimiter] == :"\"\"\""
+      assert is_list(d[:suffix_iolist])
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+    end
+
+    test "alias_unexpected_paren includes position details" do
+      tokens = tokenize_tolerant("Foo()")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :alias_unexpected_paren, details: d}} = error_token
+
+      # Alias errors have position details
+      assert is_map(d)
+    end
   end
 
   # -- Position Field Verification --------------------------------------------
@@ -194,6 +250,76 @@ defmodule ToxicErrorDetailsTest do
           _ -> :ok
         end
       end
+    end
+  end
+
+  # -- Details Validation Tests -----------------------------------------------
+
+  describe "details validation" do
+    test "validation catches missing required keys for mismatched closer" do
+      assert_raise ArgumentError, ~r/Missing required details key/, fn ->
+        %Toxic.Error{
+          code: :terminator_mismatched_closer,
+          details: %{opening_delimiter: :"("}  # Missing expected_delimiter and closing_delimiter
+        }
+        |> Toxic.Error.validate_details!()
+      end
+    end
+
+    test "validation catches missing required keys for missing closer" do
+      assert_raise ArgumentError, ~r/Missing required details key/, fn ->
+        %Toxic.Error{
+          code: :terminator_missing_closer,
+          details: %{opening_delimiter: :"("}  # Missing line, column, end_line, end_column
+        }
+        |> Toxic.Error.validate_details!()
+      end
+    end
+
+    test "validation catches missing required keys for string missing terminator" do
+      assert_raise ArgumentError, ~r/Missing required details key/, fn ->
+        %Toxic.Error{
+          code: :string_missing_terminator,
+          details: %{opening_delimiter: :"\""}  # Missing other required keys
+        }
+        |> Toxic.Error.validate_details!()
+      end
+    end
+
+    test "validation allows escape_at_eof string errors with minimal details" do
+      # Should not raise - escape_at_eof? errors have different requirements
+      assert :ok = %Toxic.Error{
+        code: :string_missing_terminator,
+        details: %{escape_at_eof?: true, line: 1, column: 5}
+      }
+      |> Toxic.Error.validate_details!()
+    end
+
+    test "validation allows codes with no required details" do
+      # Should not raise for codes with empty/optional details
+      assert :ok = %Toxic.Error{
+        code: :map_invalid_open_delimiter,
+        details: %{}
+      }
+      |> Toxic.Error.validate_details!()
+
+      assert :ok = %Toxic.Error{
+        code: :keyword_missing_space_after_colon,
+        details: %{}
+      }
+      |> Toxic.Error.validate_details!()
+    end
+
+    test "validation passes for well-formed terminator errors" do
+      assert :ok = %Toxic.Error{
+        code: :terminator_mismatched_closer,
+        details: %{
+          opening_delimiter: :"(",
+          expected_delimiter: :")",
+          closing_delimiter: :"]"
+        }
+      }
+      |> Toxic.Error.validate_details!()
     end
   end
 

@@ -155,6 +155,7 @@ Documenting recovery removes ambiguity and lets tests assert behavior directly.
 | identifier errors in map context | When identifier error follows `%{}` or `{` token: pre-insert synthetic `%` token before error to preserve map structure for downstream tools. |
 | keyword_missing_space_after_colon | Emit error at `:`; consume only `:` so following identifier remains. |
 | alias_unexpected_paren | Emit error at `(`; still emit `:(` token after error to preserve call boundary. |
+| unexpected_token (ternary missing slash) | Special case for `..//` pattern without trailing `/`: Emit error, then post-insert `{:identifier, meta, :..//}` token with zero-length meta AFTER error to preserve operator structure. |
 | number_trailing_garbage | Emit error covering the full malformed number span; do not salvage partial numeric token; resume at sync. |
 | number_invalid_float | Emit error covering exponent suffix; resume at sync. |
 | encoding/comment/VC (invalid chars, bidi, VC marker) | Emit error; advance minimally (1 cp) or to configured sync (newline/space) depending on category; do not alter terminator stack. |

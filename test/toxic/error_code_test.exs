@@ -68,6 +68,71 @@ defmodule ToxicErrorCodeTest do
     assert_error_code(";;", :syntax_consecutive_semicolons)
   end
 
+  # -- Alias errors -----------------------------------------------------------
+
+  test "alias with unexpected paren emits alias_unexpected_paren" do
+    assert_error_code("Foo()", :alias_unexpected_paren)
+  end
+
+  # Note: alias_invalid_character is tested in integration tests but requires specific
+  # invalid Unicode patterns that are detected during alias parsing
+
+  # -- Heredoc errors ---------------------------------------------------------
+
+  test "heredoc missing terminator emits heredoc_missing_terminator" do
+    input = ~S("""
+    unclosed heredoc)
+    assert_error_code(input, :heredoc_missing_terminator)
+  end
+
+  test "heredoc with invalid header emits heredoc_invalid_header" do
+    # Heredoc with invalid sigil modifier or delimiter
+    assert_error_code(~S("""invalid), :heredoc_invalid_header)
+  end
+
+  # -- Sigil errors -----------------------------------------------------------
+
+  # Note: sigil_invalid_name and sigil_invalid_delimiter are emitted during sigil parsing
+  # but require specific edge cases that are tested in integration tests
+
+  # -- Identifier errors ------------------------------------------------------
+
+  test "identifier with mixed script emits identifier_mixed_script" do
+    # Mixing Latin with Cyrillic scripts
+    assert_error_code("foo\u{0410}bar", :identifier_mixed_script)
+  end
+
+  # Note: identifier_invalid_char is typically caught as :unexpected_token during tokenization
+  # before identifier validation can occur
+
+  # Note: identifier_nonexistent_atom_when_existing_only requires runtime atom table checks
+  # and is tested in integration tests with proper atom table setup
+
+  # -- Comment errors ---------------------------------------------------------
+
+  test "comment with invalid bidi character emits comment_invalid_bidi" do
+    # Bidirectional control character in comment
+    input = "# comment with bidi \u{202E}"
+    assert_error_code(input, :comment_invalid_bidi)
+  end
+
+  test "comment with invalid linebreak emits comment_invalid_linebreak" do
+    # Invalid linebreak character in comment (e.g., LINE SEPARATOR U+2028)
+    input = "# comment with line\u{2028}break"
+    assert_error_code(input, :comment_invalid_linebreak)
+  end
+
+  # -- Version control errors -------------------------------------------------
+
+  test "merge conflict marker emits vc_merge_conflict_marker" do
+    assert_error_code("<<<<<<< HEAD", :vc_merge_conflict_marker)
+  end
+
+  # -- Interpolation errors ---------------------------------------------------
+
+  # Note: interpolation_not_allowed_in_quoted_identifier is tested in integration tests
+  # as it requires specific parsing context to be triggered
+
   # -- Helper functions -------------------------------------------------------
 
   defp assert_error_code(input, expected_code, opts \\ []) do
