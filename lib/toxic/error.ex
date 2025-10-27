@@ -322,6 +322,10 @@ defmodule Toxic.Error do
     ~c"atom length must be less than system limit: "
   end
 
+  def format(%__MODULE__{code: :syntax_consecutive_semicolons}) do
+    ~c"unexpected token: "
+  end
+
   def format(%__MODULE__{}) do
     ~c"syntax error"
   end
@@ -372,6 +376,7 @@ defmodule Toxic.Error do
         :reserved_token_used -> List.wrap(error.token_display)
         :vc_merge_conflict_marker -> List.wrap(error.token_display)
         :unexpected_token -> List.wrap(error.token_display)
+        :syntax_consecutive_semicolons -> List.wrap(error.token_display)
         _ -> []
       end
 

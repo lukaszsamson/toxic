@@ -1372,20 +1372,15 @@ defmodule Toxic.Driver do
         {new_rest, new_line, new_col} = consume_one(rest, state)
         {new_rest, new_line, new_col, [], state.scope}
 
-      # Consecutive semicolons - detected via pattern matching
-      # TODO: Update tokenizer to emit :syntax_consecutive_semicolons directly
-      {_, _} ->
-        case rest do
-          [?;, ?; | _] ->
-            # Consecutive semicolons: emit single ; token and consume both
-            meta_semi = meta(state.line, state.column + 1, state.line, state.column + 2, nil)
-            semi_token = {:";", meta_semi}
-            {Enum.drop(rest, 2), state.line, state.column + 2, [semi_token], state.scope}
+      # Consecutive semicolons - now detected by tokenizer
+      {:general, :syntax_consecutive_semicolons} ->
+        # The first semicolon was already emitted; just consume the second one that triggered the error
+        # No additional ; token needed since the first one is already in the stream
+        {Enum.drop(rest, 1), state.line, state.column + 1, [], state.scope}
 
-          _ ->
-            # Default recovery for all other unhandled error codes
-            {def_rest, def_line, def_col, [], state.scope}
-        end
+      # Default recovery for all other unhandled error codes
+      {_, _} ->
+        {def_rest, def_line, def_col, [], state.scope}
     end
   end
 

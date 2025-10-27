@@ -506,6 +506,23 @@ defmodule Toxic.Tokenizer do
 
   # End of line
 
+  # Consecutive semicolons - emit error
+  def tokenize_single([?; | _rest], line, column, _scope, [top | _] = _tokens)
+      when elem(top, 0) == :";" do
+    # Match Elixir's token format: ";" (column N, code point U+003B)
+    token_display = [
+      ?\", ?;, ?\", ?\s, ?(, ~c"column ", Integer.to_charlist(column), ~c", ",
+      ~c"code point U+003B", ?)
+    ]
+    {:error,
+     %Toxic.Error{
+       code: :syntax_consecutive_semicolons,
+       domain: :general,
+       token_display: token_display,
+       details: %{line: line, column: column}
+     }}
+  end
+
   def tokenize_single([?; | rest], line, column, scope, []) do
     token = {:";", meta(line, column, 1, 0)}
     emit(token, rest, line, column + 1, scope)

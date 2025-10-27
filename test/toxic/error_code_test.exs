@@ -64,10 +64,7 @@ defmodule ToxicErrorCodeTest do
 
   # -- Syntax errors ----------------------------------------------------------
 
-  @tag :skip
   test "consecutive semicolons emit syntax_consecutive_semicolons" do
-    # TODO: Skipped until tokenizer emits :syntax_consecutive_semicolons directly
-    # (see driver.ex line 1329 TODO comment)
     assert_error_code(";;", :syntax_consecutive_semicolons)
   end
 

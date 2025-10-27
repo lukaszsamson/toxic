@@ -1275,7 +1275,7 @@ defmodule ToxicTolerantModeTest do
       tokens = tokenize_tolerant(input)
 
       types = token_types(tokens)
-      assert types = [:"{", :"[", :error_token, :"]", :"}"]
+      assert types == [:"{", :"[", :error_token, :"]", :"}"]
     end
 
     test "nested structural + identifier issues" do
