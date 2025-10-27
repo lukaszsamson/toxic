@@ -3318,7 +3318,6 @@ defmodule ToxicTest do
       assert tokenize("not  in") ==
                {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in", {{1, 6}, {1, 8}, nil}}], ""}
 
-      # TODO: report to elixir - this is unexpected
       assert tokenize("not\nin") == {
                :ok,
                [
@@ -4214,7 +4213,8 @@ defmodule ToxicTest do
     end
 
     test "escaped newline" do
-      # TODO: isn't that a bug in elixir tokenizer?
+      # a bug in elixir tokenizer
+      # TODO: port fix from 1.20 branch
       assert tokenize("foo\\\n+1") ==
                {:ok,
                 [
