@@ -607,6 +607,26 @@ defmodule ToxicTolerantModeTest do
       assert [:alias, :"(", :error_token, :int, :dual_op, :int, :")" | _] = types
     end
 
+    test "alias unexpected paren recovery emits both error and paren token" do
+      # Dedicated test for alias_unexpected_paren error recovery
+      # Recovery emits: alias, :(, error_token, contents..., :)
+      # The :( comes before the error to allow normal call parsing
+      tokens = tokenize_tolerant("FooBar(123)")
+
+      types = token_types(tokens)
+      # Should have: alias, :(, error_token, int, :)
+      assert [:alias, :"(", :error_token, :int, :")"] = Enum.take(types, 5)
+
+      # Verify the error is specifically alias_unexpected_paren
+      error_token = Enum.find(tokens, fn t -> match?({:error_token, _, _}, t) end)
+      assert {:error_token, _meta, %Toxic.Error{code: :alias_unexpected_paren}} = error_token
+
+      # Verify :( token appears before error (allows parsing of call arguments)
+      error_idx = Enum.find_index(types, &(&1 == :error_token))
+      paren_idx = Enum.find_index(types, &(&1 == :"("))
+      assert paren_idx < error_idx, "Open paren should come before error to enable call parsing"
+    end
+
     test "fn followed by do" do
       tokens = tokenize_tolerant("fn do\n:ok")
 
@@ -1180,10 +1200,14 @@ defmodule ToxicTolerantModeTest do
       assert close_count == 1
     end
 
-    test "mismatched closer without synthesis has no synthetic expected" do
+    test "mismatched closer synthesizes expected closer even when insert_structural_closers is false" do
+      # Note: Mismatched closers ALWAYS synthesize the expected closer to balance the stream,
+      # regardless of the insert_structural_closers flag. The flag only affects unexpected closers.
       tokens = tokenize_without_synthesis("([)")
       types = token_types(tokens)
 
+      # Output: ( [ error ] )
+      # The ] is synthesized after the error even though synthesis flag is false
       assert types == [:"(", :"[", :error_token, :"]", :")"]
     end
 

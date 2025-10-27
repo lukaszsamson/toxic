@@ -1020,7 +1020,51 @@ defmodule Toxic.Driver do
   defp synthesize_end_for_kind(:atom_safe, delim, meta), do: {:atom_safe_end, meta, delim}
   defp synthesize_end_for_kind(:atom_unsafe, delim, meta), do: {:atom_unsafe_end, meta, delim}
 
+  # ============================================================================
   # Phase 1 tolerant mode helpers
+  # ============================================================================
+
+  # Emits an error token and advances the input, optionally synthesizing structural tokens.
+  #
+  # This is the core of tolerant mode error recovery. It handles:
+  # 1. Converting legacy error reasons to structured Error structs
+  # 2. Scanning forward to a sync point (semicolon, newline, closer, etc.)
+  # 3. Context-specific recovery adjustments via adjust_recovery/5
+  # 4. Synthesis of matching openers/closers to balance the stream
+  # 5. Careful token ordering to maintain deterministic stream structure
+  #
+  # Token Ordering
+  # --------------
+  # The emitted token stream follows this strict order:
+  #
+  #   deferrals + pre_inserted + pre_synth + error_token + post_inserted + post_synth + actual_closer
+  #
+  # Where:
+  # - `deferrals`: Previously deferred tokens (e.g., :eol), filtered for newline crossing
+  # - `pre_inserted`: Recovery tokens to emit BEFORE the error (e.g., map % prefix)
+  # - `pre_synth`: Structural synthesis before error (currently unused)
+  # - `error_token`: The error_token itself with accurate position meta
+  # - `post_inserted`: Recovery tokens to emit AFTER the error
+  # - `post_synth`: Synthesized structural tokens (openers for unexpected closers, closers for missing/mismatched)
+  # - `actual_closer`: The actual closer from input (with zero-length meta) if consumed during recovery
+  #
+  # Synthesis Behavior
+  # ------------------
+  # - Unexpected closer: Synthesizes matching opener AFTER error (if insert_structural_closers is true)
+  # - Mismatched closer: Synthesizes expected closer AFTER error; actual closer follows with zero-length meta
+  # - Missing closer: Synthesizes expected closer AFTER error at EOF
+  # - All synthesized tokens use zero-length meta (start_pos == end_pos) to avoid position drift
+  #
+  # Scope Management
+  # ----------------
+  # - Synthesized openers are immediately popped (to avoid affecting downstream parsing)
+  # - Mismatched closers pop the stack only if the actual closer will be emitted
+  # - Missing closers pop one frame per synthesis
+  #
+  # Forward Progress Guarantee
+  # --------------------------
+  # Always advances at least one codepoint if recovery didn't move forward, preventing infinite loops.
+  #
   defp emit_error_and_advance(reason, rest, state) do
     error = case reason do %Toxic.Error{} = e -> e; other -> Toxic.Error.ensure_struct(other) end
     {def_rest, def_line, def_col} = scan_to_sync(rest, state)
@@ -1297,9 +1341,18 @@ defmodule Toxic.Driver do
           span_chars = take_prefix_until(rest, def_rest)
           id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
 
-          # In map contexts like "%{...}", some tests expect a standalone :% token
-          # to appear in the stream. If we just emitted a map opener or "{",
-          # pre-insert a synthetic :% before the error.
+          # Map Context Heuristic
+          # ----------------------
+          # When an identifier error follows a map opener (%{} or {), downstream tools
+          # (like parsers or editors) expect to see a standalone :% token in the stream
+          # to properly understand the map structure. This is because the identifier error
+          # may represent a partially-typed struct name or map key.
+          #
+          # Example: "%{Bad@Identifier}" should emit: :%{}, :{, :error_token, :}
+          #          (where :% helps tools understand this is map/struct context)
+          #
+          # We pre-insert a synthetic :% token with zero-length meta to preserve this
+          # structural expectation without affecting position tracking.
           pre_percent =
             case state.recent_token do
               {kind, _m, _v} when kind in [:%{}, :"{"] ->

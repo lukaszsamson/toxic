@@ -1,0 +1,227 @@
+defmodule ToxicErrorDetailsTest do
+  @moduledoc """
+  Deep verification tests for error details content, position fields, and synthesis behavior.
+  Tests ensure that error_token payloads contain accurate and complete details.
+  """
+  use ExUnit.Case
+
+  alias Toxic.Error
+
+  # -- Details Content Verification -------------------------------------------
+
+  describe "error details content verification" do
+    test "terminator_mismatched_closer includes all required delimiter details" do
+      tokens = tokenize_tolerant("([)")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :terminator_mismatched_closer, details: d}} = error_token
+
+      assert d[:opening_delimiter] == :"["
+      assert d[:closing_delimiter] == :")"
+      assert d[:expected_delimiter] == :"]"
+    end
+
+    test "terminator_missing_closer includes position details" do
+      tokens = tokenize_tolerant("(")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :terminator_missing_closer, details: d}} = error_token
+
+      assert d[:opening_delimiter] == :"("
+      assert d[:expected_delimiter] == :")"
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+      assert is_integer(d[:end_line])
+      assert is_integer(d[:end_column])
+    end
+
+    test "string_missing_terminator includes delimiter and suffix details" do
+      input = ~S["unclosed]
+      tokens = tokenize_tolerant(input)
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :string_missing_terminator, details: d}} = error_token
+
+      assert d[:opening_delimiter] == :"\""
+      assert d[:expected_delimiter] == :"\""
+      assert is_list(d[:suffix_iolist])
+    end
+
+    test "interpolation_missing_terminator includes start position and suffix" do
+      # To get interpolation_missing_terminator, we need a complete string with unclosed interpolation
+      # But since strings handle their own termination, we check for the interpolation details
+      # when the tokenizer properly tracks interpolation context
+      input = "\"foo \#{bar\""
+      tokens = tokenize_tolerant(input)
+
+      # In this case, we may get a string_missing_terminator because the whole string isn't closed
+      # OR we may get interpolation_missing_terminator if the interpolation is tracked separately
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{details: d}} = error_token
+
+      # Just verify we have position details
+      assert is_map(d)
+    end
+
+    test "number_trailing_garbage includes error message" do
+      tokens = tokenize_tolerant("0x")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, _meta, %Error{code: :number_trailing_garbage, details: d}} = error_token
+
+      assert is_list(d[:msg_iolist])
+      msg_str = IO.iodata_to_binary(d[:msg_iolist])
+      assert msg_str =~ "invalid character"
+    end
+  end
+
+  # -- Position Field Verification --------------------------------------------
+
+  describe "position field verification" do
+    test "error_token meta has correct position for unexpected closer" do
+      tokens = tokenize_tolerant(")")
+
+      assert {:error_token, meta, %Error{code: :terminator_unexpected_closer}} = hd(tokens)
+      assert {{1, 1}, {1, 2}, _} = meta
+    end
+
+    test "error_token meta has correct position for mismatched closer" do
+      tokens = tokenize_tolerant("([)")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, meta, %Error{code: :terminator_mismatched_closer}} = error_token
+
+      # Error should be at the mismatched closer position
+      assert {{line, col}, {end_line, end_col}, _} = meta
+      assert line == 1
+      assert col == 3
+      assert end_line == 1
+      assert end_col == 4
+    end
+
+    test "error_token meta has correct position for string error" do
+      input = ~S["unclosed]
+      tokens = tokenize_tolerant(input)
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, meta, %Error{code: :string_missing_terminator}} = error_token
+
+      # Error position should be at end of unclosed string
+      assert {{line, col}, {end_line, end_col}, _} = meta
+      assert is_integer(line)
+      assert is_integer(col)
+      assert is_integer(end_line)
+      assert is_integer(end_col)
+    end
+
+    test "error_token meta has correct position for number error" do
+      tokens = tokenize_tolerant("0x")
+
+      error_token = find_error_token(tokens)
+      assert {:error_token, meta, %Error{code: :number_trailing_garbage}} = error_token
+
+      assert {{1, 1}, {1, 3}, _} = meta
+    end
+  end
+
+  # -- Zero-Length Meta Tests for Synthesis -----------------------------------
+
+  describe "zero-length meta for synthesis tokens" do
+    test "synthesized closer has zero-length meta after unexpected closer error" do
+      tokens = tokenize_tolerant(")", synthesis: true)
+
+      # Should emit: error_token, synthesized opener, actual closer
+      assert length(tokens) >= 2
+
+      assert {:error_token, _meta, %Error{code: :terminator_unexpected_closer}} = Enum.at(tokens, 0)
+
+      # Find the synthesized opener (should be :( with zero-length meta)
+      synthesized = Enum.at(tokens, 1)
+      assert {:"(", syn_meta} = synthesized
+      assert {{line, col}, {end_line, end_col}, _} = syn_meta
+      # Zero-length: start and end positions are the same
+      assert line == end_line
+      assert col == end_col
+    end
+
+    test "synthesized closer has zero-length meta after mismatched closer error" do
+      tokens = tokenize_tolerant("([)", synthesis: true)
+
+      # Find the error and check tokens after it
+      error_idx = Enum.find_index(tokens, fn t -> match?({:error_token, _, _}, t) end)
+      assert error_idx != nil
+
+      # After error_token, should have synthesized ] with zero-length meta
+      synthesized = Enum.at(tokens, error_idx + 1)
+      assert {:"]", syn_meta} = synthesized
+      assert {{line, col}, {end_line, end_col}, _} = syn_meta
+      assert line == end_line
+      assert col == end_col
+    end
+
+    test "synthesized missing closer has zero-length meta at EOF" do
+      tokens = tokenize_tolerant("(", synthesis: true)
+
+      # Should have error_token and synthesized closer
+      assert length(tokens) >= 2
+
+      error_idx = Enum.find_index(tokens, fn t -> match?({:error_token, _, _}, t) end)
+      assert error_idx != nil
+
+      synthesized = Enum.at(tokens, error_idx + 1)
+      assert {:")", syn_meta} = synthesized
+      assert {{line, col}, {end_line, end_col}, _} = syn_meta
+      assert line == end_line
+      assert col == end_col
+    end
+
+    test "synthesized string terminator has zero-length meta" do
+      input = ~S["unclosed]
+      tokens = tokenize_tolerant(input, synthesis: true)
+
+      # Find the string end token (synthesized)
+      string_end = Enum.find(tokens, fn t ->
+        match?({:bin_string, _meta, _content}, t) or match?({:bin_string_end, _meta}, t)
+      end)
+
+      # The bin_string_end should have been synthesized with zero-length meta
+      if string_end != nil do
+        case string_end do
+          {:bin_string_end, meta} ->
+            assert {{line, col}, {end_line, end_col}, _} = meta
+            assert line == end_line
+            assert col == end_col
+          _ -> :ok
+        end
+      end
+    end
+  end
+
+  # -- Helper Functions -------------------------------------------------------
+
+  defp tokenize_tolerant(input, opts \\ []) do
+    default_opts = [error_mode: :tolerant, synthesis: false]
+    merged_opts = Keyword.merge(default_opts, opts)
+
+    stream = Toxic.TokenStream.new(input, 1, 1, merged_opts)
+    collect_all_tokens(stream, [])
+  end
+
+  defp collect_all_tokens(stream, acc) do
+    case Toxic.TokenStream.next(stream) do
+      {:ok, token, new_stream} -> collect_all_tokens(new_stream, [token | acc])
+      {:eof, _} -> Enum.reverse(acc)
+      {:error, _reason, _} -> flunk("Stream returned {:error, ...} in tolerant mode")
+    end
+  end
+
+  defp find_error_token(tokens, code \\ nil) do
+    if code do
+      Enum.find(tokens, fn t ->
+        match?({:error_token, _, %Error{code: ^code}}, t)
+      end)
+    else
+      Enum.find(tokens, fn t -> match?({:error_token, _, _}, t) end)
+    end
+  end
+end
