@@ -1,4 +1,5 @@
 defmodule Toxic.Number do
+  @moduledoc false
   import Toxic.CharacterClassifier
 
   def tokenize_hex([h | t], acc, length) when is_hex(h) do

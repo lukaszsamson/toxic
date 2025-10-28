@@ -1,4 +1,5 @@
 defmodule Toxic.String do
+  @moduledoc false
   import Toxic.Token
   import Toxic.CharacterClassifier
 

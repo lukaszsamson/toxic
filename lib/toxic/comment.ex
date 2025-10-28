@@ -1,4 +1,5 @@
 defmodule Toxic.Comment do
+  @moduledoc false
   import Toxic.CharacterClassifier
 
   def tokenize_comment([?\r, ?\n | _] = rest, acc) do

@@ -1,4 +1,5 @@
 defmodule Toxic.Dot do
+  @moduledoc false
   import Toxic.Scope
   import Toxic.Util
   import Toxic.Comment

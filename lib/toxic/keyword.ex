@@ -1,4 +1,5 @@
 defmodule Toxic.Keyword do
+  @moduledoc false
   import Toxic.Token
   import Toxic.Util
   import Toxic.Terminator

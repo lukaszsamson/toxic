@@ -1,4 +1,5 @@
 defmodule Toxic.Identifier do
+  @moduledoc false
   import Toxic.Scope
   import Toxic.Util
   import Toxic.Token

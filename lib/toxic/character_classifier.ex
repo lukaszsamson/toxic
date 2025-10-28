@@ -1,4 +1,5 @@
 defmodule Toxic.CharacterClassifier do
+  @moduledoc false
   # Digits and letters
   defguard is_digit(s) when s in ?0..?9
   defguard is_upcase(s) when s in ?A..?Z

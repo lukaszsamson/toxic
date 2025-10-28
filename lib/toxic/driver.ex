@@ -46,6 +46,7 @@ defmodule Toxic.Driver do
           scope: Toxic.Scope.scope()
         }
 
+  @spec new(keyword()) :: Toxic.Driver.t()
   def new(opts \\ []) do
     elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
     preserve_comments = Keyword.get(opts, :preserve_comments, false)
@@ -86,6 +87,12 @@ defmodule Toxic.Driver do
     emit_error_and_advance(reason, rest, state)
   end
 
+  @spec next(any(), Toxic.Driver.t()) ::
+          {:eof, Toxic.Driver.t()}
+          | {:error,
+             {[...], binary() | maybe_improper_list(any(), binary() | []),
+              maybe_improper_list(any(), binary() | [])}, any(), Toxic.Driver.t()}
+          | {:ok, any(), any(), Toxic.Driver.t()}
   def next(rest, %__MODULE__{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end
@@ -328,14 +335,14 @@ defmodule Toxic.Driver do
 
         # Check for unnecessary quotes on calls
         updated_scope =
-          case __MODULE__.is_unnecessary_quote(
+          case is_unnecessary_quote(
                  Enum.reverse(fragments),
                  saw_interp,
                  :quoted_identifier,
                  scope
                ) do
             {true, content} ->
-              __MODULE__.maybe_warn_unnecessary_quote(
+              maybe_warn_unnecessary_quote(
                 :quoted_identifier,
                 content,
                 delim,
@@ -387,7 +394,7 @@ defmodule Toxic.Driver do
             # Note: Elixir reports warnings at column-1 (the ' position), so start_info.column
             # already points there (it's before the quote delimiter)
             updated_scope =
-              case __MODULE__.is_unnecessary_quote(
+              case is_unnecessary_quote(
                      Enum.reverse(fragments),
                      saw_interp,
                      end_token_type,
@@ -395,7 +402,7 @@ defmodule Toxic.Driver do
                    ) do
                 {true, content} ->
                   # Quotes are unnecessary - emit only this warning
-                  __MODULE__.maybe_warn_unnecessary_quote(
+                  maybe_warn_unnecessary_quote(
                     end_token_type,
                     content,
                     delim,
@@ -447,7 +454,7 @@ defmodule Toxic.Driver do
             # Check for unnecessary quotes on atoms and emit charlist warning for charlists
             updated_scope =
               if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
-                case __MODULE__.is_unnecessary_quote(
+                case is_unnecessary_quote(
                        Enum.reverse(fragments),
                        saw_interp,
                        kind,
@@ -459,7 +466,7 @@ defmodule Toxic.Driver do
                     {{_start_line, token_start_col}, {_end_line, _end_col}, _extra} =
                       elem(start_info.token, 1)
 
-                    __MODULE__.maybe_warn_unnecessary_quote(
+                    maybe_warn_unnecessary_quote(
                       kind,
                       content,
                       delim,
@@ -1707,6 +1714,7 @@ defmodule Toxic.Driver do
     current_terms ++ context_terms
   end
 
+  @spec closing_for(atom()) :: atom()
   def closing_for(:fn), do: :end
   def closing_for(:do), do: :end
   def closing_for(:"("), do: :")"
@@ -1721,11 +1729,10 @@ defmodule Toxic.Driver do
 
   # Helper functions for unnecessary quote warning
 
-  @doc false
-  def is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope) when saw_interpolation?,
+  defp is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope) when saw_interpolation?,
     do: false
 
-  def is_unnecessary_quote(fragments, false, kind, scope) do
+  defp is_unnecessary_quote(fragments, false, kind, scope) do
     case fragments do
       [single_fragment] ->
         # We have exactly one fragment, check if it's a valid identifier
@@ -1768,8 +1775,7 @@ defmodule Toxic.Driver do
     end
   end
 
-  @doc false
-  def maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
+  defp maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
     warning =
       case kind do
         k when k in [:atom_safe, :atom_unsafe] ->

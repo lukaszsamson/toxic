@@ -1,4 +1,5 @@
 defmodule Toxic.Tokenizer do
+  @moduledoc false
   import Toxic.CharacterClassifier
   import Toxic.Token
   import Toxic.Operator

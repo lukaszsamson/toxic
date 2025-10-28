@@ -1,4 +1,5 @@
 defmodule Toxic.Sigil do
+  @moduledoc false
   import Toxic.CharacterClassifier
   import Toxic.Token
 

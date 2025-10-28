@@ -1,4 +1,5 @@
 defmodule Toxic.Terminator do
+  @moduledoc false
   import Toxic.Scope
   import Toxic.Util
 

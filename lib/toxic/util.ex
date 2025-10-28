@@ -1,4 +1,5 @@
 defmodule Toxic.Util do
+  @moduledoc false
   import Toxic.CharacterClassifier, only: [is_horizontal_space: 1]
   import Toxic.Scope
 

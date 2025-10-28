@@ -1,4 +1,5 @@
 defmodule Toxic.Interpolation do
+  @moduledoc false
   import Toxic.Token
   import Toxic.Scope
   import Toxic.CharacterClassifier

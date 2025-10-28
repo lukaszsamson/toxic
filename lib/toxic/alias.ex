@@ -1,4 +1,5 @@
 defmodule Toxic.Alias do
+  @moduledoc false
   import Toxic.Util
   import Toxic.Token
 

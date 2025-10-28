@@ -1,4 +1,5 @@
 defmodule Toxic.Token do
+  @moduledoc false
   defmacro meta(line, column, length, extra) do
     quote do
       {{unquote(line), unquote(column)}, {unquote(line), unquote(column) + unquote(length)},
