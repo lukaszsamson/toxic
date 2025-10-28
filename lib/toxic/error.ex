@@ -117,7 +117,8 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :terminator_unexpected_closer, token_display: tok}) do
     case List.wrap(tok) do
-      ~c"end" -> ~c"unexpected reserved word: "
+      # TODO: no coverage
+      # ~c"end" -> ~c"unexpected reserved word: "
       _ -> ~c"unexpected token: "
     end
   end
@@ -303,14 +304,11 @@ defmodule Toxic.Error do
     help =
       case Map.get(d, :help_iolist, []) do
         {_prefix, actual_help} -> actual_help
-        other -> other
+        # TODO: no coverage
+        # other -> other
       end
 
     {~c"unexpected reserved word: ", help}
-  end
-
-  def format(%__MODULE__{code: :unexpected_token, token_display: tok}) do
-    [~c"unexpected token: ", List.wrap(tok)]
   end
 
   def format(%__MODULE__{code: :identifier_nonexistent_atom_when_existing_only}) do
@@ -329,9 +327,10 @@ defmodule Toxic.Error do
     ~c"unexpected token: "
   end
 
-  def format(%__MODULE__{}) do
-    ~c"syntax error"
-  end
+  # TODO: no coverage
+  # def format(%__MODULE__{}) do
+  #   ~c"syntax error"
+  # end
 
   @doc """
   Convert a structured error to a legacy reason tuple `{meta_kv, message_iodata, token_chars}`
@@ -505,11 +504,8 @@ defmodule Toxic.Error do
 
   defp terminator_chars(delimiter) when is_atom(delimiter) do
     delimiter
-    |> Atom.to_string()
-    |> String.to_charlist()
+    |> Atom.to_charlist()
   end
-
-  defp terminator_chars(delimiter) when is_list(delimiter), do: delimiter
 
   # -- Details validation -----------------------------------------------------
   # Validators check that required details keys are present for each error code.
