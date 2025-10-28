@@ -191,7 +191,9 @@ defmodule Toxic.TokenStream do
           stream.error ->
             case Keyword.get(stream.opts, :error_mode, :tolerant) do
               :strict -> {:error, stream.error, stream}
-              :tolerant -> recover_next(stream)
+              :tolerant ->
+                # TODO: no coverage
+                recover_next(stream)
             end
 
           true ->
@@ -227,6 +229,7 @@ defmodule Toxic.TokenStream do
                 {:error, stream.error, stream}
 
               :tolerant ->
+                # TODO: no coverage
                 stream = recover_into_buffer(stream)
                 peek(stream)
             end
@@ -308,9 +311,13 @@ defmodule Toxic.TokenStream do
             new_not_filled = needed - length(new_buf_tokens)
 
             cond do
-              new_not_filled == 0 -> {:ok, push_tokens ++ new_buf_tokens, stream}
+              new_not_filled == 0 ->
+                # TODO: no coverage
+                {:ok, push_tokens ++ new_buf_tokens, stream}
               stream.eof -> {:eof, push_tokens ++ new_buf_tokens, stream}
-              true -> {:ok, push_tokens ++ new_buf_tokens, stream}
+              true ->
+                # TODO: no coverage
+                {:ok, push_tokens ++ new_buf_tokens, stream}
             end
         end
       end
@@ -565,6 +572,7 @@ defmodule Toxic.TokenStream do
   @type error_entry :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}, any()}
   @spec errors(t()) :: {[{error_entry(), Toxic.Error.t()}], t()}
   def errors(%__MODULE__{} = stream) do
+    # TODO: no coverage
     tokens = to_stream(stream) |> Enum.to_list()
 
     errs =
@@ -706,6 +714,7 @@ defmodule Toxic.TokenStream do
             {{stream.driver.line, stream.driver.column}, stream}
 
           Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant and stream.error ->
+            # TODO: no coverage
             stream = recover_into_buffer(stream)
             position(stream)
 
@@ -728,6 +737,7 @@ defmodule Toxic.TokenStream do
         stream
 
       stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant ->
+        # TODO: no coverage
         stream
         |> recover_into_buffer()
         |> ensure_buffer_size(needed)
@@ -742,14 +752,23 @@ defmodule Toxic.TokenStream do
   # Attempt to fill buffer with at least count more tokens in tolerant mode
   defp fill_for_peek(%__MODULE__{} = stream, count, tries \\ 0) do
     cond do
-      tries > 4 -> stream
-      stream.eof -> stream
-      stream.error -> fill_for_peek(recover_into_buffer(stream), count, tries + 1)
-      true -> fill_for_peek(refill_buffer(stream), count, tries + 1)
+      tries > 4 ->
+        # TODO: no coverage
+        stream
+      stream.eof ->
+        # TODO: no coverage
+        stream
+      stream.error ->
+        # TODO: no coverage
+        fill_for_peek(recover_into_buffer(stream), count, tries + 1)
+      true ->
+        # TODO: no coverage
+        fill_for_peek(refill_buffer(stream), count, tries + 1)
     end
   end
 
   defp recover_next(%__MODULE__{} = stream) do
+    # TODO: no coverage
     # Recover one error token directly and return it
     pre_terms = Toxic.Driver.current_terminators(stream.driver)
 
@@ -775,6 +794,7 @@ defmodule Toxic.TokenStream do
   end
 
   defp recover_into_buffer(%__MODULE__{} = stream) do
+    # TODO: no coverage
     pre_terms = Toxic.Driver.current_terminators(stream.driver)
 
     case Toxic.Driver.recover(stream.source, stream.driver, stream.error) do

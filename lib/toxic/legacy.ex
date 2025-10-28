@@ -26,6 +26,7 @@ defmodule Toxic.Legacy do
           {type, {line, col, extra}, value}
 
         {true, {type, {line, col, extra}, a, b}} when is_integer(col) and col > 1 ->
+          # TODO: no coverage
           {type, {line, col, extra}, a, b}
 
         _ ->

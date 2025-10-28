@@ -198,6 +198,7 @@ defmodule Toxic.Warning do
       deprecated_bnot_operator(1, 1)
   """
   def deprecated_bnot_operator(line, column) do
+    # TODO: no coverage
     new(
       :deprecated_bnot_operator,
       :deprecated,
@@ -420,6 +421,7 @@ defmodule Toxic.Warning do
       ambiguous_question_before_equals(1, 5, ~c"foo?", :identifier)
   """
   def ambiguous_question_before_equals(line, column, identifier, kind) do
+    # TODO: no coverage
     msg =
       :io_lib.format(
         ~c"found ~ts \"~ts\", ending with \"?\", followed by =. " ++
@@ -550,6 +552,7 @@ defmodule Toxic.Warning do
       non_latin_atom(1, 5, :café)
   """
   def non_latin_atom(line, column, atom) do
+    # TODO: no coverage
     new(
       :non_latin_atom,
       :unicode,
@@ -570,6 +573,7 @@ defmodule Toxic.Warning do
       confusable_identifier_char(1, 5, ~c"fοo", ?ο)
   """
   def confusable_identifier_char(line, column, identifier, confusable_char) do
+    # TODO: no coverage
     new(
       :confusable_identifier_char,
       :unicode,

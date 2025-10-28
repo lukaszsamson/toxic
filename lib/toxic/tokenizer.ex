@@ -813,7 +813,9 @@ defmodule Toxic.Tokenizer do
   defp handle_char(?\f), do: {~c"\\f", ~c"form feed"}
   defp handle_char(?\n), do: {~c"\\n", ~c"newline"}
   defp handle_char(?\r), do: {~c"\\r", ~c"carriage return"}
+  # TODO: no coverage
   defp handle_char(?\s), do: {~c"\\s", ~c"space"}
+  # TODO: no coverage
   defp handle_char(?\t), do: {~c"\\t", ~c"tab"}
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
@@ -917,10 +919,12 @@ defmodule Toxic.Tokenizer do
         Toxic.Scope.prepend_warning(warning, scope)
 
       ?? ->
+        # TODO: no coverage
         warning = Toxic.Warning.ambiguous_question_before_equals(line, column, identifier, kind)
         Toxic.Scope.prepend_warning(warning, scope)
 
       _ ->
+        # TODO: no coverage
         scope
     end
   end

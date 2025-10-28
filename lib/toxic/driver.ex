@@ -160,6 +160,7 @@ defmodule Toxic.Driver do
           | {:eof, t()}
           | {:error, error_reason(), input(), t()}
   def recover(rest, %__MODULE__{error_mode: :tolerant} = state, reason) do
+    # TODO: no coverage
     emit_error_and_advance(reason, rest, state)
   end
 
@@ -1047,6 +1048,7 @@ defmodule Toxic.Driver do
         )
 
       false ->
+        # TODO: no coverage
         []
     end
   end
@@ -1094,7 +1096,9 @@ defmodule Toxic.Driver do
 
     parent_terms_list =
       case parent_terms do
-        :none -> []
+        :none ->
+          # TODO: no coverage
+          []
         list when is_list(list) -> list
       end
 
@@ -1122,7 +1126,9 @@ defmodule Toxic.Driver do
 
     new_terms =
       case terms do
-        [] -> []
+        [] ->
+          # TODO: no coverage
+          []
         [_ | rest] -> rest
       end
 
@@ -1137,7 +1143,9 @@ defmodule Toxic.Driver do
   end
 
   defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
+  # TODO: no coverage
   defp drop_first_interp([head | tail]), do: [head | drop_first_interp(tail)]
+  # TODO: no coverage
   defp drop_first_interp([]), do: []
 
   # Drop the first :normal that immediately precedes an interpolation frame,
@@ -1149,6 +1157,7 @@ defmodule Toxic.Driver do
   defp drop_first_normal_before_interp([head | tail]),
     do: [head | drop_first_normal_before_interp(tail)]
 
+  # TODO: no coverage
   defp drop_first_normal_before_interp(list), do: list
 
   defp synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
@@ -1162,6 +1171,7 @@ defmodule Toxic.Driver do
 
   defp synthesize_end_for_kind(:charlist, delim, meta), do: {:list_string_end, meta, delim}
   defp synthesize_end_for_kind(:string, delim, meta), do: {:bin_string_end, meta, delim}
+  # TODO: no coverage
   defp synthesize_end_for_kind(:atom_safe, delim, meta), do: {:atom_safe_end, meta, delim}
   defp synthesize_end_for_kind(:atom_unsafe, delim, meta), do: {:atom_unsafe_end, meta, delim}
 
@@ -1398,7 +1408,9 @@ defmodule Toxic.Driver do
         # The error_token's position already captures the "end" location for diagnostics.
         case rest do
           [?e, ?n, ?d, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
-          [?e, ?n, ?d, ?\r, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
+          [?e, ?n, ?d, ?\r, ?\n | tail] ->
+            # TODO: no coverage
+            {tail, state.line + 1, 1, [], state.scope}
           [?e, ?n, ?d | tail] -> {tail, state.line, state.column + 3, [], state.scope}
           _ -> {def_rest, def_line, def_col, [], state.scope}
         end
@@ -1417,6 +1429,7 @@ defmodule Toxic.Driver do
             {tail, state.line, state.column + 1, [paren_token], new_scope}
 
           _ ->
+            # TODO: no coverage
             {def_rest, def_line, def_col, [], state.scope}
         end
 
@@ -1460,6 +1473,7 @@ defmodule Toxic.Driver do
             {tail, state.line, state.column + consumed_len, [id_token], state.scope}
 
           _ ->
+            # TODO: no coverage
             {def_rest, def_line, def_col, [], state.scope}
         end
 
@@ -1476,6 +1490,7 @@ defmodule Toxic.Driver do
             {rest_no_ws, l_after, c_after, [percent_token], state.scope}
 
           _ ->
+            # TODO: no coverage
             {def_rest, def_line, def_col, [], state.scope}
         end
 
@@ -1491,6 +1506,7 @@ defmodule Toxic.Driver do
             _ -> {def_rest, def_line, def_col, [], state.scope}
           end
         else
+          # TODO: no coverage
           {def_rest, def_line, def_col, [], state.scope}
         end
 
@@ -1502,7 +1518,9 @@ defmodule Toxic.Driver do
           case List.wrap(err.token_display) do
             [?', ?', ?'] = delim -> {:list_heredoc_end, meta_end, delim, 0}
             [?", ?", ?"] = delim -> {:bin_heredoc_end, meta_end, delim, 0}
-            _ -> nil
+            _ ->
+              # TODO: no coverage
+              nil
           end
 
         inserts = if end_token, do: [{:post_error, end_token}], else: []
@@ -1528,6 +1546,7 @@ defmodule Toxic.Driver do
           pre_percent =
             case state.recent_token do
               {kind, _m, _v} when kind in [:%{}, :"{"] ->
+                # TODO: no coverage
                 meta0 = meta(state.line, state.column, state.line, state.column, nil)
                 [{:%, meta0}]
 
@@ -1542,6 +1561,7 @@ defmodule Toxic.Driver do
 
       # P1: Minimal recovery for simple lexical errors from the main tokenizer
       {:tokenizer, _code} ->
+        # TODO: no coverage
         {new_rest, new_line, new_col} = consume_one(rest, state)
         {new_rest, new_line, new_col, [], state.scope}
 
@@ -1565,7 +1585,9 @@ defmodule Toxic.Driver do
       try do
         String.Tokenizer.Security.confusable_skeleton(bin)
       rescue
-        _ -> bin
+        _ ->
+          # TODO: no coverage
+          bin
       end
 
     nfkc = :unicode.characters_to_nfkc_list(skeleton)
@@ -1587,22 +1609,29 @@ defmodule Toxic.Driver do
 
   defp do_take_prefix_until(list, list, acc), do: Enum.reverse(acc)
   defp do_take_prefix_until([h | t], tail, acc), do: do_take_prefix_until(t, tail, [h | acc])
+  # TODO: no coverage
   defp do_take_prefix_until([], _tail, acc), do: Enum.reverse(acc)
 
+  # TODO: it's most likely wrong, unicode identifiers are allowed
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
   defp allowed_ident_char?(c) when c in ?A..?Z, do: true
   defp allowed_ident_char?(c) when c in ?a..?z, do: true
+  # TODO: no coverage
   defp allowed_ident_char?(?_), do: true
   defp allowed_ident_char?(_), do: false
 
+  # TODO: no coverage
   defp ensure_ident_start([]), do: [?x]
+  # TODO: it's most likely wrong, unicode identifiers are allowed
   defp ensure_ident_start([h | _] = list) when h in ?A..?Z or h in ?a..?z or h == ?_, do: list
+  # TODO: no coverage
   defp ensure_ident_start(list), do: [?_ | list]
 
   defp ternary_missing_slash?(rest) do
     case rest do
       [?., ?., ?/, ?/ | tail] ->
         case tail do
+          # TODO: no coverage
           [?/ | _] -> false
           _ -> true
         end
@@ -1613,6 +1642,7 @@ defmodule Toxic.Driver do
   end
 
   defp consume_until_newline([?\n | rest]), do: {rest, true}
+  # TODO: no coverage
   defp consume_until_newline([?\r, ?\n | rest]), do: {rest, true}
   defp consume_until_newline([_ | rest]), do: consume_until_newline(rest)
   defp consume_until_newline([]), do: {[], false}
@@ -1621,15 +1651,18 @@ defmodule Toxic.Driver do
     consume_leading_spaces(rest, line, column, 0)
   end
 
+  # TODO: no coverage
   defp consume_leading_spaces([?\\, ?\n | tail], line, _column, count) do
     consume_leading_spaces(tail, line + 1, 1, count + 1)
   end
 
+  # TODO: no coverage
   defp consume_leading_spaces([?\\, ?\r, ?\n | tail], line, _column, count) do
     consume_leading_spaces(tail, line + 1, 1, count + 1)
   end
 
-  defp consume_leading_spaces([ch | tail], line, column, count) when ch in [?\t, ?\f, ?\v, 32] do
+  # TODO: no coverage
+  defp consume_leading_spaces([ch | tail], line, column, count) when is_horizontal_space(ch) do
     consume_leading_spaces(tail, line, column + 1, count + 1)
   end
 
@@ -1658,6 +1691,7 @@ defmodule Toxic.Driver do
 
   defp do_scan_to_sync(rest, state, scanned) when scanned >= state.error_max_skip do
     # Fallback: consume a single codepoint
+    # TODO: no coverage
     consume_one(rest, state)
   end
 
@@ -1683,11 +1717,13 @@ defmodule Toxic.Driver do
           do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
 
         [] ->
+          # TODO: no coverage
           {[], state.line, state.column}
       end
     end
   end
 
+  # TODO: no coverage
   defp advance_pos(?\n, line, _col), do: {line + 1, 1}
   defp advance_pos(_ch, line, col), do: {line, col + 1}
 
@@ -1733,6 +1769,7 @@ defmodule Toxic.Driver do
   defp closer_starts_with?(list, :")"), do: starts_with_char?(list, ?))
   defp closer_starts_with?(list, :"]"), do: starts_with_char?(list, ?])
   defp closer_starts_with?(list, :"}"), do: starts_with_char?(list, ?})
+  # TODO: no coverage
   defp closer_starts_with?(list, :">>"), do: starts_with_list?(list, [?>, ?>])
   defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
 
@@ -1740,6 +1777,7 @@ defmodule Toxic.Driver do
     do: starts_with_list?(list, terminator_chars(expected))
 
   defp starts_with_char?([h | _], ch), do: h == ch
+  # TODO: no coverage
   defp starts_with_char?(_, _), do: false
 
   defp starts_with_list?(_list, []), do: true
@@ -1904,8 +1942,9 @@ defmodule Toxic.Driver do
       {:identifier, ^charlist, _atom, [], _length, false, _special} ->
         # Valid identifier but not ASCII - still valid for calls
         case kind do
-          :quoted_identifier ->
-            {true, content}
+          # TODO: no coverage
+          # :quoted_identifier ->
+          #   {true, content}
 
           _ ->
             false
@@ -1973,7 +2012,8 @@ defmodule Toxic.Driver do
     end
   end
 
-  defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
+  # TODO: no coverage
+  # defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
 
   defp closer_atom_from_chars(~c")"), do: :")"
   defp closer_atom_from_chars(~c"]"), do: :"]"
@@ -1996,7 +2036,8 @@ defmodule Toxic.Driver do
 
     new_terms =
       case terms do
-        [] -> []
+        # TODO: no coverage
+        # [] -> []
         [_ | rest] -> rest
       end
 

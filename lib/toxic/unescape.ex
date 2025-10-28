@@ -33,6 +33,7 @@ defmodule Toxic.Unescape do
   end
 
   defp unescape_chars(<<?\\, ?u, rest::binary>>, map_fun, acc) do
+    # TODO: no coverage
     case map_fun.(:unicode) do
       true -> unescape_unicode(rest, map_fun, acc)
       false -> unescape_chars(rest, map_fun, <<acc::binary, ?\\, ?u>>)
@@ -67,6 +68,7 @@ defmodule Toxic.Unescape do
   defp unescape_chars(<<>>, _map_fun, acc), do: acc
 
   defp unescape_hex(<<a, b, rest::binary>>, map_fun, acc) when is_hex(a) and is_hex(b) do
+    # TODO: no coverage
     bytes = :erlang.list_to_integer([a, b], 16)
     unescape_chars(rest, map_fun, <<acc::binary, bytes>>)
   end
@@ -141,36 +143,43 @@ defmodule Toxic.Unescape do
   end
 
   defp unescape_unicode(<<?{, a, ?}, rest::binary>>, map_fun, acc) when is_hex(a) do
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, e, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d, e], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, e, f, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) and is_hex(f) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d, e, f], acc, 16)
   end
 
   defp unescape_unicode(<<a, b, c, d, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) do
+        # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d], acc, 16)
   end
 
@@ -194,18 +203,25 @@ defmodule Toxic.Unescape do
   end
 
   def unescape_map(:newline), do: true
+  # TODO: no coverage
   def unescape_map(:unicode), do: true
   def unescape_map(:hex), do: true
   def unescape_map(?0), do: 0
   def unescape_map(?a), do: 7
+  # TODO: no coverage
   def unescape_map(?b), do: ?\b
+  # TODO: no coverage
   def unescape_map(?d), do: ?\d
+  # TODO: no coverage
   def unescape_map(?e), do: ?\e
+  # TODO: no coverage
   def unescape_map(?f), do: ?\f
   def unescape_map(?n), do: ?\n
   def unescape_map(?r), do: ?\r
+  # TODO: no coverage
   def unescape_map(?s), do: ?\s
   def unescape_map(?t), do: ?\t
+  # TODO: no coverage
   def unescape_map(?v), do: ?\v
   def unescape_map(other), do: other
 end

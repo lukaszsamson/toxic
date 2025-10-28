@@ -104,6 +104,7 @@ defmodule Toxic.Operator do
 
   def handle_op([?: | rest], line, column, _kind, length, op, scope, _tokens)
       when is_space(hd(rest)) do
+        # TODO: no coverage
     token = {:kw_identifier, meta(line, column, length, nil), op}
     emit(token, rest, line, column + length + 1, scope)
   end
@@ -122,6 +123,7 @@ defmodule Toxic.Operator do
               Toxic.Scope.prepend_warning(warning, scope)
 
             :"~~~" ->
+              # TODO: no coverage
               warning = Toxic.Warning.deprecated_bnot_operator(line, column)
               Toxic.Scope.prepend_warning(warning, scope)
 
