@@ -9,9 +9,31 @@ defmodule Toxic.TokenStream do
   - Lookahead, pushback, and incremental lexing support
   """
 
-  @typedoc "Token with ranged meta; shapes match tokenizer"
-  # TODO: better typespec with detailed types
-  @type token :: tuple()
+  @typedoc """
+  Token metadata with ranged position information.
+
+  Format: `{{start_line, start_column}, {end_line, end_column}, extra}`
+  - Line and column are 1-based
+  - End position is exclusive
+  - Extra can be `nil` or contain token-specific information
+  """
+  @type meta :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}, term()}
+
+  @typedoc """
+  Token with ranged meta.
+
+  All tokens follow one of these shapes:
+  - `{atom(), meta()}` - Simple tokens like delimiters
+  - `{atom(), meta(), term()}` - Tokens with a value (identifiers, literals, etc.)
+  - `{atom(), meta(), term(), term()}` - Special tokens like sigils with multiple attributes
+
+  Where `meta()` is `{{start_line, start_column}, {end_line, end_column}, extra}`
+  with 1-based line/column positions and exclusive end positions.
+  """
+  @type token ::
+          {atom(), meta()}
+          | {atom(), meta(), term()}
+          | {atom(), meta(), term(), term()}
 
   @typedoc "Lexer/process options"
   @type options :: [
@@ -26,43 +48,59 @@ defmodule Toxic.TokenStream do
           | {:existing_atoms_only, boolean()}
         ]
 
-  @typedoc "Stream handle"
-  @type t :: %__MODULE__{
-          # Buffer holds entries of {token, pre_terms, pre_pos}
-          buffer:
-            :queue.queue({
-              token,
-              [{atom(), term(), non_neg_integer()}] | nil,
-              {pos_integer(), pos_integer()} | nil
-            }),
-          # Push stack holds same entry shape for accurate state when pushing back
-          push: [
-            {
-              token,
-              [{atom(), term(), non_neg_integer()}] | nil,
-              {pos_integer(), pos_integer()} | nil
-            }
-          ],
-          driver: Toxic.Driver.t(),
-          opts: options,
-          eof: boolean(),
-          error: term() | nil,
-          # Track the last emitted entry to support precise pushback
-          last_emitted_entry:
-            {
-              token,
-              [{atom(), term(), non_neg_integer()}] | nil,
-              {pos_integer(), pos_integer()} | nil
-            }
-            | nil
+  @typedoc """
+  Internal buffer entry.
+
+  Each buffered token is stored with:
+  - `token` - The token itself
+  - `pre_terms` - Terminator stack snapshot before this token (nil if not captured)
+  - `pre_pos` - Position before this token (nil if not captured)
+  """
+  @type buffer_entry :: {
+          token(),
+          terminator_stack() | nil,
+          position() | nil
         }
 
-  # TODO: Make sure it actually works with binary, iolist and producer function
-  @typedoc "Source can be a binary or a producer function"
+  @typedoc "Terminator stack entry: `{delimiter_atom, meta, indentation}`"
+  @type terminator_entry :: {atom(), term(), non_neg_integer()}
+
+  @typedoc "Stack of open terminators (delimiters, do/end blocks, etc.)"
+  @type terminator_stack :: [terminator_entry()]
+
+  @typedoc "Line and column position (1-based)"
+  @type position :: {pos_integer(), pos_integer()}
+
+  @typedoc "Stream handle"
+  @type t :: %__MODULE__{
+          buffer: :queue.queue(buffer_entry()),
+          push: [buffer_entry()],
+          driver: Toxic.Driver.t(),
+          opts: options(),
+          eof: boolean(),
+          error: Toxic.Error.t() | legacy_error() | nil,
+          last_emitted_entry: buffer_entry() | nil
+        }
+
+  @typedoc """
+  Source can be a binary, iodata, or a producer function.
+
+  Producer function receives current line and column and returns:
+  - `{:more, binary()}` - More input available
+  - `:eof` - End of input
+  """
   @type source ::
           iodata() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof)
 
-  @type error() :: any()
+  @typedoc """
+  Error value.
+
+  Can be either a structured `Toxic.Error` or a legacy error tuple/charlist.
+  """
+  @type error :: Toxic.Error.t()
+
+  @typedoc "Legacy error format (for compatibility)"
+  @type legacy_error :: {charlist(), binary(), charlist()} | charlist()
 
   defstruct buffer: :queue.new(),
             push: [],
@@ -90,14 +128,32 @@ defmodule Toxic.TokenStream do
   @doc """
   Create a new token stream from source.
 
+  ## Parameters
+  - `source` - Binary, iodata, or producer function
+  - `line` - Starting line number (default: 1)
+  - `column` - Starting column number (default: 1)
+  - `opts` - Keyword list of options
+
   ## Options
-  - `:unescape` - Whether to unescape string contents (default: true)
-  - `:max_batch` - Maximum tokens to fetch in one batch (default: 256)
-  - `:error_mode` - Error handling: `:tolerant` or `:strict` (default: :tolerant)
-  - `:error_sync` - Sync points for error recovery (default: [:semicolon, :newline, :closer])
+  - `:unescape` - Whether to unescape string contents (default: `true`)
+  - `:max_batch` - Maximum tokens to fetch in one batch (default: `256`)
+  - `:error_mode` - Error handling: `:tolerant` or `:strict` (default: `:tolerant`)
+  - `:error_sync` - Sync points for error recovery (default: `[:semicolon, :newline, :closer, :comma]`)
+  - `:error_max_skip` - Maximum characters to skip during error recovery (default: `4096`)
+  - `:insert_structural_closers` - Synthesize missing delimiters in tolerant mode (default: `true`)
+  - `:insert_identifier_sanitization` - Sanitize invalid identifiers in tolerant mode (default: `true`)
+  - `:preserve_comments` - Whether to preserve comments (default: `false`)
+  - `:existing_atoms_only` - Only allow existing atoms in keywords (default: `false`)
+
+  ## Examples
+
+      iex> stream = TokenStream.new("1 + 2")
+      iex> {:ok, token, _} = TokenStream.next(stream)
+      iex> token
+      {:int, {{1, 1}, {1, 2}, 1}, ~c"1"}
+
   """
-  # TODO: document options
-  @spec new(iodata() | source(), pos_integer(), pos_integer(), options()) :: t()
+  @spec new(source(), pos_integer(), pos_integer(), options()) :: t()
   def new(source, line \\ 1, column \\ 1, opts \\ []) do
     opts =
       Keyword.merge(@default_opts, opts)
@@ -188,12 +244,24 @@ defmodule Toxic.TokenStream do
   @doc """
   Peek at the next N tokens without consuming them.
 
-  Returns `{:ok, tokens, stream}` or `{:eof, stream}`.
+  Returns a tuple indicating success, EOF, or error, along with the tokens
+  available (which may be fewer than N at EOF or in strict error mode).
+
+  ## Returns
+  - `{:ok, tokens, stream}` - Successfully peeked N tokens
+  - `{:eof, tokens, stream}` - Reached EOF; tokens contains all available tokens (< N)
+  - `{:error, error, tokens, stream}` - Error in strict mode; tokens contains tokens before error
+
+  ## Examples
+
+      iex> stream = TokenStream.new("1 + 2")
+      iex> {:ok, tokens, _} = TokenStream.peek_n(stream, 2)
+      iex> length(tokens)
+      2
+
   """
-  @spec(
-    peek_n(t(), pos_integer()) :: {:ok, [token()], t()} | {:eof, [token()], t()},
-    {:error, error(), [token()], t()}
-  )
+  @spec peek_n(t(), pos_integer()) ::
+          {:ok, [token()], t()} | {:eof, [token()], t()} | {:error, error(), [token()], t()}
   def peek_n(_stream, n) when n <= 0 do
     raise ArgumentError, message: "n must be positive"
   end
@@ -267,8 +335,25 @@ defmodule Toxic.TokenStream do
   end
 
   @doc """
-  Create a checkpoint for backtracking. Returns a reference identifying stream state.
-  Uses process dictionary for storage
+  Create a checkpoint for backtracking.
+
+  Saves the current stream state (buffer, push stack, driver state) and returns
+  a reference that can be used with `rewind_to/2` to restore this state later.
+
+  The checkpoint is stored in the process dictionary for simplicity. In production
+  use cases, you may want to implement a different storage mechanism.
+
+  ## Returns
+  A tuple `{reference, stream}` where the reference can be passed to `rewind_to/2`.
+
+  ## Examples
+
+      stream = TokenStream.new("1 + 2 * 3")
+      {:ok, _token1, stream} = TokenStream.next(stream)
+      {ref, stream} = TokenStream.checkpoint(stream)
+      {:ok, _token2, stream} = TokenStream.next(stream)
+      stream = TokenStream.rewind_to(stream, ref)  # Back to position after token1
+
   """
   @spec checkpoint(t()) :: {reference(), t()}
   def checkpoint(%__MODULE__{} = stream) do
@@ -285,8 +370,22 @@ defmodule Toxic.TokenStream do
   end
 
   @doc """
-  Rewind to a previously created checkpoint identified by `ref`. Unless `delete_checkpoint?`
-  flag is set to `false`, the function will free the process dictionary storage and invalidate the reference.
+  Rewind to a previously created checkpoint.
+
+  Restores the stream state (buffer, push stack, driver) to the state captured
+  when `checkpoint/1` was called with the given reference.
+
+  ## Parameters
+  - `stream` - Current stream
+  - `ref` - Reference returned from `checkpoint/1`
+  - `delete_checkpoint?` - Whether to free checkpoint storage (default: `true`)
+
+  ## Returns
+  Updated stream at the checkpoint state.
+
+  ## Raises
+  `ArgumentError` if the reference is invalid or not found.
+
   """
   @spec rewind_to(t(), reference(), boolean()) :: t()
   def rewind_to(%__MODULE__{} = stream, ref, delete_checkpoint? \\ true) do
@@ -337,8 +436,26 @@ defmodule Toxic.TokenStream do
 
   @doc """
   Create a stream from a slice of input.
+
+  Useful for incremental lexing when you need to tokenize a substring
+  with adjusted base position for accurate error reporting.
+
+  ## Parameters
+  - `source` - Original source (binary or existing stream)
+  - `start_offset` - Byte offset where slice begins
+  - `end_offset` - Byte offset where slice ends (exclusive)
+  - `line_base` - Line number to use for first token
+  - `column_base` - Column number to use for first token
+  - `opts` - Options (same as `new/4`)
+
+  ## Returns
+  A new stream starting at the specified position.
+
+  ## Notes
+  - Currently uses `binary_part/3` which doesn't handle Unicode graphemes
+  - Future versions may use `String.slice/3` for proper Unicode support
+
   """
-  # TODO: better docs
   @spec slice(
           t() | iodata(),
           non_neg_integer(),
@@ -370,8 +487,27 @@ defmodule Toxic.TokenStream do
 
   @doc """
   Get the current terminator stack.
+
+  Returns the stack of open delimiters, blocks, and string contexts that need
+  to be closed. Each entry is a tuple of `{opening_delimiter, meta, indentation}`.
+
+  Useful for:
+  - Auto-completion in editors
+  - Syntax error recovery
+  - Understanding parser context
+
+  ## Returns
+  A tuple `{terminators, stream}` where terminators is a list of terminator entries.
+
+  ## Examples
+
+      stream = TokenStream.new("(1 + ")
+      {:ok, _paren, stream} = TokenStream.next(stream)
+      {terms, _} = TokenStream.current_terminators(stream)
+      # terms will include {:\"(\", meta, indent}
+
   """
-  @spec current_terminators(t()) :: {[{atom(), term(), non_neg_integer()}], t()}
+  @spec current_terminators(t()) :: {terminator_stack(), t()}
   def current_terminators(%__MODULE__{} = stream) do
     terms = terms_at_current_position(stream)
     {terms, stream}

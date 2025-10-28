@@ -7,42 +7,96 @@ defmodule Toxic.Driver do
             column: 1,
             scope: nil,
             contexts: [:normal],
-            # Error-tolerant mode controls
             error_mode: :tolerant,
             error_sync: [:semicolon, :newline, :closer, :comma],
             error_max_skip: 4096,
             insert_structural_closers: true,
             insert_identifier_sanitization: true,
-            # New: prioritized deferral list for delayed emissions
-            # Entries: {:emit_next, token, consume_len, after_action | nil}
-            #  - consume_len: non-neg integer to consume from input and advance column
-            #  - after_action: {:push_interp, kind, interpolation, delim} | nil
             deferrals: [],
             output: [],
-            # Track the most recent token emitted (for carry context)
             recent_token: nil
 
-  # TODO: better type
-  @type interp_kind() :: atom()
-  @type interp_delim() :: any()
-  @type terminators() :: :none | list()
-  @type t() :: %__MODULE__{
+  @typedoc """
+  Interpolation context kind.
+
+  Identifies the type of string-like construct that can contain interpolation:
+  - `:string` - Binary string ("...")
+  - `:charlist` - Character list ('...')
+  - `:atom_safe` - Atom with safe characters (:"...")
+  - `:atom_unsafe` - Atom requiring quotes (:"...")
+  - `:bin_heredoc` - Binary heredoc (\"\"\"...\"\"\"
+  - `:list_heredoc` - List heredoc ('''...''')
+  - `:sigil` - Sigil (~s"...", ~r/.../,  etc.)
+  - `:quoted_identifier` - Quoted function name (Mod."name")
+  """
+  @type interp_kind ::
+          :string
+          | :charlist
+          | :atom_safe
+          | :atom_unsafe
+          | :bin_heredoc
+          | :list_heredoc
+          | :sigil
+          | :quoted_identifier
+
+  @typedoc """
+  Delimiter for interpolation context.
+
+  Can be a single character (codepoint) or a character list for multi-char delimiters.
+  Examples: `?"` (34), `?'` (39), `[?', ?', ?']` for triple quotes
+  """
+  @type interp_delim :: char() | charlist()
+
+  @typedoc """
+  Terminator stack.
+
+  Either `:none` (for EEx compatibility, currently unused) or a list of terminator entries.
+  Each entry is `{opening_delimiter, meta, indentation}`.
+  """
+  @type terminators :: :none | [{atom(), term(), non_neg_integer()}]
+
+  @typedoc """
+  Token as stored internally.
+
+  Same shapes as `Toxic.TokenStream.token()` but before being returned to the user.
+  """
+  @type token ::
+          {atom(), term()}
+          | {atom(), term(), term()}
+          | {atom(), term(), term(), term()}
+
+  @typedoc """
+  Interpolation context entry.
+
+  Tuple containing:
+  - `kind` - Type of interpolation context
+  - `interpolation_allowed?` - Whether interpolation is supported
+  - `delimiter` - Closing delimiter
+  - `parent_terminators` - Terminator stack from enclosing scope
+  - `start_info` - Map with `:line`, `:column`, `:token` for error reporting
+  - `fragments` - Accumulated string fragments (in reverse order)
+  - `saw_interpolation?` - Whether any `\#{...}` was encountered
+  """
+  @type interp_context ::
+          {:interp, interp_kind(), boolean(), interp_delim(), terminators(),
+           %{line: pos_integer(), column: pos_integer(), token: token()}, [binary()], boolean()}
+
+  @typedoc "Parsing context stack: either `:normal` code or an interpolation context"
+  @type context :: :normal | interp_context()
+
+  @typedoc "Driver state"
+  @type t :: %__MODULE__{
           line: pos_integer(),
           column: pos_integer(),
-          contexts:
-            list(
-              :normal
-              | {:interp, interp_kind(), boolean(), interp_delim(), terminators(),
-                 %{line: pos_integer(), column: pos_integer(), token: tuple()}, list(), boolean()}
-            ),
+          contexts: [context()],
           error_mode: :tolerant | :strict,
           error_sync: [:semicolon | :newline | :closer | :comma],
           error_max_skip: non_neg_integer(),
           insert_structural_closers: boolean(),
           insert_identifier_sanitization: boolean(),
-          deferrals: list(),
-          output: list(),
-          recent_token: any(),
+          deferrals: [token()],
+          output: [token()],
+          recent_token: token() | nil,
           scope: Toxic.Scope.scope()
         }
 
@@ -77,22 +131,58 @@ defmodule Toxic.Driver do
     }
   end
 
-  @doc """
-  Recover from a driver-level error in tolerant mode by emitting an error token
-  (and optionally structural insertions) and advancing to the next sync point.
+  @typedoc "Input remaining to be tokenized (charlist)"
+  @type input :: charlist()
 
-  Returns same shape as next/2: {:ok, token, rest, new_driver}.
+  @typedoc "Error reason tuple in legacy format"
+  @type error_reason :: {charlist(), charlist(), charlist()}
+
+  @doc """
+  Recover from a driver-level error in tolerant mode.
+
+  Emits an error token and optionally structural insertions, then advances
+  to the next sync point to continue tokenization.
+
+  ## Parameters
+  - `rest` - Remaining input
+  - `state` - Driver state (must have `error_mode: :tolerant`)
+  - `reason` - Error that occurred
+
+  ## Returns
+  Same shape as `next/2`:
+  - `{:ok, token, rest, new_driver}` - Recovery successful, token emitted
+  - `{:eof, new_driver}` - Reached end while recovering
+  - `{:error, reason, rest, new_driver}` - Nested error during recovery
+
   """
+  @spec recover(input(), t(), term()) ::
+          {:ok, token(), input(), t()}
+          | {:eof, t()}
+          | {:error, error_reason(), input(), t()}
   def recover(rest, %__MODULE__{error_mode: :tolerant} = state, reason) do
     emit_error_and_advance(reason, rest, state)
   end
 
-  @spec next(any(), Toxic.Driver.t()) ::
-          {:eof, Toxic.Driver.t()}
-          | {:error,
-             {[...], binary() | maybe_improper_list(any(), binary() | []),
-              maybe_improper_list(any(), binary() | [])}, any(), Toxic.Driver.t()}
-          | {:ok, any(), any(), Toxic.Driver.t()}
+  @doc """
+  Get the next token from the driver.
+
+  This is the low-level single-token driver interface. Most users should use
+  `Toxic.TokenStream` instead, which provides buffering and lookahead.
+
+  ## Parameters
+  - `rest` - Remaining input as a charlist
+  - `state` - Current driver state
+
+  ## Returns
+  - `{:ok, token, rest, new_state}` - Successfully produced a token
+  - `{:eof, new_state}` - Reached end of input
+  - `{:error, reason, rest, new_state}` - Error in strict mode
+
+  """
+  @spec next(input(), t()) ::
+          {:ok, token(), input(), t()}
+          | {:eof, t()}
+          | {:error, error_reason(), input(), t()}
   def next(rest, %__MODULE__{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end
@@ -1655,6 +1745,29 @@ defmodule Toxic.Driver do
 
   @doc """
   Get the current terminator stack.
+
+  Returns the stack of open delimiters, blocks, and string contexts that are
+  currently awaiting their closing delimiter. This includes:
+  - Structural delimiters from scope (parens, brackets, braces, do/end blocks)
+  - Parent terminators from enclosing interpolation contexts
+  - Delimiters from active string/heredoc/atom/sigil constructs
+
+  Useful for:
+  - Editor auto-completion
+  - Syntax error recovery
+  - Understanding current parser state
+
+  ## Returns
+  List of `{opening_delimiter, meta, indentation}` tuples in stack order
+  (innermost first).
+
+  ## Examples
+
+      driver = Toxic.Driver.new()
+      {:ok, _token, rest, driver} = Toxic.Driver.next(~c"(", driver)
+      terms = Toxic.Driver.current_terminators(driver)
+      # terms will include {:"(", meta, indent}
+
   """
   @spec current_terminators(t()) :: [{atom(), term(), non_neg_integer()}]
   def current_terminators(%__MODULE__{} = driver) do
@@ -1714,6 +1827,30 @@ defmodule Toxic.Driver do
     current_terms ++ context_terms
   end
 
+  @doc """
+  Get the expected closing delimiter for an opening delimiter.
+
+  Maps opening delimiters to their corresponding closers. For symmetric
+  delimiters (like string quotes), returns the same delimiter.
+
+  ## Parameters
+  - `opening` - The opening delimiter atom
+
+  ## Returns
+  The corresponding closing delimiter atom.
+
+  ## Examples
+
+      iex> Toxic.Driver.closing_for(:"(")
+      :")"
+
+      iex> Toxic.Driver.closing_for(:do)
+      :end
+
+      iex> Toxic.Driver.closing_for(:"\"")
+      :"\""
+
+  """
   @spec closing_for(atom()) :: atom()
   def closing_for(:fn), do: :end
   def closing_for(:do), do: :end
@@ -1729,8 +1866,9 @@ defmodule Toxic.Driver do
 
   # Helper functions for unnecessary quote warning
 
-  defp is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope) when saw_interpolation?,
-    do: false
+  defp is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope)
+       when saw_interpolation?,
+       do: false
 
   defp is_unnecessary_quote(fragments, false, kind, scope) do
     case fragments do
