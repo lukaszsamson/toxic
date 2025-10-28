@@ -590,6 +590,10 @@ defmodule Toxic.TokenStream do
       buffer_size >= needed or stream.eof ->
         stream
 
+      stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :strict ->
+        # In strict mode with error, cannot refill - return immediately
+        stream
+
       stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant ->
         stream
         |> recover_into_buffer()

@@ -906,8 +906,6 @@ defmodule Toxic.TokenStreamTest do
       assert stream_after.error != nil
     end
 
-    # TODO: infinite loop
-    @tag :skip
     test "strict peek_n/2 returns buffered tokens up until error" do
       stream = TokenStream.new("1 1 1 1 Ä", 1, 1, error_mode: :strict)
       # fetches a batch and sets error
@@ -926,8 +924,6 @@ defmodule Toxic.TokenStreamTest do
       assert length(tokens) == 3
     end
 
-    # TODO: infinite loop
-    @tag :skip
     test "strict peek_n/2 reports eof and never exposes buffered tokens" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
       assert {:error, reason, stream_after} = TokenStream.next(stream)
@@ -935,8 +931,6 @@ defmodule Toxic.TokenStreamTest do
       assert {:error, ^reason, [], ^stream_after} = TokenStream.peek_n(stream_after, 3)
     end
 
-    # TODO: infinite loop
-    @tag :skip
     test "strict peek_n/2 encounters an error, next still returns tokens" do
       stream = TokenStream.new("1 2 Ä", 1, 1, error_mode: :strict)
 
