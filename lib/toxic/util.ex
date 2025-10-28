@@ -51,8 +51,12 @@ defmodule Toxic.Util do
     part_as_charlist = if is_binary(part), do: String.to_charlist(part), else: part
 
     {:error,
-     {[line: line, column: column], ~c"atom length must be less than system limit: ",
-      part_as_charlist}}
+     %Toxic.Error{
+       code: :identifier_atom_length_limit,
+       domain: :identifier,
+       token_display: part_as_charlist,
+       details: %{line: line, column: column}
+     }}
   end
 
   # TODO: static_atoms_encoder

@@ -231,7 +231,15 @@ defmodule Toxic.Driver do
       )
       when start_token != :"{" do
     reason = mismatched_delimiter_reason(entry, :"}", state)
-    {:error, Toxic.Error.to_reason_tuple(reason), rest, state}
+
+    case state.error_mode do
+      :strict ->
+        reason_tuple = Toxic.Error.to_reason_tuple(reason)
+        {:error, reason_tuple, rest, state}
+
+      :tolerant ->
+        emit_error_and_advance(reason, rest, state)
+    end
   end
 
   def next(
@@ -281,11 +289,7 @@ defmodule Toxic.Driver do
       {:error, reason, state} ->
         case state.error_mode do
           :strict ->
-            reason_tuple =
-              reason
-              |> Toxic.Error.ensure_struct()
-              |> Toxic.Error.to_reason_tuple()
-
+            reason_tuple = Toxic.Error.to_reason_tuple(reason)
             {:error, reason_tuple, string, state}
 
           :tolerant ->
@@ -319,11 +323,7 @@ defmodule Toxic.Driver do
       {:error, reason} ->
         case state.error_mode do
           :strict ->
-            reason_tuple =
-              reason
-              |> Toxic.Error.ensure_struct()
-              |> Toxic.Error.to_reason_tuple()
-
+            reason_tuple = Toxic.Error.to_reason_tuple(reason)
             {:error, reason_tuple, string, state}
 
           :tolerant ->
@@ -594,7 +594,19 @@ defmodule Toxic.Driver do
           reason =
             interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
 
-          {:error, Toxic.Error.to_reason_tuple(reason), rest, state}
+          case state.error_mode do
+            :strict ->
+              reason_tuple = Toxic.Error.to_reason_tuple(reason)
+              {:error, reason_tuple, rest, state}
+
+            :tolerant ->
+              emit_error_and_advance(reason, rest, %{
+                state
+                | line: line,
+                  column: column,
+                  scope: scope
+              })
+          end
         else
           # Mark that we saw interpolation in the parent context
           updated_parent_context =
@@ -1050,9 +1062,8 @@ defmodule Toxic.Driver do
          state
        ) do
     reason = missing_interpolation_reason(interp_context, state)
-    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, error_struct}
+    error_token = {:error_token, meta0, reason}
 
     inserted =
       if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
@@ -1073,9 +1084,8 @@ defmodule Toxic.Driver do
          state
        ) do
     reason = missing_terminator_reason(interp_context, state)
-    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, error_struct}
+    error_token = {:error_token, meta0, reason}
 
     inserted =
       if state.insert_structural_closers,
@@ -1104,9 +1114,8 @@ defmodule Toxic.Driver do
 
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
     reason = missing_scope_terminator_reason(entry, state)
-    error_struct = Toxic.Error.ensure_struct(reason)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, error_struct}
+    error_token = {:error_token, meta0, reason}
 
     # Pop one scope terminator
     scope(terminators: terms) = state.scope
@@ -1201,13 +1210,7 @@ defmodule Toxic.Driver do
   # --------------------------
   # Always advances at least one codepoint if recovery didn't move forward, preventing infinite loops.
   #
-  defp emit_error_and_advance(reason, rest, state) do
-    error =
-      case reason do
-        %Toxic.Error{} = e -> e
-        other -> Toxic.Error.ensure_struct(other)
-      end
-
+  defp emit_error_and_advance(%Toxic.Error{} = error, rest, state) do
     {def_rest, def_line, def_col} = scan_to_sync(rest, state)
 
     # Phase 4: Context-specific minimal recovery (override default scan)
