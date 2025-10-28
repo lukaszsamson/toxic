@@ -60,42 +60,4 @@ defmodule Toxic.Scope do
     warnings = scope(scope, :warnings)
     scope(scope, warnings: [warning | warnings])
   end
-
-  @doc """
-  Legacy warning function for backward compatibility during migration.
-
-  This function creates an unstructured warning with a generic `:legacy_unstructured` code.
-  **This will be removed after migration is complete.**
-
-  Use `prepend_warning/2` with a structured `Toxic.Warning` instead.
-
-  ## Example
-
-      # Old way (deprecated)
-      scope = Toxic.Scope.prepend_warning_legacy(1, 5, ~c"some warning", scope)
-
-      # New way (preferred)
-      warning = Toxic.Warning.deprecated_single_quote_atom(1, 5)
-      scope = Toxic.Scope.prepend_warning(warning, scope)
-  """
-  def prepend_warning_legacy(line, column, message, scope) do
-    warning = %Toxic.Warning{
-      code: :legacy_unstructured,
-      domain: :general,
-      token_display: message,
-      details: %{line: line, column: column, message: message}
-    }
-
-    prepend_warning(warning, scope)
-  end
-
-  @doc """
-  **DEPRECATED:** Use `prepend_warning/2` with structured warnings instead.
-
-  This is maintained temporarily for backward compatibility.
-  """
-  def prepend_warning(line, column, message, scope)
-      when is_integer(line) and is_integer(column) do
-    prepend_warning_legacy(line, column, message, scope)
-  end
 end

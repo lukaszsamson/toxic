@@ -379,12 +379,8 @@ defmodule Toxic.Tokenizer do
       when is_quote(h) do
     scope =
       if h == ?' do
-        Toxic.Scope.prepend_warning(
-          line,
-          column,
-          ~c"single quotes around atoms are deprecated. Use double quotes instead",
-          base_scope
-        )
+        warning = Toxic.Warning.deprecated_single_quote_atom(line, column)
+        Toxic.Scope.prepend_warning(warning, base_scope)
       else
         base_scope
       end

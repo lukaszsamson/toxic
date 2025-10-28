@@ -78,7 +78,7 @@ defmodule Toxic.TokenStream do
           driver: Toxic.Driver.t(),
           opts: options(),
           eof: boolean(),
-          error: Toxic.Error.t() | legacy_error() | nil,
+          error: Toxic.Error.t() | nil,
           last_emitted_entry: buffer_entry() | nil
         }
 
@@ -98,9 +98,6 @@ defmodule Toxic.TokenStream do
   Can be either a structured `Toxic.Error` or a legacy error tuple/charlist.
   """
   @type error :: Toxic.Error.t()
-
-  @typedoc "Legacy error format (for compatibility)"
-  @type legacy_error :: {charlist(), binary(), charlist()} | charlist()
 
   defstruct buffer: :queue.new(),
             push: [],

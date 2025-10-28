@@ -78,6 +78,13 @@ defmodule ToxicWarningsTest do
     "single-quoted string represent charlists. Use ~c''' if you indeed want a charlist or use \"\"\" instead"
   end
 
+  defp format_warning_message(%Toxic.Warning{
+         code: :deprecated_single_quote_atom,
+         details: %{suggestion: _}
+       }) do
+    "single quotes around atoms are deprecated. Use double quotes instead"
+  end
+
   defp format_warning_message(%Toxic.Warning{details: %{message: message}}) do
     IO.iodata_to_binary(message)
   end
