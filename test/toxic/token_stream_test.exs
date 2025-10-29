@@ -945,6 +945,17 @@ defmodule Toxic.TokenStreamTest do
       assert {:error, ^reason, [], ^stream_after} = TokenStream.peek_n(stream_after, 3)
     end
 
+    test "strict peek_n/2 returns EOF when requesting more tokens than available" do
+      stream = TokenStream.new("1 2", 1, 1, error_mode: :strict)
+
+      # Consume first token
+      {:ok, _token, stream} = TokenStream.next(stream)
+
+      # Peek more tokens than available (only 1 token left but asking for 5)
+      assert {:eof, tokens, _stream} = TokenStream.peek_n(stream, 5)
+      assert length(tokens) == 1
+    end
+
     test "strict peek_n/2 encounters an error, next still returns tokens" do
       stream = TokenStream.new("1 2 Ä", 1, 1, error_mode: :strict)
 

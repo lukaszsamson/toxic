@@ -277,22 +277,12 @@ defmodule Toxic.TokenStream do
       if not_filled == 0 do
         {:ok, push_tokens ++ buffer_tokens, stream}
       else
-        case Keyword.get(stream.opts, :error_mode, :tolerant) do
-          :strict ->
-            if stream.eof do
-              # TODO: no coverage
-              {:eof, push_tokens ++ buffer_tokens, stream}
-            else
-              {:error, stream.error, push_tokens ++ buffer_tokens, stream}
-            end
-
-          :tolerant ->
-            if stream.eof do
-              {:eof, push_tokens ++ buffer_tokens, stream}
-            else
-              # TODO: no coverage
-              {:ok, push_tokens ++ buffer_tokens, stream}
-            end
+        # If ensure_buffer_size didn't fill enough, we're either at EOF or have an error
+        if stream.eof do
+          {:eof, push_tokens ++ buffer_tokens, stream}
+        else
+          # In strict mode with error, return error tuple
+          {:error, stream.error, push_tokens ++ buffer_tokens, stream}
         end
       end
     end
@@ -546,7 +536,6 @@ defmodule Toxic.TokenStream do
   @type error_entry :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}, any()}
   @spec errors(t()) :: {[{error_entry(), Toxic.Error.t()}], t()}
   def errors(%__MODULE__{} = stream) do
-    # TODO: no coverage
     tokens = to_stream(stream) |> Enum.to_list()
 
     errs =
@@ -672,17 +661,11 @@ defmodule Toxic.TokenStream do
 
       true ->
         # Ensure we have a head entry to accurately reflect the next-token start
-        cond do
-          strict_error?(stream) ->
-            {{stream.driver.line, stream.driver.column}, stream}
-
-          stream.error ->
-            # TODO: no coverage
-            {{stream.driver.line, stream.driver.column}, stream}
-
-          true ->
-            stream = refill_buffer(stream)
-            position(stream)
+        if strict_error?(stream) do
+          {{stream.driver.line, stream.driver.column}, stream}
+        else
+          stream = refill_buffer(stream)
+          position(stream)
         end
     end
   end
