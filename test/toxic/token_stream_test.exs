@@ -856,6 +856,20 @@ defmodule Toxic.TokenStreamTest do
   describe "error handling" do
     @invalid_source "Ä"
 
+    test "errors/1 collects error tokens without consuming stream" do
+      stream = TokenStream.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      {errors, stream_after} = TokenStream.errors(stream)
+
+      assert [{_meta, %Toxic.Error{}}] = errors
+      assert stream_after == stream
+
+      assert {:ok, {:error_token, _, %Toxic.Error{}}, stream_after_error} =
+               TokenStream.next(stream_after)
+
+      assert {:ok, {:int, _, ~c"1"}, _} = TokenStream.next(stream_after_error)
+    end
+
     test "strict next/1 returns error tuple and preserves reason" do
       stream = TokenStream.new(@invalid_source, 1, 1, error_mode: :strict)
 

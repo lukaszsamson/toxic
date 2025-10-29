@@ -189,14 +189,7 @@ defmodule Toxic.TokenStream do
             {:eof, stream}
 
           stream.error ->
-            case Keyword.get(stream.opts, :error_mode, :tolerant) do
-              :strict ->
-                {:error, stream.error, stream}
-
-              :tolerant ->
-                # TODO: no coverage
-                recover_next(stream)
-            end
+            {:error, stream.error, stream}
 
           true ->
             stream = refill_buffer(stream)
@@ -226,15 +219,7 @@ defmodule Toxic.TokenStream do
             {:eof, stream}
 
           stream.error ->
-            case Keyword.get(stream.opts, :error_mode, :tolerant) do
-              :strict ->
-                {:error, stream.error, stream}
-
-              :tolerant ->
-                # TODO: no coverage
-                stream = recover_into_buffer(stream)
-                peek(stream)
-            end
+            {:error, stream.error, stream}
 
           true ->
             stream = refill_buffer(stream)
@@ -292,37 +277,21 @@ defmodule Toxic.TokenStream do
       if not_filled == 0 do
         {:ok, push_tokens ++ buffer_tokens, stream}
       else
-        # Try to recover/fill further in tolerant mode
         case Keyword.get(stream.opts, :error_mode, :tolerant) do
           :strict ->
             if stream.eof do
+              # TODO: no coverage
               {:eof, push_tokens ++ buffer_tokens, stream}
             else
               {:error, stream.error, push_tokens ++ buffer_tokens, stream}
             end
 
           :tolerant ->
-            stream = fill_for_peek(stream, not_filled)
-
-            new_buf_tokens =
-              stream.buffer
-              |> :queue.to_list()
-              |> Enum.take(needed)
-              |> Enum.map(fn {t, _, _} -> t end)
-
-            new_not_filled = needed - length(new_buf_tokens)
-
-            cond do
-              new_not_filled == 0 ->
-                # TODO: no coverage
-                {:ok, push_tokens ++ new_buf_tokens, stream}
-
-              stream.eof ->
-                {:eof, push_tokens ++ new_buf_tokens, stream}
-
-              true ->
-                # TODO: no coverage
-                {:ok, push_tokens ++ new_buf_tokens, stream}
+            if stream.eof do
+              {:eof, push_tokens ++ buffer_tokens, stream}
+            else
+              # TODO: no coverage
+              {:ok, push_tokens ++ buffer_tokens, stream}
             end
         end
       end
@@ -616,17 +585,6 @@ defmodule Toxic.TokenStream do
   defp normalize_source_for_driver(source) when is_binary(source), do: String.to_charlist(source)
   defp normalize_source_for_driver(source) when is_list(source), do: source
 
-  # TODO: no coverage
-  defp normalize_source_for_driver(source) when is_function(source, 2) do
-    # For function sources, convert to charlist on each call
-    fn line, column ->
-      case source.(line, column) do
-        {:more, binary} -> {:more, String.to_charlist(binary)}
-        :eof -> :eof
-      end
-    end
-  end
-
   defp fetch_tokens_from_driver(stream, max_batch, opts) do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
     # TODO: slicing source
@@ -718,10 +676,9 @@ defmodule Toxic.TokenStream do
           strict_error?(stream) ->
             {{stream.driver.line, stream.driver.column}, stream}
 
-          Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant and stream.error ->
+          stream.error ->
             # TODO: no coverage
-            stream = recover_into_buffer(stream)
-            position(stream)
+            {{stream.driver.line, stream.driver.column}, stream}
 
           true ->
             stream = refill_buffer(stream)
@@ -737,15 +694,9 @@ defmodule Toxic.TokenStream do
       buffer_size >= needed or stream.eof ->
         stream
 
-      stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :strict ->
-        # In strict mode with error, cannot refill - return immediately
+      stream.error ->
+        # Driver reported an error; do not attempt to refill
         stream
-
-      stream.error && Keyword.get(stream.opts, :error_mode, :tolerant) == :tolerant ->
-        # TODO: no coverage
-        stream
-        |> recover_into_buffer()
-        |> ensure_buffer_size(needed)
 
       true ->
         stream
@@ -754,83 +705,9 @@ defmodule Toxic.TokenStream do
     end
   end
 
-  # Attempt to fill buffer with at least count more tokens in tolerant mode
-  defp fill_for_peek(%__MODULE__{} = stream, count, tries \\ 0) do
-    cond do
-      tries > 4 ->
-        # TODO: no coverage
-        stream
-
-      stream.eof ->
-        stream
-
-      stream.error ->
-        # TODO: no coverage
-        fill_for_peek(recover_into_buffer(stream), count, tries + 1)
-
-      true ->
-        # TODO: no coverage
-        fill_for_peek(refill_buffer(stream), count, tries + 1)
-    end
-  end
-
-  defp recover_next(%__MODULE__{} = stream) do
-    # TODO: no coverage
-    # Recover one error token directly and return it
-    pre_terms = Toxic.Driver.current_terminators(stream.driver)
-
-    case Toxic.Driver.recover(stream.source, stream.driver, stream.error) do
-      {:ok, token, new_source, new_driver} ->
-        pre_pos = start_pos(token)
-        entry = {token, pre_terms, pre_pos}
-
-        new_stream =
-          %{
-            stream
-            | driver: new_driver,
-              source: new_source,
-              error: nil,
-              last_emitted_entry: entry
-          }
-
-        {:ok, token, new_stream}
-
-      other ->
-        other
-    end
-  end
-
-  defp recover_into_buffer(%__MODULE__{} = stream) do
-    # TODO: no coverage
-    pre_terms = Toxic.Driver.current_terminators(stream.driver)
-
-    case Toxic.Driver.recover(stream.source, stream.driver, stream.error) do
-      {:ok, token, new_source, new_driver} ->
-        pre_pos = start_pos(token)
-        entry = {token, pre_terms, pre_pos}
-        new_buffer = :queue.in(entry, stream.buffer)
-        %{stream | driver: new_driver, source: new_source, error: nil, buffer: new_buffer}
-
-      _ ->
-        stream
-    end
-  end
-
   defp extract_slice(source, start_offset, end_offset) when is_binary(source) do
     # TODO: this should use String.slice to handle unicode
     binary_part(source, start_offset, end_offset - start_offset)
-  end
-
-  # TODO: no coverage
-  defp extract_slice(source, start_offset, end_offset) when is_function(source, 2) do
-    # For function sources, we'd need to call it appropriately
-    # This is a simplified implementation
-    fn _line, _column ->
-      case source.(start_offset, end_offset - start_offset) do
-        {:more, binary} -> {:more, binary}
-        _ -> :eof
-      end
-    end
   end
 
   defp strict_error?(%__MODULE__{error: error, opts: opts}) do
