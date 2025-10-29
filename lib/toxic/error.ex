@@ -108,16 +108,12 @@ defmodule Toxic.Error do
   Returns iodata.
   """
   @spec format(t()) :: iodata()
-  def format(%__MODULE__{code: :terminator_mismatched_closer, token_display: tok}) do
+  def format(%__MODULE__{code: code, token_display: tok})
+      when code in [
+             :terminator_mismatched_closer,
+             :terminator_unexpected_closer
+           ] do
     case List.wrap(tok) do
-      ~c"end" -> ~c"unexpected reserved word: "
-      _ -> ~c"unexpected token: "
-    end
-  end
-
-  def format(%__MODULE__{code: :terminator_unexpected_closer, token_display: tok}) do
-    case List.wrap(tok) do
-      # TODO: no coverage
       ~c"end" -> ~c"unexpected reserved word: "
       _ -> ~c"unexpected token: "
     end
@@ -298,16 +294,7 @@ defmodule Toxic.Error do
     ~c"reserved token: "
   end
 
-  def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: d}) do
-    # Message uses tuple {prefix, help}
-    # Note: help_iolist may incorrectly contain the full tuple from producer; extract second element if so
-    help =
-      case Map.get(d, :help_iolist, []) do
-        {_prefix, actual_help} -> actual_help
-        # TODO: no coverage
-        other -> other
-      end
-
+  def format(%__MODULE__{code: :keyword_do_with_fn_invalid, details: %{help_iolist: help}}) do
     {~c"unexpected reserved word: ", help}
   end
 
@@ -325,11 +312,6 @@ defmodule Toxic.Error do
 
   def format(%__MODULE__{code: :syntax_consecutive_semicolons}) do
     ~c"unexpected token: "
-  end
-
-  # TODO: no coverage
-  def format(%__MODULE__{}) do
-    ~c"syntax error"
   end
 
   @doc """
@@ -402,32 +384,6 @@ defmodule Toxic.Error do
             closing_delimiter: Map.get(details, :closing_delimiter),
             expected_delimiter: Map.get(details, :expected_delimiter)
           ]
-
-      :terminator_missing_closer ->
-        details = error.details
-
-        [
-          opening_delimiter: Map.get(details, :opening_delimiter),
-          expected_delimiter: Map.get(details, :expected_delimiter),
-          line: Map.get(details, :start_line, sl),
-          column: Map.get(details, :start_column, sc),
-          end_line: el,
-          end_column: ec
-        ]
-
-      :interpolation_missing_terminator ->
-        # Use details start position if provided, else current
-        [
-          opening_delimiter: Map.get(error.details, :opening_delimiter, :"{"),
-          expected_delimiter: Map.get(error.details, :expected_delimiter, :"{"),
-          line: Map.get(error.details, :start_line, sl),
-          column: Map.get(error.details, :start_column, sc),
-          end_line: el,
-          end_column: ec
-        ]
-
-      _ ->
-        base
     end
   end
 

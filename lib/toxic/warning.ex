@@ -195,7 +195,7 @@ defmodule Toxic.Warning do
       deprecated_bnot_operator(1, 1)
   """
   def deprecated_bnot_operator(line, column) do
-    # TODO: no coverage
+    # TODO: port fix from upstream
     new(
       :deprecated_bnot_operator,
       :deprecated,

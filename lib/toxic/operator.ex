@@ -123,7 +123,7 @@ defmodule Toxic.Operator do
               Toxic.Scope.prepend_warning(warning, scope)
 
             :"~~~" ->
-              # TODO: no coverage
+              # TODO: port fix from upstream elixir
               warning = Toxic.Warning.deprecated_bnot_operator(line, column)
               Toxic.Scope.prepend_warning(warning, scope)
 

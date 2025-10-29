@@ -203,6 +203,10 @@ defmodule ToxicErrorsTest do
   end
 
   # Terminator errors
+  test "unexpected closing end" do
+    tokenize_and_compare_error("end")
+  end
+
   test "unexpected closing parenthesis" do
     tokenize_and_compare_error(")")
   end

@@ -69,8 +69,7 @@ defmodule Toxic.Keyword do
 
   defp tokenize_keyword_terminator(line, column, :do, _length, [{:fn, _} | _]) do
     message =
-      {~c"unexpected reserved word: ",
-       ~c". Anonymous functions are written as:\n\n    fn pattern -> expression end\n\nPlease remove the \"do\" keyword"}
+      ~c". Anonymous functions are written as:\n\n    fn pattern -> expression end\n\nPlease remove the \"do\" keyword"
 
     {:error,
      %Toxic.Error{
