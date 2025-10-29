@@ -214,6 +214,8 @@ defmodule ToxicTest do
       assert tokenize("&: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 3}, nil}, :&}], ""}
       assert tokenize("{}: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 4}, nil}, :{}}], ""}
       assert tokenize("..//: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 6}, nil}, :..//}], ""}
+
+      assert tokenize("&&&: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 5}, nil}, :&&&}], ""}
     end
 
     test "atom operators" do
@@ -4837,21 +4839,21 @@ defmodule ToxicTest do
     #   end
     # end
 
-    # test "elixir src" do
-    #   files =
-    #     Enum.module_info()[:compile][:source]
-    #     |> Path.join("../../..")
-    #     |> Path.expand()
-    #     |> Path.join("**/*.ex*")
-    #     |> Path.wildcard()
+    test "elixir src" do
+      files =
+        Enum.module_info()[:compile][:source]
+        |> Path.join("../../..")
+        |> Path.expand()
+        |> Path.join("**/*.ex*")
+        |> Path.wildcard()
 
-    #   for file <- files do
-    #     IO.puts(file)
-    #     source = file |> File.read!()
-    #     # lines = String.split(source, "\n")
-    #     assert {:ok, _, _} = tokenize(source)
-    #   end
-    # end
+      for file <- files do
+        IO.puts(file)
+        source = file |> File.read!()
+        # lines = String.split(source, "\n")
+        assert {:ok, _, _} = tokenize(source)
+      end
+    end
 
     #   test "elixir src 1" do
     #     files = [
@@ -4971,6 +4973,30 @@ defmodule ToxicTest do
         digit = char + diff
       end
       """
+
+      # Turn off validation to see the actual tokens
+      assert {:ok, _toxic_tokens, _} = tokenize(source)
+    end
+
+    test "rare to legacy case" do
+      source = ~s'''
+
+            """
+            <li>
+              <strong>Some:</strong>
+              <%= true && @some[ %>
+            </li>
+            """,
+      '''
+
+      # Turn off validation to see the actual tokens
+      assert {:ok, _toxic_tokens, _} = tokenize(source)
+    end
+
+    test "unescapes" do
+      source = ~s'''
+      "\\b\\d\\e\\f\\s\\t\\v\\uFEFFРусский\\u{7}\\u{77}\\u{777}\\u{7777}\\u{77777}\\u{006666}\\x12"
+      '''
 
       # Turn off validation to see the actual tokens
       assert {:ok, _toxic_tokens, _} = tokenize(source)
@@ -5938,41 +5964,9 @@ defmodule ToxicTest do
                    <<"\"\"\"">>}
                 ], ""}
     end
-
-    # Note: vc_merge_conflict_test is skipped as it tests tokenize_error
-    # Note: invalid_sigil_delimiter_test is skipped as it tests tokenize_error
   end
 
   test "try keyword as do_identifier after newline" do
-    # # Regression test for List.ex tokenization - 'try' should be :do_identifier not :identifier
-
-    # # This works (no spaces between try and do)
-    # assert tokenize("try do\n:ok\nend") == {:ok, [
-    #   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-    #   {:do, {{1, 5}, {1, 7}, nil}},
-    #   {:eol, {{1, 7}, {2, 1}, 1}},
-    #   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-    #   {:eol, {{2, 4}, {3, 1}, 1}},
-    #   {:end, {{3, 1}, {3, 4}, nil}}], ""}
-
-    # # This should also work (spaces between try and do)
-    # assert tokenize("try  do\n:ok\nend") == {:ok, [
-    #   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-    #   {:do, {{1, 6}, {1, 8}, nil}},
-    #   {:eol, {{1, 8}, {2, 1}, 1}},
-    #   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-    #   {:eol, {{2, 4}, {3, 1}, 1}},
-    #   {:end, {{3, 1}, {3, 4}, nil}}], ""}
-
-    # # This should also work (indented try do on same line)
-    # assert tokenize("  try do\n  :ok\n  end") == {:ok, [
-    #   {:do_identifier, {{1, 3}, {1, 6}, ~c"try"}, :try},
-    #   {:do, {{1, 7}, {1, 9}, nil}},
-    #   {:eol, {{1, 9}, {2, 1}, 1}},
-    #   {:atom, {{2, 3}, {2, 6}, ~c"ok"}, :ok},
-    #   {:eol, {{2, 6}, {3, 1}, 1}},
-    #   {:end, {{3, 3}, {3, 6}, nil}}], ""}
-
     # The originally failing case from List.ex
     source = """
     def example do

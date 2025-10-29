@@ -762,7 +762,6 @@ defmodule Toxic.TokenStream do
         stream
 
       stream.eof ->
-        # TODO: no coverage
         stream
 
       stream.error ->
