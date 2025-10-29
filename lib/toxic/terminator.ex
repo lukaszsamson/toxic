@@ -142,7 +142,7 @@ defmodule Toxic.Terminator do
      }}
   end
 
-  # TODO: report dead code to elixir
+  # dead code in elixir
   # def check_terminator(_, _, scope), do: {:ok, scope}
 
   defp terminator(:fn), do: :end

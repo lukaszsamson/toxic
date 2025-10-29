@@ -802,7 +802,6 @@ defmodule Toxic.Driver do
     delimiter_length = delimiter_length(delimiter)
 
     cond do
-      # TODO: this seems too complicated
       line == meta_end_line and column - delimiter_length >= 1 ->
         %{line: meta_end_line, column: column - delimiter_length, token: start_token}
 
