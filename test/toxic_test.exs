@@ -6056,4 +6056,8 @@ defmodule ToxicTest do
     assert {:ok, _, _} = tokenize("\"\\x{88888}\"")
     assert {:ok, _, _} = tokenize("\"\\x{088888}\"")
   end
+
+  test "no warn" do
+    assert {:ok, _, _} = tokenize("a=\"\"")
+  end
 end
