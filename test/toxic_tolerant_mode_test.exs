@@ -13,7 +13,8 @@ defmodule ToxicTolerantModeTest do
         Keyword.take(opts, [
           :existing_atoms_only,
           :insert_structural_closers,
-          :insert_identifier_sanitization
+          :insert_identifier_sanitization,
+          :error_max_skip
         ])
       )
 
@@ -42,6 +43,62 @@ defmodule ToxicTolerantModeTest do
       {:error, _reason, _final_stream} ->
         # This should not happen in tolerant mode
         flunk("Tolerant mode returned {:error, ...} tuple - should have continued")
+    end
+  end
+
+  defp tokenize_with_stream(string, opts \\ []) do
+    stream_opts =
+      [
+        error_mode: :tolerant,
+        elixir_compatibility: false,
+        preserve_comments: false
+      ]
+      |> Keyword.merge(
+        Keyword.take(opts, [
+          :existing_atoms_only,
+          :insert_structural_closers,
+          :insert_identifier_sanitization,
+          :error_max_skip
+        ])
+      )
+
+    stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+    opts = Keyword.put_new(opts, :include_errors, true)
+    collect_all_tokens_with_final(stream, [], opts)
+  end
+
+  defp collect_all_tokens_with_final(stream, acc, opts) do
+    case Toxic.TokenStream.next(stream) do
+      {:ok, token, new_stream} ->
+        acc =
+          if Keyword.get(opts, :include_errors, true) or elem(token, 0) != :error_token do
+            [token | acc]
+          else
+            acc
+          end
+
+        collect_all_tokens_with_final(new_stream, acc, opts)
+
+      {:eof, final_stream} ->
+        {Enum.reverse(acc), final_stream}
+
+      {:error, _reason, _final_stream} ->
+        flunk("Tolerant mode returned {:error, ...} tuple - should have continued")
+    end
+  end
+
+  describe "Driver API" do
+    test "recover/3 emits error_token and advances" do
+      driver = Toxic.Driver.new(error_mode: :tolerant)
+      rest = ~c"+ 1"
+      error = %Toxic.Error{code: :unexpected_token, domain: :general}
+
+      {:ok, {:error_token, meta, ^error}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, error)
+
+      assert {{1, 1}, _, _} = meta
+      assert length(new_rest) < length(rest)
+      assert new_driver.error_mode == :tolerant
     end
   end
 
@@ -280,6 +337,16 @@ defmodule ToxicTolerantModeTest do
 
     test "unexpected end with continuation" do
       tokens = tokenize_tolerant("end\nfoo")
+
+      assert length(error_tokens(tokens)) == 1
+      assert [:error_token, :identifier] = token_types(tokens)
+
+      valid = valid_tokens(tokens)
+      assert {_, _, :foo} = Enum.at(valid, 0)
+    end
+
+    test "unexpected end with continuation CRLF" do
+      tokens = tokenize_tolerant("end\r\nfoo")
 
       assert length(error_tokens(tokens)) == 1
       assert [:error_token, :identifier] = token_types(tokens)
@@ -591,6 +658,118 @@ defmodule ToxicTolerantModeTest do
       types = token_types(tokens)
       assert [:error_token, :dual_op, :int | _] = types
     end
+
+    test "sanitized identifier does not start with digit after normalization" do
+      tokens = tokenize_tolerant("\u1BB0foo + 1", insert_identifier_sanitization: true)
+
+      identifiers =
+        tokens
+        |> Enum.filter(fn
+          {:identifier, _, _} -> true
+          _ -> false
+        end)
+        |> Enum.map(fn {:identifier, _, atom} -> Atom.to_string(atom) end)
+
+      assert Enum.all?(identifiers, fn name -> not String.match?(name, ~r/^[0-9]/) end)
+    end
+  end
+
+  describe "Ternary operator recovery" do
+    test "ternary missing slash inserts synthetic identifier" do
+      tokens = tokenize_tolerant("..//foo")
+
+      assert Enum.any?(tokens, fn token -> match?({:error_token, _, _}, token) end)
+
+      {:identifier, _, :..//} =
+        Enum.find(tokens, fn
+          {:identifier, _, :..//} -> true
+          _ -> false
+        end)
+    end
+
+    test "ternary triple slash is not special-cased" do
+      tokens = tokenize_tolerant("..///foo")
+
+      types = token_types(tokens)
+      assert :mult_op in types
+
+      assert Enum.any?(tokens, fn
+               {:identifier, _, :..//} -> true
+               _ -> false
+             end)
+    end
+  end
+
+  describe "Recovery scanning and sync" do
+    test "vc merge conflict marker with CRLF advances to next line" do
+      tokens = tokenize_tolerant("<<<<<<< foo\r\nbar + baz")
+
+      {:error_token, {{1, 1}, {2, 1}, _}, _} =
+        Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
+
+      {:identifier, {{2, 1}, _, _}, :bar} =
+        Enum.find(tokens, fn
+          {:identifier, {{2, 1}, _, _}, :bar} -> true
+          _ -> false
+        end)
+
+      assert :dual_op in token_types(tokens)
+    end
+
+    test "map invalid open delimiter handles backslash CRLF continuation" do
+      tokens = tokenize_tolerant("%\\\r\n{foo}")
+
+      assert Enum.any?(tokens, fn token -> match?({:%, _}, token) end)
+
+      {:error_token, {{2, 1}, {2, 6}, _}, %Toxic.Error{code: :map_unexpected_space_after_percent}} =
+        Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
+    end
+
+    test "max-skip fallback ensures forward progress" do
+      long = String.duplicate(<<0x1F>>, 8) <> " ok"
+      tokens = tokenize_tolerant(long, error_max_skip: 0)
+
+      assert Enum.any?(tokens, fn token -> match?({:error_token, _, _}, token) end)
+      assert Enum.any?(tokens, fn token -> match?({:identifier, _, :ok}, token) end)
+      assert_forward_progress(tokens)
+    end
+
+    test "error recovery across newline updates position" do
+      tokens = tokenize_tolerant(<<0x1F, ?\n>> <> "ok")
+
+      {:error_token, {{sl, _}, {el, ec}, _}, _} =
+        Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
+
+      assert el == sl
+      assert ec == 2
+
+      {:identifier, {{line, _}, _, _}, :ok} =
+        Enum.find(tokens, fn token -> match?({:identifier, _, :ok}, token) end)
+
+      assert line == sl + 1
+    end
+
+    test "scan stops at bitstring closer" do
+      tokens = tokenize_tolerant("<<foo" <> <<0x1F>> <> ">>")
+
+      types = token_types(tokens)
+      assert :"<<" in types
+      assert :error_token in types
+      assert Enum.any?(tokens, fn token -> elem(token, 0) == :">>" end)
+    end
+  end
+
+  describe "Quoted identifiers" do
+    test "quoted call with non-ASCII emits unnecessary quote warning" do
+      {_tokens, final_stream} = tokenize_with_stream(~S|Mod."føø"()|)
+
+      {warnings, _} = Toxic.TokenStream.warnings(final_stream)
+
+      assert Enum.any?(warnings, fn
+               %Toxic.Warning{code: :unnecessary_quoted_call, details: %{line: 1}} -> true
+               _ -> false
+             end)
+    end
   end
 
   # ============================================================================
@@ -653,6 +832,14 @@ defmodule ToxicTolerantModeTest do
 
       assert Enum.any?(token_types(tokens), &(&1 == :error_token))
       assert Enum.any?(token_types(tokens), &(&1 == :int))
+    end
+  end
+
+  describe "Map context recovery" do
+    test "map identifier sanitization does not emit synthetic percent" do
+      tokens = tokenize_tolerant("%{Bad@Ident: 1}", insert_identifier_sanitization: true)
+
+      refute Enum.any?(tokens, fn token -> match?({:%, _}, token) end)
     end
   end
 
@@ -862,6 +1049,15 @@ defmodule ToxicTolerantModeTest do
       end
     end
 
+    test "missing string terminator recovers without newline escape handling" do
+      tokens = tokenize_tolerant("\"foo + 1")
+
+      {:error_token, {{_sl, _sc}, {el, _}, _}, _} =
+        Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
+
+      assert el == 1
+    end
+
     test "missing heredoc terminator" do
       for input <- ["\"\"\"foo\nbar\n + 1", "\"\"\"foo\n", "'''foo\n", "'''foo\nbar"] do
         tokens = tokenize_tolerant(input)
@@ -944,11 +1140,64 @@ defmodule ToxicTolerantModeTest do
       assert Enum.any?(token_types(tokens), &(&1 == :atom))
     end
 
+    test "missing terminator with no hint" do
+      tokens = tokenize_tolerant("fn 1")
+
+      assert token_types(tokens) == [:fn, :int, :error_token, :end]
+
+      tokens = tokenize_tolerant("defmodule ShowSnippet do\n\n")
+
+      assert token_types(tokens) == [:identifier, :alias, :do, :eol, :error_token, :end]
+
+      tokens = tokenize_tolerant("defmodule ShowSnippet do")
+
+      assert token_types(tokens) == [:identifier, :alias, :do, :error_token, :end]
+
+      tokens = tokenize_tolerant("[1, 2, 3")
+
+      assert token_types(tokens) == [:"[", :int, :",", :int, :",", :int, :error_token, :"]"]
+
+      tokens = tokenize_tolerant("[1, 2, 3")
+
+      assert token_types(tokens) == [:"[", :int, :",", :int, :",", :int, :error_token, :"]"]
+    end
+
     test "unexpected end without hint" do
       tokens = tokenize_tolerant("end \n:ok")
 
       assert Enum.any?(token_types(tokens), &(&1 == :error_token))
       assert Enum.any?(token_types(tokens), &(&1 == :atom))
+    end
+
+    test "missing scope hint without matching entry" do
+      input =
+        """
+        do
+          if true
+            (
+        end
+        """
+        |> String.trim_leading()
+
+      tokens = tokenize_tolerant(input)
+
+      paren_error =
+        Enum.find(tokens, fn
+          {:error_token, _,
+           %Toxic.Error{
+             code: :terminator_mismatched_closer,
+             details: %{opening_delimiter: :"(", closing_delimiter: :end}
+           }} ->
+            true
+
+          _ ->
+            false
+        end)
+
+      assert paren_error
+      {:error_token, _, %Toxic.Error{details: details}} = paren_error
+      assert Map.get(details, :hint_iolist, []) == []
+      assert Enum.any?(tokens, fn token -> elem(token, 0) == :")" end)
     end
   end
 
@@ -958,8 +1207,8 @@ defmodule ToxicTolerantModeTest do
 
   describe "Phase 2: Structural synthesis (insert_structural_closers: true)" do
     # Helper for synthesis tests (default has flag enabled)
-    defp tokenize_with_synthesis(string) do
-      tokenize_tolerant(string)
+    defp tokenize_with_synthesis(string, opts \\ []) do
+      tokenize_tolerant(string, opts)
     end
 
     defp tokenize_without_synthesis(string) do
@@ -1022,6 +1271,23 @@ defmodule ToxicTolerantModeTest do
 
       assert :error_token in types
       assert :atom_unsafe_end in types
+    end
+
+    test "missing quoted atom terminator synthesizes atom_safe_end" do
+      _ = :abc
+      tokens = tokenize_with_synthesis(":\"abc", existing_atoms_only: true)
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :atom_safe_end in types
+
+      {:atom_safe_end, {{sl, sc}, {el, ec}, _}, _} =
+        Enum.find(tokens, fn
+          {:atom_safe_end, _, _} -> true
+          _ -> false
+        end)
+
+      assert {sl, sc} == {el, ec}
     end
 
     test "missing quoted identifier terminator synthesizes quoted_identifier_end" do

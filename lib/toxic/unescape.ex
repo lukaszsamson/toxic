@@ -149,37 +149,37 @@ defmodule Toxic.Unescape do
 
   defp unescape_unicode(<<?{, a, b, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, e, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d, e], acc, 16)
   end
 
   defp unescape_unicode(<<?{, a, b, c, d, e, f, ?}, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) and is_hex(e) and is_hex(f) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d, e, f], acc, 16)
   end
 
   defp unescape_unicode(<<a, b, c, d, rest::binary>>, map_fun, acc)
        when is_hex(a) and is_hex(b) and is_hex(c) and is_hex(d) do
-        # TODO: no coverage
+    # TODO: no coverage
     append_codepoint(rest, map_fun, [a, b, c, d], acc, 16)
   end
 

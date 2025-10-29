@@ -190,7 +190,9 @@ defmodule Toxic.TokenStream do
 
           stream.error ->
             case Keyword.get(stream.opts, :error_mode, :tolerant) do
-              :strict -> {:error, stream.error, stream}
+              :strict ->
+                {:error, stream.error, stream}
+
               :tolerant ->
                 # TODO: no coverage
                 recover_next(stream)
@@ -314,7 +316,10 @@ defmodule Toxic.TokenStream do
               new_not_filled == 0 ->
                 # TODO: no coverage
                 {:ok, push_tokens ++ new_buf_tokens, stream}
-              stream.eof -> {:eof, push_tokens ++ new_buf_tokens, stream}
+
+              stream.eof ->
+                {:eof, push_tokens ++ new_buf_tokens, stream}
+
               true ->
                 # TODO: no coverage
                 {:ok, push_tokens ++ new_buf_tokens, stream}
@@ -755,12 +760,15 @@ defmodule Toxic.TokenStream do
       tries > 4 ->
         # TODO: no coverage
         stream
+
       stream.eof ->
         # TODO: no coverage
         stream
+
       stream.error ->
         # TODO: no coverage
         fill_for_peek(recover_into_buffer(stream), count, tries + 1)
+
       true ->
         # TODO: no coverage
         fill_for_peek(refill_buffer(stream), count, tries + 1)

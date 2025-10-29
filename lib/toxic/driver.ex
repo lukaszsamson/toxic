@@ -160,7 +160,6 @@ defmodule Toxic.Driver do
           | {:eof, t()}
           | {:error, error_reason(), input(), t()}
   def recover(rest, %__MODULE__{error_mode: :tolerant} = state, reason) do
-    # TODO: no coverage
     emit_error_and_advance(reason, rest, state)
   end
 
@@ -1038,19 +1037,13 @@ defmodule Toxic.Driver do
 
   defp missing_scope_hint({start, _meta, _indent}, closing, scope(mismatch_hints: mismatch_hints)) do
     # Check for hint about mismatched terminator based on indentation
-    case :lists.keyfind(start, 1, mismatch_hints) do
-      {^start, hint_meta, _indentation} ->
-        {{hint_line, _hint_column}, _, _} = hint_meta
+    {^start, hint_meta, _indentation} = :lists.keyfind(start, 1, mismatch_hints)
+    {{hint_line, _hint_column}, _, _} = hint_meta
 
-        :io_lib.format(
-          ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
-          [Atom.to_string(start), hint_line, Atom.to_string(closing)]
-        )
-
-      false ->
-        # TODO: no coverage
-        []
-    end
+    :io_lib.format(
+      ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
+      [Atom.to_string(start), hint_line, Atom.to_string(closing)]
+    )
   end
 
   # Helper to return a token and update recent_token in state
@@ -1094,13 +1087,7 @@ defmodule Toxic.Driver do
         do: [synthesize_end_for_kind(kind, delim, meta0)],
         else: []
 
-    parent_terms_list =
-      case parent_terms do
-        :none ->
-          # TODO: no coverage
-          []
-        list when is_list(list) -> list
-      end
+    parent_terms_list = parent_terms
 
     new_scope = scope(state.scope, terminators: parent_terms_list)
     new_contexts = drop_first_interp(state.contexts)
@@ -1124,13 +1111,8 @@ defmodule Toxic.Driver do
     # Pop one scope terminator
     scope(terminators: terms) = state.scope
 
-    new_terms =
-      case terms do
-        [] ->
-          # TODO: no coverage
-          []
-        [_ | rest] -> rest
-      end
+    [_ | rest] = terms
+    new_terms = rest
 
     new_scope = scope(state.scope, terminators: new_terms)
 
@@ -1143,10 +1125,6 @@ defmodule Toxic.Driver do
   end
 
   defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
-  # TODO: no coverage
-  defp drop_first_interp([head | tail]), do: [head | drop_first_interp(tail)]
-  # TODO: no coverage
-  defp drop_first_interp([]), do: []
 
   # Drop the first :normal that immediately precedes an interpolation frame,
   # preserving the interpolation frame itself. This mirrors how a real '}'
@@ -1156,9 +1134,6 @@ defmodule Toxic.Driver do
 
   defp drop_first_normal_before_interp([head | tail]),
     do: [head | drop_first_normal_before_interp(tail)]
-
-  # TODO: no coverage
-  defp drop_first_normal_before_interp(list), do: list
 
   defp synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
   defp synthesize_end_for_kind(:bin_heredoc, delim, meta), do: {:bin_heredoc_end, meta, delim, 0}
@@ -1171,7 +1146,6 @@ defmodule Toxic.Driver do
 
   defp synthesize_end_for_kind(:charlist, delim, meta), do: {:list_string_end, meta, delim}
   defp synthesize_end_for_kind(:string, delim, meta), do: {:bin_string_end, meta, delim}
-  # TODO: no coverage
   defp synthesize_end_for_kind(:atom_safe, delim, meta), do: {:atom_safe_end, meta, delim}
   defp synthesize_end_for_kind(:atom_unsafe, delim, meta), do: {:atom_unsafe_end, meta, delim}
 
@@ -1407,31 +1381,27 @@ defmodule Toxic.Driver do
         # 3) Re-emitting would require synthesizing a matching opener (do/fn), which is ambiguous
         # The error_token's position already captures the "end" location for diagnostics.
         case rest do
-          [?e, ?n, ?d, ?\n | tail] -> {tail, state.line + 1, 1, [], state.scope}
-          [?e, ?n, ?d, ?\r, ?\n | tail] ->
-            # TODO: no coverage
+          [?e, ?n, ?d, ?\n | tail] ->
             {tail, state.line + 1, 1, [], state.scope}
-          [?e, ?n, ?d | tail] -> {tail, state.line, state.column + 3, [], state.scope}
-          _ -> {def_rest, def_line, def_col, [], state.scope}
+
+          [?e, ?n, ?d, ?\r, ?\n | tail] ->
+            {tail, state.line + 1, 1, [], state.scope}
+
+          [?e, ?n, ?d | tail] ->
+            {tail, state.line, state.column + 3, [], state.scope}
+
+          _ ->
+            {def_rest, def_line, def_col, [], state.scope}
         end
 
       {:alias, :alias_unexpected_paren} ->
-        case rest do
-          [?( | tail] ->
-            # Pre-insert "(" token before error and consume it from input.
-            meta_paren = meta(state.line, state.column, state.line, state.column + 1, nil)
-            paren_token = {:"(", meta_paren}
+        [?( | tail] = rest
+        meta_paren = meta(state.line, state.column, state.line, state.column + 1, nil)
+        paren_token = {:"(", meta_paren}
 
-            # Also push the opening paren onto the terminator stack so the
-            # subsequent ")" is properly matched by normal tokenization.
-            {:ok, _tok, new_scope} = synthesize_opening(:"(", state)
+        {:ok, _tok, new_scope} = synthesize_opening(:"(", state)
 
-            {tail, state.line, state.column + 1, [paren_token], new_scope}
-
-          _ ->
-            # TODO: no coverage
-            {def_rest, def_line, def_col, [], state.scope}
-        end
+        {tail, state.line, state.column + 1, [paren_token], new_scope}
 
       {:vc, :vc_merge_conflict_marker} ->
         # Consume the entire conflict marker line including the newline.
@@ -1461,38 +1431,23 @@ defmodule Toxic.Driver do
         end
 
       {_, :keyword_missing_space_after_colon} ->
-        # Emit the identifier before ':' as a valid token, then consume ':' and
-        # continue with the remainder. This preserves expected ordering
-        # [:identifier, :error_token, ...].
-        {id_chars, remainder} = Enum.split_while(rest, fn ch -> ch != ?: end)
+        {[first | rest_chars], [?: | tail]} =
+          Enum.split_while(rest, fn ch -> ch != ?: end)
 
-        case remainder do
-          [?: | tail] when id_chars != [] ->
-            id_token = sanitize_identifier_from_chars(id_chars, state.line, state.column)
-            consumed_len = length(id_chars) + 1
-            {tail, state.line, state.column + consumed_len, [id_token], state.scope}
-
-          _ ->
-            # TODO: no coverage
-            {def_rest, def_line, def_col, [], state.scope}
-        end
+        id_chars = [first | rest_chars]
+        id_token = sanitize_identifier_from_chars(id_chars, state.line, state.column)
+        consumed_len = length(id_chars) + 1
+        {tail, state.line, state.column + consumed_len, [id_token], state.scope}
 
       {_, :map_invalid_open_delimiter} ->
-        case rest do
-          [?% | _] ->
-            meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
-            percent_token = {:%, meta_percent}
-            rest_after_percent = tl(rest)
+        [?% | _] = rest
+        meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
+        percent_token = {:%, meta_percent}
+        rest_after_percent = tl(rest)
 
-            {rest_no_ws, l_after, c_after} =
-              consume_leading_spaces(rest_after_percent, state.line, state.column + 1)
+        {rest_no_ws, l_after, c_after} = {rest_after_percent, state.line, state.column + 1}
 
-            {rest_no_ws, l_after, c_after, [percent_token], state.scope}
-
-          _ ->
-            # TODO: no coverage
-            {def_rest, def_line, def_col, [], state.scope}
-        end
+        {rest_no_ws, l_after, c_after, [percent_token], state.scope}
 
       {_, :terminator_mismatched_closer} ->
         # For mismatched closers, consume normally and let post_actual_closer emit it
@@ -1506,8 +1461,9 @@ defmodule Toxic.Driver do
             _ -> {def_rest, def_line, def_col, [], state.scope}
           end
         else
-          # TODO: no coverage
-          {def_rest, def_line, def_col, [], state.scope}
+          # {def_rest, def_line, def_col, [], state.scope}
+          # TODO: this probably should not happen
+          raise ArgumentError
         end
 
       {_, :heredoc_invalid_header} ->
@@ -1518,12 +1474,9 @@ defmodule Toxic.Driver do
           case List.wrap(err.token_display) do
             [?', ?', ?'] = delim -> {:list_heredoc_end, meta_end, delim, 0}
             [?", ?", ?"] = delim -> {:bin_heredoc_end, meta_end, delim, 0}
-            _ ->
-              # TODO: no coverage
-              nil
           end
 
-        inserts = if end_token, do: [{:post_error, end_token}], else: []
+        inserts = [{:post_error, end_token}]
         {def_rest, def_line, def_col, inserts, state.scope}
 
       {:identifier, _code} ->
@@ -1531,39 +1484,10 @@ defmodule Toxic.Driver do
           span_chars = take_prefix_until(rest, def_rest)
           id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
 
-          # Map Context Heuristic
-          # ----------------------
-          # When an identifier error follows a map opener (%{} or {), downstream tools
-          # (like parsers or editors) expect to see a standalone :% token in the stream
-          # to properly understand the map structure. This is because the identifier error
-          # may represent a partially-typed struct name or map key.
-          #
-          # Example: "%{Bad@Identifier}" should emit: :%{}, :{, :error_token, :}
-          #          (where :% helps tools understand this is map/struct context)
-          #
-          # We pre-insert a synthetic :% token with zero-length meta to preserve this
-          # structural expectation without affecting position tracking.
-          pre_percent =
-            case state.recent_token do
-              {kind, _m, _v} when kind in [:%{}, :"{"] ->
-                # TODO: no coverage
-                meta0 = meta(state.line, state.column, state.line, state.column, nil)
-                [{:%, meta0}]
-
-              _ ->
-                []
-            end
-
-          {def_rest, def_line, def_col, pre_percent ++ [{:post_error, id_token}], state.scope}
+          {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
         else
           {def_rest, def_line, def_col, [], state.scope}
         end
-
-      # P1: Minimal recovery for simple lexical errors from the main tokenizer
-      {:tokenizer, _code} ->
-        # TODO: no coverage
-        {new_rest, new_line, new_col} = consume_one(rest, state)
-        {new_rest, new_line, new_col, [], state.scope}
 
       # Consecutive semicolons - now detected by tokenizer
       {:general, :syntax_consecutive_semicolons} ->
@@ -1586,7 +1510,7 @@ defmodule Toxic.Driver do
         String.Tokenizer.Security.confusable_skeleton(bin)
       rescue
         _ ->
-          # TODO: no coverage
+          # Defensive: fallback if confusable_skeleton raises
           bin
       end
 
@@ -1609,31 +1533,28 @@ defmodule Toxic.Driver do
 
   defp do_take_prefix_until(list, list, acc), do: Enum.reverse(acc)
   defp do_take_prefix_until([h | t], tail, acc), do: do_take_prefix_until(t, tail, [h | acc])
-  # TODO: no coverage
-  defp do_take_prefix_until([], _tail, acc), do: Enum.reverse(acc)
+  defp do_take_prefix_until([], _tail, _acc), do: raise(ArgumentError, "tail must be suffix")
 
-  # TODO: it's most likely wrong, unicode identifiers are allowed
+  # this is overly restrictive but we are recovering from an error anyway
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
   defp allowed_ident_char?(c) when c in ?A..?Z, do: true
   defp allowed_ident_char?(c) when c in ?a..?z, do: true
-  # TODO: no coverage
-  defp allowed_ident_char?(?_), do: true
+  defp allowed_ident_char?(c) when c in [?_, ??, ?!], do: true
   defp allowed_ident_char?(_), do: false
 
-  # TODO: no coverage
-  defp ensure_ident_start([]), do: [?x]
-  # TODO: it's most likely wrong, unicode identifiers are allowed
   defp ensure_ident_start([h | _] = list) when h in ?A..?Z or h in ?a..?z or h == ?_, do: list
-  # TODO: no coverage
-  defp ensure_ident_start(list), do: [?_ | list]
 
   defp ternary_missing_slash?(rest) do
     case rest do
       [?., ?., ?/, ?/ | tail] ->
         case tail do
-          # TODO: no coverage
-          [?/ | _] -> false
-          _ -> true
+          [?/ | _] ->
+            # TODO: this should not happen
+            # false
+            raise ArgumentError
+
+          _ ->
+            true
         end
 
       _ ->
@@ -1642,33 +1563,9 @@ defmodule Toxic.Driver do
   end
 
   defp consume_until_newline([?\n | rest]), do: {rest, true}
-  # TODO: no coverage
   defp consume_until_newline([?\r, ?\n | rest]), do: {rest, true}
   defp consume_until_newline([_ | rest]), do: consume_until_newline(rest)
   defp consume_until_newline([]), do: {[], false}
-
-  defp consume_leading_spaces(rest, line, column) do
-    consume_leading_spaces(rest, line, column, 0)
-  end
-
-  # TODO: no coverage
-  defp consume_leading_spaces([?\\, ?\n | tail], line, _column, count) do
-    consume_leading_spaces(tail, line + 1, 1, count + 1)
-  end
-
-  # TODO: no coverage
-  defp consume_leading_spaces([?\\, ?\r, ?\n | tail], line, _column, count) do
-    consume_leading_spaces(tail, line + 1, 1, count + 1)
-  end
-
-  # TODO: no coverage
-  defp consume_leading_spaces([ch | tail], line, column, count) when is_horizontal_space(ch) do
-    consume_leading_spaces(tail, line, column + 1, count + 1)
-  end
-
-  defp consume_leading_spaces(rest, line, column, _count) do
-    {rest, line, column}
-  end
 
   defp consume_one(rest, state) do
     case :unicode_util.gc(rest) do
@@ -1681,7 +1578,7 @@ defmodule Toxic.Driver do
         {new_rest, line, col}
 
       [] ->
-        {[], state.line, state.column}
+        raise "unicode_util.gc/1 returned [] for non-empty input"
     end
   end
 
@@ -1691,7 +1588,6 @@ defmodule Toxic.Driver do
 
   defp do_scan_to_sync(rest, state, scanned) when scanned >= state.error_max_skip do
     # Fallback: consume a single codepoint
-    # TODO: no coverage
     consume_one(rest, state)
   end
 
@@ -1717,14 +1613,14 @@ defmodule Toxic.Driver do
           do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
 
         [] ->
-          # TODO: no coverage
-          {[], state.line, state.column}
+          raise "unicode_util.gc/1 returned [] for non-empty input"
       end
     end
   end
 
-  # TODO: no coverage
-  defp advance_pos(?\n, line, _col), do: {line + 1, 1}
+  # TODO: this may not be needed
+  # defp advance_pos(?\n, line, _col), do: {line + 1, 1}
+  defp advance_pos(?\n, _line, _col), do: raise(ArgumentError)
   defp advance_pos(_ch, line, col), do: {line, col + 1}
 
   defp advance_pos_cluster(cluster, line, col) do
@@ -1769,7 +1665,6 @@ defmodule Toxic.Driver do
   defp closer_starts_with?(list, :")"), do: starts_with_char?(list, ?))
   defp closer_starts_with?(list, :"]"), do: starts_with_char?(list, ?])
   defp closer_starts_with?(list, :"}"), do: starts_with_char?(list, ?})
-  # TODO: no coverage
   defp closer_starts_with?(list, :">>"), do: starts_with_list?(list, [?>, ?>])
   defp closer_starts_with?(list, :end), do: starts_with_list?(list, ~c"end")
 
@@ -1777,8 +1672,6 @@ defmodule Toxic.Driver do
     do: starts_with_list?(list, terminator_chars(expected))
 
   defp starts_with_char?([h | _], ch), do: h == ch
-  # TODO: no coverage
-  defp starts_with_char?(_, _), do: false
 
   defp starts_with_list?(_list, []), do: true
   defp starts_with_list?([h | t1], [h | t2]), do: starts_with_list?(t1, t2)
@@ -1942,7 +1835,6 @@ defmodule Toxic.Driver do
       {:identifier, ^charlist, _atom, [], _length, false, _special} ->
         # Valid identifier but not ASCII - still valid for calls
         case kind do
-          # TODO: no coverage
           :quoted_identifier ->
             {true, content}
 
@@ -2012,9 +1904,6 @@ defmodule Toxic.Driver do
     end
   end
 
-  # TODO: no coverage
-  defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
-
   defp closer_atom_from_chars(~c")"), do: :")"
   defp closer_atom_from_chars(~c"]"), do: :"]"
   defp closer_atom_from_chars(~c"}"), do: :"}"
@@ -2034,12 +1923,8 @@ defmodule Toxic.Driver do
     # Pop one if matches current opener; we will conservatively pop regardless
     scope(terminators: terms) = state.scope
 
-    new_terms =
-      case terms do
-        # TODO: no coverage
-        [] -> []
-        [_ | rest] -> rest
-      end
+    [_ | rest] = terms
+    new_terms = rest
 
     {:ok, token, scope(state.scope, terminators: new_terms)}
   end
