@@ -919,7 +919,6 @@ defmodule Toxic.Tokenizer do
         Toxic.Scope.prepend_warning(warning, scope)
 
       ?? ->
-        # TODO: no coverage
         warning = Toxic.Warning.ambiguous_question_before_equals(line, column, identifier, kind)
         Toxic.Scope.prepend_warning(warning, scope)
 

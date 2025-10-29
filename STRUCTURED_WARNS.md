@@ -32,10 +32,6 @@ Located in:
    - Unknown char escapes (`:invalid_char_escape`)
    - Unnecessary char escapes (`:unnecessary_char_escape`)
 
-4. **Unicode/Character Issues**
-   - Non-Latin atoms (`:non_latin_atom`)
-   - Confusable identifier characters (`:confusable_identifier_char`)
-
 ## Implementation Plan
 
 ### Phase 1: Warning Structure Definition

@@ -185,13 +185,22 @@ defmodule ToxicWarningsTest do
     tokenize_and_compare_warning("foo!= 1")
   end
 
+  # Ambiguous question before equals warnings
+  test "ambiguous question before equals in atom" do
+    tokenize_and_compare_warning(":foo?= 1")
+  end
+
+  test "ambiguous question before equals in identifier" do
+    tokenize_and_compare_warning("foo?= 1")
+  end
+
   # Deprecated operator warnings
   test "deprecated xor operator ^^^" do
     tokenize_and_compare_warning("1 ^^^ 2")
   end
 
   test "deprecated bnot operator ~~~" do
-    tokenize_and_compare_warning("~~~ 1")
+    tokenize_and_compare_warning("~~~1")
   end
 
   test "deprecated pipe operator <|>" do

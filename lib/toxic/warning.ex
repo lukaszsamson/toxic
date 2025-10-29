@@ -54,9 +54,6 @@ defmodule Toxic.Warning do
           # Escape
           | :invalid_char_escape
           | :unnecessary_char_escape
-          # Unicode
-          | :non_latin_atom
-          | :confusable_identifier_char
 
   @type t :: %__MODULE__{
           code: code(),
@@ -421,13 +418,12 @@ defmodule Toxic.Warning do
       ambiguous_question_before_equals(1, 5, ~c"foo?", :identifier)
   """
   def ambiguous_question_before_equals(line, column, identifier, kind) do
-    # TODO: no coverage
     msg =
       :io_lib.format(
         ~c"found ~ts \"~ts\", ending with \"?\", followed by =. " ++
-          ~c"It is unclear if you mean \"~ts\" as a predicate or \"~ts =\". " ++
+          ~c"It is unclear if you mean \"~ts ?=\" or \"~ts =\". " ++
           ~c"Please add a space before or after ? to remove the ambiguity",
-        [kind_name(kind), identifier, identifier, identifier]
+        [kind_name(kind), identifier, :lists.droplast(identifier), identifier]
       )
 
     new(
@@ -536,49 +532,6 @@ defmodule Toxic.Warning do
       :escape,
       [??, ?\\, char],
       %{line: line, column: column, char: char, escape: escape_seq, name: name, message: msg}
-    )
-  end
-
-  # Unicode warnings
-
-  @doc """
-  Warning for non-Latin atoms.
-
-  Atoms containing non-Latin characters may cause portability or readability issues.
-
-  ## Example
-
-      # Input: :café
-      non_latin_atom(1, 5, :café)
-  """
-  def non_latin_atom(line, column, atom) do
-    # TODO: no coverage
-    new(
-      :non_latin_atom,
-      :unicode,
-      Atom.to_charlist(atom),
-      %{line: line, column: column, atom: atom}
-    )
-  end
-
-  @doc """
-  Warning for confusable identifier characters.
-
-  Some unicode characters look similar to ASCII characters but are different,
-  which can lead to confusing bugs.
-
-  ## Example
-
-      # Input: fοo (where ο is Greek omicron, not ASCII o)
-      confusable_identifier_char(1, 5, ~c"fοo", ?ο)
-  """
-  def confusable_identifier_char(line, column, identifier, confusable_char) do
-    # TODO: no coverage
-    new(
-      :confusable_identifier_char,
-      :unicode,
-      identifier,
-      %{line: line, column: column, confusable: confusable_char}
     )
   end
 

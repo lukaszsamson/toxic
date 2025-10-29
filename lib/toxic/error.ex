@@ -118,7 +118,7 @@ defmodule Toxic.Error do
   def format(%__MODULE__{code: :terminator_unexpected_closer, token_display: tok}) do
     case List.wrap(tok) do
       # TODO: no coverage
-      # ~c"end" -> ~c"unexpected reserved word: "
+      ~c"end" -> ~c"unexpected reserved word: "
       _ -> ~c"unexpected token: "
     end
   end
@@ -305,7 +305,7 @@ defmodule Toxic.Error do
       case Map.get(d, :help_iolist, []) do
         {_prefix, actual_help} -> actual_help
         # TODO: no coverage
-        # other -> other
+        other -> other
       end
 
     {~c"unexpected reserved word: ", help}
@@ -328,9 +328,9 @@ defmodule Toxic.Error do
   end
 
   # TODO: no coverage
-  # def format(%__MODULE__{}) do
-  #   ~c"syntax error"
-  # end
+  def format(%__MODULE__{}) do
+    ~c"syntax error"
+  end
 
   @doc """
   Convert a structured error to a legacy reason tuple `{meta_kv, message_iodata, token_chars}`

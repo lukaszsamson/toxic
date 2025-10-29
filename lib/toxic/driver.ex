@@ -1943,8 +1943,8 @@ defmodule Toxic.Driver do
         # Valid identifier but not ASCII - still valid for calls
         case kind do
           # TODO: no coverage
-          # :quoted_identifier ->
-          #   {true, content}
+          :quoted_identifier ->
+            {true, content}
 
           _ ->
             false
@@ -2013,7 +2013,7 @@ defmodule Toxic.Driver do
   end
 
   # TODO: no coverage
-  # defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
+  defp synthesize_from_reason(_reason, state), do: {:none, [], state.scope}
 
   defp closer_atom_from_chars(~c")"), do: :")"
   defp closer_atom_from_chars(~c"]"), do: :"]"
@@ -2037,7 +2037,7 @@ defmodule Toxic.Driver do
     new_terms =
       case terms do
         # TODO: no coverage
-        # [] -> []
+        [] -> []
         [_ | rest] -> rest
       end
 
