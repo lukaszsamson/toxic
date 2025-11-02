@@ -688,10 +688,20 @@ defmodule Toxic.Driver do
          }}
 
       {:transform_into_do_identifier, rest, line, column, scope} ->
-        updated_token =
+        {output_tokens, deferrals_result} =
           case deferrals do
-            [{:identifier, meta, name}] -> {:do_identifier, meta, name}
-            [{:quoted_identifier_end, meta, name}] -> {:quoted_do_identifier_end, meta, name}
+            [{:identifier, meta, name}] ->
+              updated_token = {:do_identifier, meta, name}
+              {[updated_token], []}
+
+            [{:quoted_identifier_end, meta, name}] ->
+              updated_token = {:quoted_do_identifier_end, meta, name}
+              {[updated_token], []}
+
+            # Defensive: if deferrals is empty or contains unexpected tokens,
+            # emit any deferred tokens as-is without transformation
+            _ ->
+              {[], deferrals}
           end
 
         {rest,
@@ -700,7 +710,7 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: [updated_token],
+             output: output ++ Enum.reverse(deferrals_result) ++ output_tokens,
              deferrals: []
          }}
 
@@ -727,10 +737,20 @@ defmodule Toxic.Driver do
          }}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
-        updated_token =
+        {output_tokens, deferrals_result} =
           case deferrals do
-            [{:identifier, meta, name}] -> {:op_identifier, meta, name}
-            [{:quoted_identifier_end, meta, name}] -> {:quoted_op_identifier_end, meta, name}
+            [{:identifier, meta, name}] ->
+              updated_token = {:op_identifier, meta, name}
+              {[updated_token, token], []}
+
+            [{:quoted_identifier_end, meta, name}] ->
+              updated_token = {:quoted_op_identifier_end, meta, name}
+              {[updated_token, token], []}
+
+            # Defensive: if deferrals is empty or contains unexpected tokens,
+            # emit both the dual_op and token as-is without transformation
+            _ ->
+              {[token], deferrals}
           end
 
         {rest,
@@ -739,7 +759,7 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             output: [updated_token, token],
+             output: output ++ Enum.reverse(deferrals_result) ++ output_tokens,
              deferrals: []
          }}
 
@@ -1565,6 +1585,11 @@ defmodule Toxic.Driver do
   defp consume_until_newline([_ | rest]), do: consume_until_newline(rest)
   defp consume_until_newline([]), do: {[], false}
 
+  defp consume_one([], state) do
+    # Already at EOF; return current position without advancing
+    {[], state.line, state.column}
+  end
+
   defp consume_one(rest, state) do
     case :unicode_util.gc(rest) do
       [cluster | new_rest] when is_list(cluster) ->
@@ -1576,7 +1601,8 @@ defmodule Toxic.Driver do
         {new_rest, line, col}
 
       [] ->
-        raise "unicode_util.gc/1 returned [] for non-empty input"
+        # This should not happen if rest is non-empty, but be defensive
+        {[], state.line, state.column}
     end
   end
 
