@@ -97,8 +97,19 @@ defmodule Toxic.Operator do
         emit(token, remaining, line, column + length + extra, scope)
 
       {remaining, extra} ->
+        new_scope =
+          # TODO: Remove these deprecations on Elixir v2.0
+          case op do
+            :"~~~" ->
+              warning = Toxic.Warning.deprecated_bnot_operator(line, column)
+              Toxic.Scope.prepend_warning(warning, scope)
+
+            _ ->
+              scope
+          end
+
         token = {kind, meta(line, column, length, nil), op}
-        emit(token, remaining, line, column + length + extra, scope)
+        emit(token, remaining, line, column + length + extra, new_scope)
     end
   end
 
@@ -119,11 +130,6 @@ defmodule Toxic.Operator do
           case op do
             :"^^^" ->
               warning = Toxic.Warning.deprecated_xor_operator(line, column)
-              Toxic.Scope.prepend_warning(warning, scope)
-
-            :"~~~" ->
-              # TODO: port fix from upstream elixir
-              warning = Toxic.Warning.deprecated_bnot_operator(line, column)
               Toxic.Scope.prepend_warning(warning, scope)
 
             :"<|>" ->
