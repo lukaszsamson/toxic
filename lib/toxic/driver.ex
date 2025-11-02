@@ -1562,6 +1562,11 @@ defmodule Toxic.Driver do
 
   defp ensure_ident_start([h | _] = list) when h in ?A..?Z or h in ?a..?z or h == ?_, do: list
 
+  defp ensure_ident_start(list) do
+    # Identifier starts with invalid character (digit or other); prepend underscore
+    [?_ | list]
+  end
+
   defp ternary_missing_slash?(rest) do
     case rest do
       [?., ?., ?/, ?/ | tail] ->
@@ -1602,7 +1607,8 @@ defmodule Toxic.Driver do
 
       [] ->
         # This should not happen if rest is non-empty, but be defensive
-        {[], state.line, state.column}
+        # {[], state.line, state.column}
+        raise "unicode_util.gc/1 returned [] for non-empty input"
     end
   end
 
@@ -1642,9 +1648,7 @@ defmodule Toxic.Driver do
     end
   end
 
-  # TODO: this may not be needed
-  # defp advance_pos(?\n, line, _col), do: {line + 1, 1}
-  defp advance_pos(?\n, _line, _col), do: raise(ArgumentError)
+  defp advance_pos(?\n, line, _col), do: {line + 1, 1}
   defp advance_pos(_ch, line, col), do: {line, col + 1}
 
   defp advance_pos_cluster(cluster, line, col) do

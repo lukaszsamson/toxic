@@ -1878,5 +1878,36 @@ defmodule ToxicTolerantModeTest do
       assert is_list(tokens)
       assert length(tokens) > 0
     end
+
+    test "fuzzing crash - ensure_ident_start no clause for digit-starting identifier (failure_2)" do
+      # This is a reduced test for the fuzzing crash from fuzz_toxic_tolerant_out/failure_2.ex
+      # During identifier sanitization in error recovery, if the sanitized identifier
+      # starts with a digit (like "3_"), ensure_ident_start/1 has no clause matching it
+      # The payload contains invalid Unicode that triggers this path
+      code = "񼦺򆾷񏧜𖗍З𞹛"
+
+      # This should not crash in tolerant mode
+      tokens = tokenize_tolerant(code)
+
+      # Verify we got some tokens (not necessarily all valid, but no crash)
+      assert is_list(tokens)
+      assert length(tokens) > 0
+    end
+
+    test "fuzzing crash - advance_pos raises on newline in consume_one (failure_3 duplicate)" do
+      # This is a test for a fuzzing crash from fuzz_toxic_tolerant_out/failure_3.ex
+      # (Different from the dual_op_identifier failure_3)
+      # During error recovery, consume_one/2 calls advance_pos/3 with a newline codepoint
+      # but advance_pos intentionally raises ArgumentError for newlines
+      # The payload contains invalid Unicode that triggers this in error recovery
+      code = "g®²=Ãg·9!Ï°ÍÐ:íHä\u0010Ç\u00184(¡~\u0011níE'Mw\nr)H\u0018ÃÐèü|\u0017%Ò($J®âA\u000b"
+
+      # This should not crash in tolerant mode
+      tokens = tokenize_tolerant(code)
+
+      # Verify we got some tokens (not necessarily all valid, but no crash)
+      assert is_list(tokens)
+      assert length(tokens) > 0
+    end
   end
 end
