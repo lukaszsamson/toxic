@@ -123,7 +123,6 @@ defmodule Toxic.Driver do
       insert_identifier_sanitization: insert_identifier_sanitization,
       scope:
         scope(
-          identifier_tokenizer: String.Tokenizer,
           elixir_compatibility: elixir_compatibility,
           preserve_comments: preserve_comments,
           existing_atoms_only: existing_atoms_only

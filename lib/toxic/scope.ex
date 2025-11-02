@@ -10,8 +10,6 @@ defmodule Toxic.Scope do
     existing_atoms_only: false,
     static_atoms_encoder: nil,
     preserve_comments: nil,
-    # TODO: do we need that?
-    identifier_tokenizer: Toxic.IdentifierTokenizer,
     ascii_identifiers_only: true,
     indentation: 0,
     column: 1,
@@ -33,7 +31,6 @@ defmodule Toxic.Scope do
             existing_atoms_only: boolean(),
             static_atoms_encoder: nil | function(),
             preserve_comments: nil | false | preserve_comments_fun(),
-            identifier_tokenizer: module(),
             ascii_identifiers_only: boolean(),
             indentation: non_neg_integer(),
             column: pos_integer(),

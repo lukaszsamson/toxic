@@ -1,6 +1,5 @@
 defmodule Toxic.Identifier do
   @moduledoc false
-  import Toxic.Scope
   import Toxic.Util
   import Toxic.Token
 
@@ -17,9 +16,7 @@ defmodule Toxic.Identifier do
   end
 
   def tokenize_identifier(string, line, column, scope, maybe_keyword?) do
-    scope(identifier_tokenizer: identifier_tokenizer) = scope
-
-    case identifier_tokenizer.tokenize(string) do
+    case String.Tokenizer.tokenize(string) do
       {kind, acc, rest, length, ascii, special} ->
         keyword = maybe_keyword? and maybe_keyword?(rest)
 
@@ -145,16 +142,14 @@ defmodule Toxic.Identifier do
     unsafe_to_atom(part, line, column, scope)
   end
 
-  defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
-    scope(identifier_tokenizer: identifier_tokenizer) = scope
-
+  defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, _scope) do
     nfkc = :unicode.characters_to_nfkc_list(wrong)
 
-    case identifier_tokenizer.tokenize(nfkc) do
+    case String.Tokenizer.tokenize(nfkc) do
       {:error, _reason} ->
         confusable = String.Tokenizer.Security.confusable_skeleton(wrong)
 
-        case identifier_tokenizer.tokenize(confusable) do
+        case String.Tokenizer.tokenize(confusable) do
           {_, simpler, _, _, _, _} ->
             message =
               suggest_change(
