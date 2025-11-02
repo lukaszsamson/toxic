@@ -1869,7 +1869,10 @@ defmodule ToxicTolerantModeTest do
       # During error recovery with scan_to_sync, when max skip is exceeded, consume_one is called
       # but the input might reach EOF, causing unicode_util.gc to return [] when called on empty rest
       # The string contains special chars including backtick and brace, so we construct from bytes
-      code = <<46, 39, 93, 98, 73, 57, 66, 55, 47, 125, 70, 113, 115, 34, 78, 90, 49, 96, 69, 59, 72, 113, 116, 92, 119, 67, 42, 101, 118, 83, 83, 53, 79, 94, 70, 34, 104, 105, 35, 85, 45, 53, 112, 45, 59, 55, 84, 40, 108, 70, 106, 64, 70, 111, 126, 63, 50, 80, 35, 123>>
+      code =
+        <<46, 39, 93, 98, 73, 57, 66, 55, 47, 125, 70, 113, 115, 34, 78, 90, 49, 96, 69, 59, 72,
+          113, 116, 92, 119, 67, 42, 101, 118, 83, 83, 53, 79, 94, 70, 34, 104, 105, 35, 85, 45,
+          53, 112, 45, 59, 55, 84, 40, 108, 70, 106, 64, 70, 111, 126, 63, 50, 80, 35, 123>>
 
       # This should not crash in tolerant mode
       tokens = tokenize_tolerant(code)

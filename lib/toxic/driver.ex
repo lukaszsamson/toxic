@@ -1479,9 +1479,8 @@ defmodule Toxic.Driver do
             _ -> {def_rest, def_line, def_col, [], state.scope}
           end
         else
-          # {def_rest, def_line, def_col, [], state.scope}
-          # TODO: this probably should not happen
-          raise ArgumentError
+          # defensive, this should should not happen
+          {def_rest, def_line, def_col, [], state.scope}
         end
 
       {_, :heredoc_invalid_header} ->
@@ -1551,7 +1550,8 @@ defmodule Toxic.Driver do
 
   defp do_take_prefix_until(list, list, acc), do: Enum.reverse(acc)
   defp do_take_prefix_until([h | t], tail, acc), do: do_take_prefix_until(t, tail, [h | acc])
-  defp do_take_prefix_until([], _tail, _acc), do: raise(ArgumentError, "tail must be suffix")
+  # This should not happen
+  defp do_take_prefix_until([], _tail, acc), do: Enum.reverse(acc)
 
   # this is overly restrictive but we are recovering from an error anyway
   defp allowed_ident_char?(c) when c in ?0..?9, do: true
@@ -1572,9 +1572,8 @@ defmodule Toxic.Driver do
       [?., ?., ?/, ?/ | tail] ->
         case tail do
           [?/ | _] ->
-            # TODO: this should not happen
-            # false
-            raise ArgumentError
+            # defensive, this should not happen
+            false
 
           _ ->
             true
@@ -1607,8 +1606,7 @@ defmodule Toxic.Driver do
 
       [] ->
         # This should not happen if rest is non-empty, but be defensive
-        # {[], state.line, state.column}
-        raise "unicode_util.gc/1 returned [] for non-empty input"
+        {[], state.line, state.column}
     end
   end
 
@@ -1643,7 +1641,8 @@ defmodule Toxic.Driver do
           do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
 
         [] ->
-          raise "unicode_util.gc/1 returned [] for non-empty input"
+          # This should not happen but be defensive
+          {list, state.line, state.column}
       end
     end
   end
