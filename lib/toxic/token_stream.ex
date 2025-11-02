@@ -79,18 +79,18 @@ defmodule Toxic.TokenStream do
           opts: options(),
           eof: boolean(),
           error: Toxic.Error.t() | nil,
-          last_emitted_entry: buffer_entry() | nil
+          last_emitted_entry: buffer_entry() | nil,
+          driver_source: charlist() | nil,
+          source_binary: binary() | nil
         }
 
   @typedoc """
-  Source can be a binary, iodata, or a producer function.
+  Source type accepted by `new/4`:
+  - UTF-8 binary
+  - Flat charlist (list of codepoints/bytes)
 
-  Producer function receives current line and column and returns:
-  - `{:more, binary()}` - More input available
-  - `:eof` - End of input
   """
-  @type source ::
-          iodata() | (non_neg_integer(), non_neg_integer() -> {:more, binary()} | :eof)
+  @type source :: binary() | charlist()
 
   @typedoc """
   Error value.
@@ -106,7 +106,9 @@ defmodule Toxic.TokenStream do
             opts: [],
             eof: false,
             error: nil,
-            last_emitted_entry: nil
+            last_emitted_entry: nil,
+            driver_source: nil,
+            source_binary: nil
 
   # Default options
   @default_opts [
@@ -126,7 +128,7 @@ defmodule Toxic.TokenStream do
   Create a new token stream from source.
 
   ## Parameters
-  - `source` - Binary, iodata, or producer function
+  - `source` - Binary or flat charlist
   - `line` - Starting line number (default: 1)
   - `column` - Starting column number (default: 1)
   - `opts` - Keyword list of options
@@ -158,9 +160,26 @@ defmodule Toxic.TokenStream do
 
     driver = Toxic.Driver.new(opts)
 
+    {driver_source, source_binary, effective_source} =
+      cond do
+        is_binary(source) ->
+          charlist = String.to_charlist(source)
+          {charlist, source, charlist}
+
+        is_list(source) ->
+          bin = :unicode.characters_to_binary(source)
+          {source, bin, source}
+
+        true ->
+          raise ArgumentError,
+                "Unsupported source type: #{inspect(source)}. Expected binary or flat charlist"
+      end
+
     %__MODULE__{
       driver: driver,
-      source: source,
+      source: effective_source,
+      driver_source: driver_source,
+      source_binary: source_binary,
       opts: opts
     }
   end
@@ -425,7 +444,7 @@ defmodule Toxic.TokenStream do
 
   """
   @spec slice(
-          t() | iodata(),
+          t() | binary() | charlist(),
           non_neg_integer(),
           non_neg_integer(),
           pos_integer(),
@@ -570,13 +589,10 @@ defmodule Toxic.TokenStream do
 
   # Private functions
 
-  defp normalize_source_for_driver(source) when is_binary(source), do: String.to_charlist(source)
-  defp normalize_source_for_driver(source) when is_list(source), do: source
-
   defp fetch_tokens_from_driver(stream, max_batch, opts) do
     # Fetch a batch from the Erlang driver, then optionally collapse linear markers
-    # TODO: slicing source
-    source_string = normalize_source_for_driver(stream.source)
+    # source already normalized once in new/4 for binary/charlist inputs
+    source_string = stream.source
 
     {tokens, source_string, new_driver, eof, error} =
       fetch_tokens_from_driver(stream.driver, source_string, max_batch, [], 0, opts)
@@ -635,6 +651,7 @@ defmodule Toxic.TokenStream do
       | buffer: new_buffer,
         driver: new_driver,
         source: source,
+        driver_source: source,
         eof: stream_eof,
         error: stream.error || error
     }
@@ -689,6 +706,21 @@ defmodule Toxic.TokenStream do
 
   defp extract_slice(source, start_offset, end_offset) when is_binary(source) do
     String.slice(source, start_offset, end_offset - start_offset)
+  end
+
+  defp extract_slice(source, start_offset, end_offset) when is_list(source) do
+    # Convert once then slice using codepoint offsets (String.slice is codepoint-aware)
+    bin = :unicode.characters_to_binary(source)
+    String.slice(bin, start_offset, end_offset - start_offset)
+  end
+
+  defp extract_slice(%__MODULE__{source_binary: bin}, start_offset, end_offset)
+       when is_integer(start_offset) and is_integer(end_offset) do
+    if bin do
+      String.slice(bin, start_offset, end_offset - start_offset)
+    else
+      ""
+    end
   end
 
   defp strict_error?(%__MODULE__{error: error, opts: opts}) do

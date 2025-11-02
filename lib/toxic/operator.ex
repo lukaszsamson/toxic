@@ -97,8 +97,8 @@ defmodule Toxic.Operator do
         emit(token, remaining, line, column + length + extra, scope)
 
       {remaining, extra} ->
+        # TODO: Remove these deprecations on Elixir v2.0
         new_scope =
-          # TODO: Remove these deprecations on Elixir v2.0
           case op do
             :"~~~" ->
               warning = Toxic.Warning.deprecated_bnot_operator(line, column)

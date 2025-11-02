@@ -19,12 +19,6 @@ defmodule Toxic.TokenStreamTest do
       stream = TokenStream.new("foo", 1, 1, max_batch: 10)
       assert stream.opts[:max_batch] == 10
     end
-
-    test "accepts a function source" do
-      source = fn _line, _column -> :eof end
-      stream = TokenStream.new(source)
-      assert %TokenStream{} = stream
-    end
   end
 
   describe "next/1" do
