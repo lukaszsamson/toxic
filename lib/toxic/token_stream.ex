@@ -443,7 +443,6 @@ defmodule Toxic.TokenStream do
   # """
   # @spec relex_range(t(), non_neg_integer(), non_neg_integer(), iodata()) :: t()
   # def relex_range(%__MODULE__{} = stream, _start_offset, _end_offset, new_content) do
-  #   # TODO: real implementation
   #   # This is a complex operation that would require:
   #   # 1. Invalidating buffered tokens in the range
   #   # 2. Re-lexing the new content
@@ -689,8 +688,7 @@ defmodule Toxic.TokenStream do
   end
 
   defp extract_slice(source, start_offset, end_offset) when is_binary(source) do
-    # TODO: this should use String.slice to handle unicode
-    binary_part(source, start_offset, end_offset - start_offset)
+    String.slice(source, start_offset, end_offset - start_offset)
   end
 
   defp strict_error?(%__MODULE__{error: error, opts: opts}) do
