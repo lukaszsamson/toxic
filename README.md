@@ -36,21 +36,21 @@ A production-ready **streaming tokenizer for Elixir** with comprehensive error r
 
 ```elixir
 # Basic tokenization (tolerant mode by default)
-stream = Toxic.TokenStream.new("x = 1 + 2")
+stream = Toxic.new("x = 1 + 2")
 
-{:ok, token, stream} = Toxic.TokenStream.next(stream)
+{:ok, token, stream} = Toxic.next(stream)
 # token = {:identifier, {{1, 1}, {1, 2}, nil}, :x}
 
 # Lookahead without consuming
-{:ok, next_token, stream} = Toxic.TokenStream.peek(stream)
+{:ok, next_token, stream} = Toxic.peek(stream)
 
 # Get multiple tokens ahead
-{:ok, tokens, stream} = Toxic.TokenStream.peek_n(stream, 5)
+{:ok, tokens, stream} = Toxic.peek_n(stream, 5)
 
 # Backtracking with checkpoints
-{ref, stream} = Toxic.TokenStream.checkpoint(stream)
+{ref, stream} = Toxic.checkpoint(stream)
 # ... try something ...
-stream = Toxic.TokenStream.rewind_to(stream, ref)
+stream = Toxic.rewind_to(stream, ref)
 ```
 
 ## Error Recovery
@@ -58,9 +58,9 @@ stream = Toxic.TokenStream.rewind_to(stream, ref)
 ```elixir
 # Tolerant mode - continues with error tokens
 bad_code = "x = 1 + @@@"
-stream = Toxic.TokenStream.new(bad_code, opts: [error_mode: :tolerant])
+stream = Toxic.new(bad_code, opts: [error_mode: :tolerant])
 
-case Toxic.TokenStream.next(stream) do
+case Toxic.next(stream) do
   {:ok, {:error_token, meta, %Toxic.Error{code: code}}, stream} ->
     # Error token emitted, parsing continues
     IO.inspect(code)  # e.g., :invalid_identifier
@@ -71,14 +71,14 @@ case Toxic.TokenStream.next(stream) do
 end
 
 # Strict mode - halts on error
-stream = Toxic.TokenStream.new(bad_code, opts: [error_mode: :strict])
-{:error, reason, stream} = Toxic.TokenStream.next(stream)
+stream = Toxic.new(bad_code, opts: [error_mode: :strict])
+{:error, reason, stream} = Toxic.next(stream)
 ```
 
 ## Configuration
 
 ```elixir
-Toxic.TokenStream.new(code, opts: [
+Toxic.new(code, opts: [
   error_mode: :tolerant,  # or :strict
   error_sync: [:semicolon, :newline, :closer, :comma],
   error_max_skip: 4096,
@@ -91,14 +91,14 @@ Toxic.TokenStream.new(code, opts: [
 
 ```elixir
 # Check for open delimiters
-{terminators, stream} = Toxic.TokenStream.current_terminators(stream)
+{terminators, stream} = Toxic.current_terminators(stream)
 # terminators = [{opening_token, meta, indent}, ...]
 
 # Collect all warnings
-{warnings, stream} = Toxic.TokenStream.warnings(stream)
+{warnings, stream} = Toxic.warnings(stream)
 
 # Collect all error tokens
-{errors, stream} = Toxic.TokenStream.errors(stream)
+{errors, stream} = Toxic.errors(stream)
 ```
 
 ## Installation

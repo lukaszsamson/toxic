@@ -106,11 +106,11 @@ Toxic.Driver.new([
 
 ```elixir
 # Tolerant mode - continues with error tokens
-stream = Toxic.TokenStream.new(bad_code, opts: [error_mode: :tolerant])
+stream = Toxic.new(bad_code, opts: [error_mode: :tolerant])
 {:ok, {:error_token, meta, %Toxic.Error{}}, stream} = TokenStream.next(stream)
 
 # Strict mode - halts
-stream = Toxic.TokenStream.new(bad_code, opts: [error_mode: :strict])
+stream = Toxic.new(bad_code, opts: [error_mode: :strict])
 {:error, reason, stream} = TokenStream.next(stream)
 ```
 
@@ -240,10 +240,10 @@ Parser/compiler halts with error
 
 ```elixir
 # Create stream (tolerant by default)
-stream = Toxic.TokenStream.new(code_string)
+stream = Toxic.new(code_string)
 
 # Consume tokens
-case Toxic.TokenStream.next(stream) do
+case Toxic.next(stream) do
   {:ok, token, stream} ->
     # token = {kind, meta, value?, ...}
     # meta = {{line, col}, {end_line, end_col}, extra}
@@ -257,15 +257,15 @@ case Toxic.TokenStream.next(stream) do
 end
 
 # Lookahead without consuming
-{:ok, next_token, stream} = Toxic.TokenStream.peek(stream)
+{:ok, next_token, stream} = Toxic.peek(stream)
 
 # Get next 5 tokens
-{:ok, tokens, stream} = Toxic.TokenStream.peek_n(stream, 5)
+{:ok, tokens, stream} = Toxic.peek_n(stream, 5)
 
 # Backtrack
-{ref, stream} = Toxic.TokenStream.checkpoint(stream)
+{ref, stream} = Toxic.checkpoint(stream)
 # ... try something ...
-stream = Toxic.TokenStream.rewind_to(stream, ref)
+stream = Toxic.rewind_to(stream, ref)
 ```
 
 ---

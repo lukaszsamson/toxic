@@ -18,14 +18,14 @@ defmodule ToxicTolerantModeTest do
         ])
       )
 
-    stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+    stream = Toxic.new(string, 1, 1, stream_opts)
 
     opts = Keyword.put_new(opts, :include_errors, true)
     collect_all_tokens(stream, [], opts)
   end
 
   defp collect_all_tokens(stream, acc, opts) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} ->
         # Optionally filter out error tokens for continuation testing
         acc =
@@ -62,13 +62,13 @@ defmodule ToxicTolerantModeTest do
         ])
       )
 
-    stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+    stream = Toxic.new(string, 1, 1, stream_opts)
     opts = Keyword.put_new(opts, :include_errors, true)
     collect_all_tokens_with_final(stream, [], opts)
   end
 
   defp collect_all_tokens_with_final(stream, acc, opts) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} ->
         acc =
           if Keyword.get(opts, :include_errors, true) or elem(token, 0) != :error_token do
@@ -763,7 +763,7 @@ defmodule ToxicTolerantModeTest do
     test "quoted call with non-ASCII emits unnecessary quote warning" do
       {_tokens, final_stream} = tokenize_with_stream(~S|Mod."føø"()|)
 
-      {warnings, _} = Toxic.TokenStream.warnings(final_stream)
+      {warnings, _} = Toxic.warnings(final_stream)
 
       assert Enum.any?(warnings, fn
                %Toxic.Warning{code: :unnecessary_quoted_call, details: %{line: 1}} -> true
@@ -1217,7 +1217,7 @@ defmodule ToxicTolerantModeTest do
         insert_structural_closers: false
       ]
 
-      stream = Toxic.TokenStream.new(string, 1, 1, stream_opts)
+      stream = Toxic.new(string, 1, 1, stream_opts)
       collect_all_tokens(stream, [], include_errors: true)
     end
 

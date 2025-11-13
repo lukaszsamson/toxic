@@ -22,7 +22,7 @@ defmodule ToxicErrorsTest do
 
     # Use the new streaming API
     stream =
-      Toxic.TokenStream.new(string, 1, 1,
+      Toxic.new(string, 1, 1,
         elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
         preserve_comments: Keyword.get(opts, :preserve_comments, false),
         existing_atoms_only: existing_atoms_only,
@@ -99,7 +99,7 @@ defmodule ToxicErrorsTest do
   end
 
   defp collect_all_tokens(stream, acc) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} ->
         collect_all_tokens(new_stream, [token | acc])
 

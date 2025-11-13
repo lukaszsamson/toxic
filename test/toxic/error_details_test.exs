@@ -358,12 +358,12 @@ defmodule ToxicErrorDetailsTest do
     default_opts = [error_mode: :tolerant, synthesis: false]
     merged_opts = Keyword.merge(default_opts, opts)
 
-    stream = Toxic.TokenStream.new(input, 1, 1, merged_opts)
+    stream = Toxic.new(input, 1, 1, merged_opts)
     collect_all_tokens(stream, [])
   end
 
   defp collect_all_tokens(stream, acc) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} -> collect_all_tokens(new_stream, [token | acc])
       {:eof, _} -> Enum.reverse(acc)
       {:error, _reason, _} -> flunk("Stream returned {:error, ...} in tolerant mode")

@@ -12,12 +12,12 @@ defmodule ToxicScopeStateTest do
     default_opts = [error_mode: :tolerant, synthesis: true]
     merged_opts = Keyword.merge(default_opts, opts)
 
-    stream = Toxic.TokenStream.new(input, 1, 1, merged_opts)
+    stream = Toxic.new(input, 1, 1, merged_opts)
     drain_stream(stream)
   end
 
   defp drain_stream(stream) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, _token, new_stream} -> drain_stream(new_stream)
       {:eof, final_stream} -> final_stream
       {:error, _reason, final_stream} -> final_stream
@@ -25,7 +25,7 @@ defmodule ToxicScopeStateTest do
   end
 
   defp count_open_terminators(stream) do
-    {terminators, _stream} = Toxic.TokenStream.current_terminators(stream)
+    {terminators, _stream} = Toxic.current_terminators(stream)
     length(terminators)
   end
 

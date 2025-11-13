@@ -152,15 +152,15 @@ This guide keeps contributors and agents aligned on how to work in this repo. It
 ### API Examples
 ```elixir
 # Tolerant mode (default)
-stream = Toxic.TokenStream.new(code, opts: [error_mode: :tolerant])
+stream = Toxic.new(code, opts: [error_mode: :tolerant])
 {:ok, {:error_token, meta, %Toxic.Error{}}, stream} = TokenStream.next(stream)
 
 # Strict mode
-stream = Toxic.TokenStream.new(code, opts: [error_mode: :strict])
+stream = Toxic.new(code, opts: [error_mode: :strict])
 {:error, reason, stream} = TokenStream.next(stream)
 
 # Check terminators
-{terminators, stream} = Toxic.TokenStream.current_terminators(stream)
+{terminators, stream} = Toxic.current_terminators(stream)
 # terminators = [{opening_token, meta, indent}, ...]
 ```
 

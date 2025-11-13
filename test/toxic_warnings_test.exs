@@ -11,7 +11,7 @@ defmodule ToxicWarningsTest do
 
     # Use the new streaming API for Toxic
     stream =
-      Toxic.TokenStream.new(string, 1, 1,
+      Toxic.new(string, 1, 1,
         elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
         preserve_comments: Keyword.get(opts, :preserve_comments, false),
         existing_atoms_only: existing_atoms_only,
@@ -20,7 +20,7 @@ defmodule ToxicWarningsTest do
 
     # Collect all tokens and warnings
     {_tokens, final_stream} = collect_all_tokens(stream, [])
-    {toxic_warnings, _stream} = Toxic.TokenStream.warnings(final_stream)
+    {toxic_warnings, _stream} = Toxic.warnings(final_stream)
 
     # Compare warnings
     assert_fn = Keyword.get(opts, :assert, &default_assert/2)
@@ -95,7 +95,7 @@ defmodule ToxicWarningsTest do
   end
 
   defp collect_all_tokens(stream, acc) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} ->
         collect_all_tokens(new_stream, [token | acc])
 

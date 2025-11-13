@@ -136,7 +136,7 @@ defmodule ToxicErrorCodeTest do
   # -- Helper functions -------------------------------------------------------
 
   defp assert_error_code(input, expected_code, opts \\ []) do
-    stream = Toxic.TokenStream.new(input, 1, 1, Keyword.merge([error_mode: :tolerant], opts))
+    stream = Toxic.new(input, 1, 1, Keyword.merge([error_mode: :tolerant], opts))
     tokens = collect_all_tokens(stream, [])
 
     error = Enum.find(tokens, fn t -> match?({:error_token, _, _}, t) end)
@@ -146,7 +146,7 @@ defmodule ToxicErrorCodeTest do
   end
 
   defp collect_all_tokens(stream, acc) do
-    case Toxic.TokenStream.next(stream) do
+    case Toxic.next(stream) do
       {:ok, token, new_stream} -> collect_all_tokens(new_stream, [token | acc])
       {:eof, _} -> Enum.reverse(acc)
       {:error, _reason, _} -> flunk("Stream returned {:error, ...} in tolerant mode")
