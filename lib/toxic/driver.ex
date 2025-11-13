@@ -3,6 +3,10 @@ defmodule Toxic.Driver do
   import Toxic.Token
   import Toxic.CharacterClassifier
 
+  alias Toxic.Driver.Contexts
+  alias Toxic.Driver.Recovery
+  alias Toxic.Driver.Synthesis
+
   alias Toxic.Driver.Recovery
   alias Toxic.Driver.Synthesis
 
@@ -190,22 +194,22 @@ defmodule Toxic.Driver do
   end
 
   def next([], %__MODULE__{deferrals: []} = state) do
-    case pending_error(state) do
+    case Contexts.pending_error(state) do
       nil ->
         {:eof, state}
 
       error when state.error_mode == :strict ->
         case error do
           {:missing_interpolation, interp_context} ->
-            reason = missing_interpolation_reason(interp_context, state)
+            reason = Contexts.missing_interpolation_reason(interp_context, state)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_context, interp_context} ->
-            reason = missing_terminator_reason(interp_context, state)
+            reason = Contexts.missing_terminator_reason(interp_context, state)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_scope, entry} ->
-            reason = missing_scope_terminator_reason(entry, state)
+            reason = Contexts.missing_scope_terminator_reason(entry, state)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
         end
 
@@ -232,7 +236,7 @@ defmodule Toxic.Driver do
           state
       )
       when start_token != :"{" do
-    reason = mismatched_delimiter_reason(entry, :"}", state)
+    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state)
 
     case state.error_mode do
       :strict ->
@@ -427,14 +431,14 @@ defmodule Toxic.Driver do
 
         # Check for unnecessary quotes on calls
         updated_scope =
-          case is_unnecessary_quote(
+          case Contexts.is_unnecessary_quote(
                  Enum.reverse(fragments),
                  saw_interp,
                  :quoted_identifier,
                  scope
                ) do
             {true, content} ->
-              maybe_warn_unnecessary_quote(
+              Contexts.maybe_warn_unnecessary_quote(
                 :quoted_identifier,
                 content,
                 delim,
@@ -486,7 +490,7 @@ defmodule Toxic.Driver do
             # Note: Elixir reports warnings at column-1 (the ' position), so start_info.column
             # already points there (it's before the quote delimiter)
             updated_scope =
-              case is_unnecessary_quote(
+              case Contexts.is_unnecessary_quote(
                      Enum.reverse(fragments),
                      saw_interp,
                      end_token_type,
@@ -494,7 +498,7 @@ defmodule Toxic.Driver do
                    ) do
                 {true, content} ->
                   # Quotes are unnecessary - emit only this warning
-                  maybe_warn_unnecessary_quote(
+                  Contexts.maybe_warn_unnecessary_quote(
                     end_token_type,
                     content,
                     delim,
@@ -546,7 +550,7 @@ defmodule Toxic.Driver do
             # Check for unnecessary quotes on atoms and emit charlist warning for charlists
             updated_scope =
               if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
-                case is_unnecessary_quote(
+                case Contexts.is_unnecessary_quote(
                        Enum.reverse(fragments),
                        saw_interp,
                        kind,
@@ -558,7 +562,7 @@ defmodule Toxic.Driver do
                     {{_start_line, token_start_col}, {_end_line, _end_col}, _extra} =
                       elem(start_info.token, 1)
 
-                    maybe_warn_unnecessary_quote(
+                    Contexts.maybe_warn_unnecessary_quote(
                       kind,
                       content,
                       delim,
@@ -594,7 +598,11 @@ defmodule Toxic.Driver do
       {:begin_interpolation, meta, rest, line, column, scope} ->
         if kind == :quoted_identifier do
           reason =
-            interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+            Contexts.interpolation_in_quoted_identifier_reason(
+              start_info.line,
+              start_info.column,
+              delim
+            )
 
           case state.error_mode do
             :strict ->
@@ -795,7 +803,7 @@ defmodule Toxic.Driver do
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope = scope(terminators: terminators)} ->
-        start_info = compute_start_info(start_token, delimiter, line, column)
+        start_info = Contexts.compute_start_info(start_token, delimiter, line, column)
 
         contexts =
           [
@@ -816,345 +824,6 @@ defmodule Toxic.Driver do
          }}
     end
   end
-
-  defp compute_start_info(start_token, delimiter, line, column) do
-    {{_meta_start_line, _meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
-      elem(start_token, 1)
-
-    delimiter_length = delimiter_length(delimiter)
-
-    cond do
-      line == meta_end_line and column - delimiter_length >= 1 ->
-        %{line: meta_end_line, column: column - delimiter_length, token: start_token}
-
-      true ->
-        base_column = meta_end_column - delimiter_length
-
-        %{line: meta_end_line, column: base_column, token: start_token}
-    end
-  end
-
-  defp pending_error(%__MODULE__{contexts: contexts, scope: scope} = _state) do
-    cond do
-      # Drain innermost structural scopes first (e.g., missing ")" from an open "(")
-      entry = find_missing_scope_terminator(scope) ->
-        {:missing_scope, entry}
-
-      # Then close any open interpolation braces
-      interp = find_missing_interpolation(contexts) ->
-        {:missing_interpolation, interp}
-
-      # Finally, close the surrounding string/sigil/quoted identifier contexts
-      context = find_missing_context(contexts) ->
-        {:missing_context, context}
-
-      true ->
-        nil
-    end
-  end
-
-  defp find_missing_interpolation([:normal, {:interp, _, _, _, _, _, _, _} = interp | _]),
-    do: interp
-
-  defp find_missing_interpolation([_ | rest]), do: find_missing_interpolation(rest)
-  defp find_missing_interpolation(_), do: nil
-
-  defp find_missing_context([{:interp, _, _, _, _, _, _, _} = interp | _]), do: interp
-  defp find_missing_context([_ | rest]), do: find_missing_context(rest)
-  defp find_missing_context(_), do: nil
-
-  # TODO: eex support, remove?
-  defp find_missing_scope_terminator(scope(terminators: :none)), do: nil
-  defp find_missing_scope_terminator(scope(terminators: [])), do: nil
-  defp find_missing_scope_terminator(scope(terminators: [entry | _])), do: entry
-
-  defp missing_terminator_reason(
-         {:interp, kind, _allowed?, delim, _parents,
-          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
-         %__MODULE__{line: end_line, column: end_column}
-       ) do
-    delim_chars = delimiter_charlist(delim)
-    opening_atom = delimiter_atom(delim_chars)
-    delimiter_length = delimiter_length(delim)
-
-    {resolved_end_line, resolved_end_column} =
-      if start_line == end_line do
-        {start_line, start_column + delimiter_length}
-      else
-        {end_line, end_column}
-      end
-
-    code =
-      case kind do
-        k when k in [:bin_heredoc, :list_heredoc] -> :heredoc_missing_terminator
-        _ -> :string_missing_terminator
-      end
-
-    %Toxic.Error{
-      code: code,
-      domain: if(code == :heredoc_missing_terminator, do: :heredoc, else: :string),
-      token_display: nil,
-      details: %{
-        opening_delimiter: opening_atom,
-        expected_delimiter: opening_atom,
-        line: start_line,
-        column: start_column,
-        end_line: resolved_end_line,
-        end_column: resolved_end_column,
-        suffix_iolist: context_suffix(kind, delim, start_info)
-      }
-    }
-  end
-
-  defp missing_interpolation_reason(
-         {:interp, kind, _allowed?, delim, _parents,
-          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
-         %__MODULE__{line: end_line, column: end_column}
-       ) do
-    delim_chars = delimiter_charlist(delim)
-    opening_atom = delimiter_atom(delim_chars)
-
-    delimiter_length = delimiter_length(delim)
-
-    {resolved_end_line, resolved_end_column} =
-      if start_line == end_line do
-        {start_line, start_column + delimiter_length}
-      else
-        {end_line, end_column}
-      end
-
-    %Toxic.Error{
-      code: :interpolation_missing_terminator,
-      domain: :interpolation,
-      token_display: nil,
-      details: %{
-        opening_delimiter: opening_atom,
-        expected_delimiter: opening_atom,
-        start_line: start_line,
-        start_column: start_column,
-        end_line: resolved_end_line,
-        end_column: resolved_end_column,
-        suffix_iolist: context_suffix(kind, delim, start_info)
-      }
-    }
-  end
-
-  defp missing_scope_terminator_reason(
-         {start, meta, _indentation} = entry,
-         %__MODULE__{line: end_line, column: end_column, scope: scope} = _state
-       ) do
-    closing = closing_for(start)
-
-    hint = missing_scope_hint(entry, closing, scope)
-
-    {{start_line, start_column}, _end_pos, _extra} = meta
-
-    %Toxic.Error{
-      code: :terminator_missing_closer,
-      domain: :terminator,
-      token_display: nil,
-      details: %{
-        opening_delimiter: start,
-        expected_delimiter: closing,
-        line: start_line,
-        column: start_column,
-        end_line: end_line,
-        end_column: end_column,
-        hint_iolist: hint
-      }
-    }
-  end
-
-  defp mismatched_delimiter_reason({start, meta, _indent}, closing, %__MODULE__{
-         line: end_line,
-         column: end_column
-       }) do
-    expected = closing_for(start)
-    closing_chars = terminator_chars(closing)
-
-    {{start_line, start_column}, _end_pos, _extra} = meta
-
-    code = :terminator_mismatched_closer
-    token_display = closing_chars
-
-    %Toxic.Error{
-      code: code,
-      domain: :terminator,
-      token_display: token_display,
-      position: {{start_line, start_column}, {end_line, end_column}},
-      details: %{
-        opening_delimiter: start,
-        closing_delimiter: closing,
-        expected_delimiter: expected
-      }
-    }
-  end
-
-  defp context_suffix(:sigil, delim, %{line: line, token: {:sigil_start, _meta, sigil_atom, _}}) do
-    sigil_name =
-      sigil_atom
-      |> Atom.to_string()
-      |> String.replace_prefix("sigil_", "")
-      |> String.to_charlist()
-
-    sigil_label = [?~ | sigil_name]
-    delimiter_chars = delimiter_charlist(delim)
-
-    :io_lib.format(~c" (for sigil ~ts~ts starting at line ~B)", [
-      sigil_label,
-      delimiter_chars,
-      line
-    ])
-  end
-
-  defp context_suffix(:quoted_identifier, _delim, %{line: line}) do
-    :io_lib.format(~c" (for function name starting at line ~B)", [line])
-  end
-
-  defp context_suffix(kind, _delim, %{line: line}) when kind in [:atom_safe, :atom_unsafe] do
-    :io_lib.format(~c" (for atom starting at line ~B)", [line])
-  end
-
-  defp context_suffix(kind, _delim, %{line: line}) when kind in [:bin_heredoc, :list_heredoc] do
-    :io_lib.format(~c" (for heredoc starting at line ~B)", [line])
-  end
-
-  defp context_suffix(_, _delim, %{line: line}) do
-    :io_lib.format(~c" (for string starting at line ~B)", [line])
-  end
-
-  defp interpolation_in_quoted_identifier_reason(start_line, start_column, delim) do
-    %Toxic.Error{
-      code: :interpolation_not_allowed_in_quoted_identifier,
-      domain: :interpolation,
-      token_display: delimiter_charlist(delim),
-      details: %{start_line: start_line, start_column: start_column}
-    }
-  end
-
-  defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
-
-  defp delimiter_charlist(delim) when is_list(delim), do: delim
-
-  defp delimiter_atom(chars) do
-    chars
-    |> List.flatten()
-    |> List.to_atom()
-  end
-
-  defp delimiter_length(delim) do
-    delim
-    |> delimiter_charlist()
-    |> length()
-  end
-
-  defp terminator_chars(delimiter) when is_atom(delimiter) do
-    delimiter
-    |> Atom.to_string()
-    |> String.to_charlist()
-  end
-
-  defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: [])), do: []
-
-  defp missing_scope_hint({start, _meta, _indent}, closing, scope(mismatch_hints: mismatch_hints)) do
-    # Check for hint about mismatched terminator based on indentation
-    {^start, hint_meta, _indentation} = :lists.keyfind(start, 1, mismatch_hints)
-    {{hint_line, _hint_column}, _, _} = hint_meta
-
-    :io_lib.format(
-      ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
-      [Atom.to_string(start), hint_line, Atom.to_string(closing)]
-    )
-  end
-
-  # Helper to return a token and update recent_token in state
-  defp return_token(token, rest, state) do
-    {:ok, token, rest, %{state | recent_token: token}}
-  end
-
-  defp emit_pending_error(
-         {:missing_interpolation,
-          {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context},
-         state
-       ) do
-    reason = missing_interpolation_reason(interp_context, state)
-    meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
-
-    inserted =
-      if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
-
-    # Pop the leading :normal that represents being inside interpolation, but
-    # keep the parent {:interp, ...} context so we can subsequently emit the
-    # missing string/sigil/atom terminator on the next pending error.
-    new_contexts = drop_first_normal_before_interp(state.contexts)
-    new_output = state.output ++ [error_token | inserted]
-
-    {:ok, hd(new_output), [],
-     %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}}
-  end
-
-  defp emit_pending_error(
-         {:missing_context,
-          {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context},
-         state
-       ) do
-    reason = missing_terminator_reason(interp_context, state)
-    meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
-
-    inserted =
-      if state.insert_structural_closers,
-        do: [Synthesis.synthesize_end_for_kind(kind, delim, meta0)],
-        else: []
-
-    parent_terms_list = parent_terms
-
-    new_scope = scope(state.scope, terminators: parent_terms_list)
-    new_contexts = drop_first_interp(state.contexts)
-    new_output = state.output ++ [error_token | inserted]
-
-    {:ok, hd(new_output), [],
-     %{
-       state
-       | contexts: new_contexts,
-         scope: new_scope,
-         output: tl(new_output),
-         recent_token: hd(new_output)
-     }}
-  end
-
-  defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
-    reason = missing_scope_terminator_reason(entry, state)
-    meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
-
-    # Pop one scope terminator
-    scope(terminators: terms) = state.scope
-
-    [_ | rest] = terms
-    new_terms = rest
-
-    new_scope = scope(state.scope, terminators: new_terms)
-
-    inserted = if state.insert_structural_closers, do: [{closing_for(start), meta0}], else: []
-
-    new_output = state.output ++ [error_token | inserted]
-
-    {:ok, hd(new_output), [],
-     %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}}
-  end
-
-  defp drop_first_interp([{:interp, _, _, _, _, _, _, _} | rest]), do: rest
-
-  # Drop the first :normal that immediately precedes an interpolation frame,
-  # preserving the interpolation frame itself. This mirrors how a real '}'
-  # would pop the :normal frame and keep the parent {:interp, ...} on stack.
-  defp drop_first_normal_before_interp([:normal, {:interp, _, _, _, _, _, _, _} = interp | rest]),
-    do: [interp | rest]
-
-  defp drop_first_normal_before_interp([head | tail]),
-    do: [head | drop_first_normal_before_interp(tail)]
 
   # Tolerant-mode recovery logic is implemented in Toxic.Driver.Recovery.
 
@@ -1279,74 +948,86 @@ defmodule Toxic.Driver do
     delimiter
   end
 
-  # Helper functions for unnecessary quote warning
-
-  defp is_unnecessary_quote(_fragments, saw_interpolation?, _kind, _scope)
-       when saw_interpolation?,
-       do: false
-
-  defp is_unnecessary_quote(fragments, false, kind, scope) do
-    case fragments do
-      [single_fragment] ->
-        # We have exactly one fragment, check if it's a valid identifier
-        content = IO.iodata_to_binary(single_fragment)
-        check_identifier_validity(content, kind, scope)
-
-      _ ->
-        # Multiple fragments or no fragments
-        false
-    end
+  defp return_token(token, rest, state) do
+    {:ok, token, rest, %{state | recent_token: token}}
   end
 
-  defp check_identifier_validity(content, kind, scope) do
-    charlist = String.to_charlist(content)
+  defp emit_pending_error(
+         {:missing_interpolation,
+          {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context},
+         state
+       ) do
+    reason = Contexts.missing_interpolation_reason(interp_context, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
 
-    case Toxic.Identifier.tokenize_identifier(charlist, 1, 1, scope, false) do
-      {:identifier, ^charlist, _atom, [], _length, true, special} ->
-        # Valid identifier, ASCII, no remaining input
-        # For atoms, check that @ is not in special markers
-        case kind do
-          k when k in [:atom_safe, :atom_unsafe] ->
-            if :at in special, do: false, else: {true, content}
+    inserted =
+      if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
 
-          _ ->
-            {true, content}
-        end
+    new_contexts = Contexts.drop_first_normal_before_interp(state.contexts)
+    new_output = state.output ++ [error_token | inserted]
 
-      {:identifier, ^charlist, _atom, [], _length, false, _special} ->
-        # Valid identifier but not ASCII - still valid for calls
-        case kind do
-          :quoted_identifier ->
-            {true, content}
-
-          _ ->
-            false
-        end
-
-      _ ->
-        false
-    end
+    {
+      :ok,
+      hd(new_output),
+      [],
+      %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}
+    }
   end
 
-  defp maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
-    warning =
-      case kind do
-        k when k in [:atom_safe, :atom_unsafe] ->
-          Toxic.Warning.unnecessary_quoted_atom(line, column, content)
+  defp emit_pending_error(
+         {:missing_context,
+          {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context},
+         state
+       ) do
+    reason = Contexts.missing_terminator_reason(interp_context, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
 
-        k
-        when k in [
-               :kw_identifier_safe,
-               :kw_identifier_unsafe,
-               :kw_identifier_safe_end,
-               :kw_identifier_unsafe_end
-             ] ->
-          Toxic.Warning.unnecessary_quoted_keyword(line, column, content)
+    inserted =
+      if state.insert_structural_closers,
+        do: [Synthesis.synthesize_end_for_kind(kind, delim, meta0)],
+        else: []
 
-        :quoted_identifier ->
-          Toxic.Warning.unnecessary_quoted_call(line, column, content)
-      end
+    parent_terms_list = parent_terms
 
-    Toxic.Scope.prepend_warning(warning, scope)
+    new_scope = scope(state.scope, terminators: parent_terms_list)
+    new_contexts = Contexts.drop_first_interp(state.contexts)
+    new_output = state.output ++ [error_token | inserted]
+
+    {
+      :ok,
+      hd(new_output),
+      [],
+      %{
+        state
+        | contexts: new_contexts,
+          scope: new_scope,
+          output: tl(new_output),
+          recent_token: hd(new_output)
+      }
+    }
+  end
+
+  defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
+    reason = Contexts.missing_scope_terminator_reason(entry, state)
+    meta0 = meta(state.line, state.column, state.line, state.column, nil)
+    error_token = {:error_token, meta0, reason}
+
+    scope(terminators: terms) = state.scope
+
+    [_ | rest] = terms
+    new_scope = scope(state.scope, terminators: rest)
+
+    inserted = if state.insert_structural_closers, do: [{closing_for(start), meta0}], else: []
+
+    new_output = state.output ++ [error_token | inserted]
+
+    {
+      :ok,
+      hd(new_output),
+      [],
+      %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}
+    }
   end
 end
