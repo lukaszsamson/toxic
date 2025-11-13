@@ -15,11 +15,17 @@ defmodule Toxic do
   defdelegate new(source, line \\ 1, column \\ 1, opts \\ []), to: TokenStream
 
   @doc "Return the next token from the stream (`Toxic.TokenStream.next/1`)."
-  @spec next(TokenStream.t()) :: {:ok, TokenStream.token(), TokenStream.t()} | {:eof, TokenStream.t()} | {:error, Toxic.Error.t(), TokenStream.t()}
+  @spec next(TokenStream.t()) ::
+          {:ok, TokenStream.token(), TokenStream.t()}
+          | {:eof, TokenStream.t()}
+          | {:error, Toxic.Error.t(), TokenStream.t()}
   defdelegate next(stream), to: TokenStream
 
   @doc "Peek at the next token without consuming it (`Toxic.TokenStream.peek/1`)."
-  @spec peek(TokenStream.t()) :: {:ok, TokenStream.token(), TokenStream.t()} | {:eof, TokenStream.t()} | {:error, Toxic.Error.t(), TokenStream.t()}
+  @spec peek(TokenStream.t()) ::
+          {:ok, TokenStream.token(), TokenStream.t()}
+          | {:eof, TokenStream.t()}
+          | {:error, Toxic.Error.t(), TokenStream.t()}
   defdelegate peek(stream), to: TokenStream
 
   @doc "Peek at the next `n` tokens (`Toxic.TokenStream.peek_n/2`)."
@@ -46,8 +52,16 @@ defmodule Toxic do
   defdelegate to_stream(stream), to: TokenStream
 
   @doc "Slice the source and create a fresh stream (`Toxic.TokenStream.slice/6`)."
-  @spec slice(TokenStream.source(), non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer(), TokenStream.options()) :: TokenStream.t()
-  defdelegate slice(source, start_offset, end_offset, line_base, column_base, opts \\ []), to: TokenStream
+  @spec slice(
+          TokenStream.source(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer(),
+          pos_integer(),
+          TokenStream.options()
+        ) :: TokenStream.t()
+  defdelegate slice(source, start_offset, end_offset, line_base, column_base, opts \\ []),
+    to: TokenStream
 
   @doc "Get the current terminator stack (`Toxic.TokenStream.current_terminators/1`)."
   @spec current_terminators(TokenStream.t()) :: {TokenStream.terminator_stack(), TokenStream.t()}
@@ -62,7 +76,8 @@ defmodule Toxic do
   defdelegate warnings(stream), to: TokenStream
 
   @doc "Collect emitted error tokens (`Toxic.TokenStream.errors/1`)."
-  @spec errors(TokenStream.t()) :: {[{TokenStream.error_entry(), Toxic.Error.t()}], TokenStream.t()}
+  @spec errors(TokenStream.t()) ::
+          {[{TokenStream.error_entry(), Toxic.Error.t()}], TokenStream.t()}
   defdelegate errors(stream), to: TokenStream
 
   @doc "Get the current absolute position (`Toxic.TokenStream.position/1`)."
