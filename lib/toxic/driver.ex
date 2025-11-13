@@ -4,9 +4,7 @@ defmodule Toxic.Driver do
   import Toxic.CharacterClassifier
 
   alias Toxic.Driver.Contexts
-  alias Toxic.Driver.Recovery
-  alias Toxic.Driver.Synthesis
-
+  alias Toxic.Driver.Deferrals
   alias Toxic.Driver.Recovery
   alias Toxic.Driver.Synthesis
 
@@ -688,13 +686,15 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
+        new_output = Deferrals.flush(output, deferrals)
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope,
-             output: output ++ Enum.reverse(deferrals),
+             output: new_output,
              deferrals: [token]
          }}
 
@@ -715,28 +715,34 @@ defmodule Toxic.Driver do
               {[], deferrals}
           end
 
+        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope,
-             output: output ++ Enum.reverse(deferrals_result) ++ output_tokens,
+             output: new_output,
              deferrals: []
          }}
 
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
+        new_output = Deferrals.flush(output, deferrals)
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope,
-             output: output ++ Enum.reverse(deferrals),
+             output: new_output,
              deferrals: [token]
          }}
 
       {{:token, token}, rest, line, column, scope} ->
+        new_output = Deferrals.append(output, deferrals, [token])
+
         {rest,
          %{
            state
@@ -744,7 +750,7 @@ defmodule Toxic.Driver do
              column: column,
              scope: scope,
              deferrals: [],
-             output: output ++ Enum.reverse(deferrals) ++ [token]
+             output: new_output
          }}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
@@ -764,13 +770,15 @@ defmodule Toxic.Driver do
               {[token], deferrals}
           end
 
+        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope,
-             output: output ++ Enum.reverse(deferrals_result) ++ output_tokens,
+             output: new_output,
              deferrals: []
          }}
 
@@ -791,13 +799,15 @@ defmodule Toxic.Driver do
             {left, tokens} -> [left | tokens]
           end
 
+        new_output = Deferrals.flush(output, carry_with_recent)
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope,
-             output: output ++ Enum.reverse(carry_with_recent),
+             output: new_output,
              deferrals: []
          }}
 
@@ -812,13 +822,15 @@ defmodule Toxic.Driver do
             | contexts
           ]
 
+        new_output = Deferrals.append(output, deferrals, [start_token])
+
         {rest,
          %{
            state
            | line: line,
              column: column,
              scope: scope(scope, terminators: []),
-             output: output ++ Enum.reverse([start_token | deferrals]),
+             output: new_output,
              deferrals: [],
              contexts: contexts
          }}
