@@ -1,5 +1,5 @@
 defmodule Toxic.Unescape do
-  @moduledoc """
+  @moduledoc ~S"""
   Escape sequence processing for string and character tokens.
 
   Handles unescaping of escape sequences commonly found in Elixir strings:
