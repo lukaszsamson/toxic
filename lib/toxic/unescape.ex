@@ -1,4 +1,17 @@
 defmodule Toxic.Unescape do
+  @moduledoc """
+  Escape sequence processing for string and character tokens.
+
+  Handles unescaping of escape sequences commonly found in Elixir strings:
+  - Hex escape sequences: `\xHH`
+  - Unicode escape sequences: `\uHHHH`
+  - Standard escapes: `\n`, `\t`, `\\`, etc.
+  - Line-continuation escapes: `\` followed by newline
+
+  This module processes tokens after they've been lexically identified,
+  converting raw escape sequences into their literal character equivalents.
+  """
+
   import Toxic.CharacterClassifier, only: [is_hex: 1]
 
   def unescape_tokens(tokens) do

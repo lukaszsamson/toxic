@@ -1,4 +1,19 @@
 defmodule Toxic.Scope do
+  @moduledoc """
+  Tokenizer scope and configuration record.
+
+  The Scope record manages tokenizer configuration and state during lexical analysis:
+  - **Terminators**: Stack of opening/closing delimiters being tracked
+  - **Unescaping**: Whether to process escape sequences in strings
+  - **Identifier rules**: ASCII-only or Unicode identifier support
+  - **Comments and warnings**: Comment preservation and warning collection
+  - **Compatibility mode**: Elixir reference tokenizer compatibility
+
+  This is an Erlang record (managed via `Record.defrecord/2`) that is passed
+  through the tokenization pipeline and updated as scopes are entered/exited
+  and configuration changes.
+  """
+
   require Record
 
   Record.defrecord(

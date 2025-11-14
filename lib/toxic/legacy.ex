@@ -1,4 +1,15 @@
 defmodule Toxic.Legacy do
+  @moduledoc """
+  Conversion utilities for legacy metadata format.
+
+  Provides functions to convert Toxic's modern ranged metadata format
+  `{{start_line, start_col}, {end_line, end_col}, extra}` to the legacy
+  format `{line, column, extra}` used by Elixir's original tokenizer.
+
+  This module is primarily used for backward compatibility and testing against
+  the Elixir reference tokenizer.
+  """
+
   import Toxic.CharacterClassifier, only: [is_horizontal_space: 1]
 
   @doc """

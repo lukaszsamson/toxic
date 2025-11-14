@@ -1,4 +1,39 @@
 defmodule Toxic.Driver do
+  @moduledoc """
+  Low-level single-token driver for Toxic tokenizer.
+
+  The Driver is the core engine that emits one token at a time, managing:
+  - **Contexts and scope**: Tracks interpolation state, terminators, and configuration
+  - **Deferrals**: Buffers tokens that are emitted in a specific order (e.g., EOL markers)
+  - **Error recovery**: Handles both strict mode (immediate halt) and tolerant mode
+    (error-token emission with sync-point recovery)
+  - **Position tracking**: Maintains accurate line/column positions including Unicode support
+
+  ## Features
+
+  - Single-token, streaming API for Pratt parsers and IDE integration
+  - Linearized output (no nested containers, always flat token stream)
+  - Ranged metadata: `{{start_line, start_col}, {end_line, end_col}, extra}`
+  - Error-token emission with automatic sync-point recovery (tolerant mode)
+  - Structural token synthesis for malformed input
+  - Configurable error handling, recovery, and synthesization behavior
+
+  ## Error Modes
+
+  - `:strict` - Returns `{:error, reason, rest, state}` and halts tokenization
+  - `:tolerant` - Emits `{:error_token, meta, %Toxic.Error{}}` inline and continues
+    to the next sync point (semicolon, newline, closer, comma, or comment boundary)
+
+  ## Configuration
+
+  Error recovery is configured via fields on the `%Toxic.Driver{}` struct:
+  - `error_mode`: `:strict` or `:tolerant`
+  - `error_sync`: List of sync points to advance to during recovery
+  - `error_max_skip`: Maximum bytes to skip before giving up on recovery
+  - `insert_structural_closers`: Whether to synthesize missing/mismatched delimiters
+  - `insert_identifier_sanitization`: Whether to sanitize invalid identifiers
+  """
+
   import Toxic.Scope
   import Toxic.Token
   import Toxic.CharacterClassifier
