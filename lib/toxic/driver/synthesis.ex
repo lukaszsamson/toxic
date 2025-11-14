@@ -4,7 +4,7 @@ defmodule Toxic.Driver.Synthesis do
   import Toxic.Scope
   import Toxic.Token
 
-  alias Toxic.{Driver, Error}
+  alias Toxic.{Driver, Error, Scope}
 
   @spec synthesize_end_for_kind(atom(), term(), term()) :: Driver.token()
   def synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
@@ -22,7 +22,7 @@ defmodule Toxic.Driver.Synthesis do
   def synthesize_end_for_kind(:atom_unsafe, delim, meta), do: {:atom_unsafe_end, meta, delim}
 
   @spec synthesize_from_reason(Error.t(), Driver.t()) ::
-          {:closer | :opener | :none, [Driver.token()], Driver.t()}
+          {:closer | :opener | :none, [Driver.token()], Scope.scope()}
 
   def synthesize_from_reason(
         %Error{code: :terminator_mismatched_closer, details: %{expected_delimiter: expected}} =

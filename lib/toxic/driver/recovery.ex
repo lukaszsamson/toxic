@@ -86,21 +86,16 @@ defmodule Toxic.Driver.Recovery do
     # Always compute proposal, but only keep it if appropriate:
     # - Keep synthesized closers for mismatches even when insert_structural_closers is false
     # - Keep synthesized openers for unexpected closers only when flag is true
-    {synth_side_all, inserted_all, scope_after_all} =
-      Synthesis.synthesize_from_reason(error, %{state | scope: scope_after_pre})
-
-    keep_synth =
-      case synth_side_all do
-        :closer -> true
-        :opener -> state.insert_structural_closers
-        _ -> false
-      end
-
     {synth_side, inserted_struct, scope_after_insert} =
-      if keep_synth do
-        {synth_side_all, inserted_all, scope_after_all}
-      else
-        {:none, [], scope_after_pre}
+      case Synthesis.synthesize_from_reason(error, %{state | scope: scope_after_pre}) do
+        {:closer, inserted_all, scope_after_all} ->
+          {:closer, inserted_all, scope_after_all}
+
+        {:opener, inserted_all, scope_after_all} when state.insert_structural_closers ->
+          {:opener, inserted_all, scope_after_all}
+
+        _ ->
+          {:none, [], scope_after_pre}
       end
 
     # Decide final scope updates
