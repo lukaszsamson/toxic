@@ -281,7 +281,7 @@ defmodule Toxic.Driver do
     carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
 
     result =
-      Toxic.Tokenizer.tokenize_single(
+      Toxic.NormalTokenizer.next(
         string,
         state.line,
         state.column,
@@ -316,7 +316,7 @@ defmodule Toxic.Driver do
         } =
           state
       ) do
-    case Toxic.Interpolation.tokenize_single(
+    case Toxic.InterpolationTokenizer.next(
            state.line,
            state.column,
            state.scope,
@@ -373,7 +373,7 @@ defmodule Toxic.Driver do
       {:done, meta, indent, rest, line, column, scope} when kind == :sigil ->
         end_token = {:sigil_end, meta, delim, indent}
 
-        {rest, modifiers} = Toxic.Sigil.collect_modifiers(rest)
+        {rest, modifiers} = Toxic.NormalTokenizer.Sigil.collect_modifiers(rest)
         modifiers_length = length(modifiers)
 
         output =

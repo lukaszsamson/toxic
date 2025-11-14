@@ -1,4 +1,4 @@
-defmodule Toxic.Operator do
+defmodule Toxic.NormalTokenizer.Operator do
   @moduledoc false
   import Toxic.CharacterClassifier, only: [is_space: 1]
   import Toxic.Token, only: [meta: 4]

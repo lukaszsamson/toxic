@@ -1,7 +1,8 @@
-defmodule Toxic.Sigil do
+defmodule Toxic.NormalTokenizer.Sigil do
   @moduledoc false
   import Toxic.CharacterClassifier
   import Toxic.Token
+  alias Toxic.NormalTokenizer
 
   def tokenize_sigil([?~ | t], line, column, scope, tokens) do
     case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) do
@@ -93,7 +94,7 @@ defmodule Toxic.Sigil do
         _tokens
       )
       when is_quote(h) do
-    case Toxic.String.extract_heredoc_header(t) do
+    case NormalTokenizer.String.extract_heredoc_header(t) do
       {:ok, headerless} ->
         sigil_atom = List.to_atom(~c"sigil_" ++ sigil_name)
         start_column = column - length(sigil_name) - 1

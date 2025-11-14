@@ -1,17 +1,17 @@
-defmodule Toxic.Interpolation do
+defmodule Toxic.InterpolationTokenizer do
   @moduledoc false
   import Toxic.Token
   import Toxic.Scope
   import Toxic.CharacterClassifier
 
-  def tokenize_single(line, column, scope, interpol, string, last)
+  def next(line, column, scope, interpol, string, last)
       when is_integer(line) and is_integer(column) do
-    tokenize_single(string, [], line, column, line, column, scope, interpol, last)
+    next(string, [], line, column, line, column, scope, interpol, last)
   end
 
   # Terminators
 
-  def tokenize_single(
+  def next(
         [],
         buffer = [_ | _],
         line,
@@ -27,7 +27,7 @@ defmodule Toxic.Interpolation do
   end
 
   # This cannot happen
-  # def tokenize_single(
+  # def next(
   #       [],
   #       [],
   #       _line,
@@ -41,7 +41,7 @@ defmodule Toxic.Interpolation do
   #   :eof
   # end
 
-  def tokenize_single(
+  def next(
         [last | rest],
         buffer = [_ | _],
         line,
@@ -56,7 +56,7 @@ defmodule Toxic.Interpolation do
      Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [last | rest], line, column, scope}
   end
 
-  def tokenize_single(
+  def next(
         [last | rest],
         [],
         line,
@@ -70,7 +70,7 @@ defmodule Toxic.Interpolation do
     {:done, meta(line, column, 1, nil), nil, rest, line, column + 1, scope}
   end
 
-  def tokenize_single(
+  def next(
         [last, last, last | rest],
         [],
         line,
@@ -86,7 +86,7 @@ defmodule Toxic.Interpolation do
 
   # Going through the string
 
-  def tokenize_single(
+  def next(
         [?\\, ?\r, ?\n | rest],
         buffer,
         line,
@@ -109,7 +109,7 @@ defmodule Toxic.Interpolation do
     )
   end
 
-  def tokenize_single(
+  def next(
         [?\\, ?\n | rest],
         buffer,
         line,
@@ -123,7 +123,7 @@ defmodule Toxic.Interpolation do
     extract_nl(rest, [?\n, ?\\ | buffer], line, start_line, start_column, scope, interpol, last)
   end
 
-  def tokenize_single(
+  def next(
         [?\n | rest],
         buffer,
         line,
@@ -137,7 +137,7 @@ defmodule Toxic.Interpolation do
     extract_nl(rest, [?\n | buffer], line, start_line, start_column, scope, interpol, last)
   end
 
-  def tokenize_single(
+  def next(
         [?\\, last | rest],
         buffer,
         line,
@@ -156,7 +156,7 @@ defmodule Toxic.Interpolation do
         scope
       end
 
-    tokenize_single(
+    next(
       rest,
       [last | buffer],
       line,
@@ -169,7 +169,7 @@ defmodule Toxic.Interpolation do
     )
   end
 
-  def tokenize_single(
+  def next(
         [?\\, last, last, last | rest],
         buffer,
         line,
@@ -180,7 +180,7 @@ defmodule Toxic.Interpolation do
         interpol,
         [last, last, last] = all
       ) do
-    tokenize_single(
+    next(
       rest,
       [last, last, last | buffer],
       line,
@@ -193,7 +193,7 @@ defmodule Toxic.Interpolation do
     )
   end
 
-  def tokenize_single(
+  def next(
         [?\\, ?#, ?{ | rest],
         buffer,
         line,
@@ -204,7 +204,7 @@ defmodule Toxic.Interpolation do
         true,
         last
       ) do
-    tokenize_single(
+    next(
       rest,
       [?{, ?#, ?\\ | buffer],
       line,
@@ -217,7 +217,7 @@ defmodule Toxic.Interpolation do
     )
   end
 
-  def tokenize_single(
+  def next(
         [?#, ?{ | rest],
         buffer = [_ | _],
         line,
@@ -234,7 +234,7 @@ defmodule Toxic.Interpolation do
      column, scope}
   end
 
-  def tokenize_single(
+  def next(
         [?#, ?{ | rest],
         [],
         line,
@@ -248,7 +248,7 @@ defmodule Toxic.Interpolation do
     {:begin_interpolation, meta(line, column, 2, nil), rest, line, column + 2, scope}
   end
 
-  def tokenize_single(
+  def next(
         [?\\ | rest],
         buffer,
         line,
@@ -274,7 +274,7 @@ defmodule Toxic.Interpolation do
 
   # Catch all clause
 
-  def tokenize_single(
+  def next(
         [char1, char2 | rest],
         buffer,
         line,
@@ -286,7 +286,7 @@ defmodule Toxic.Interpolation do
         last
       )
       when char1 <= 255 and char2 <= 255 do
-    tokenize_single(
+    next(
       [char2 | rest],
       [char1 | buffer],
       line,
@@ -299,7 +299,7 @@ defmodule Toxic.Interpolation do
     )
   end
 
-  def tokenize_single(rest, buffer, line, column, start_line, start_column, scope, interpol, last) do
+  def next(rest, buffer, line, column, start_line, start_column, scope, interpol, last) do
     extract_char(rest, buffer, line, column, start_line, start_column, scope, interpol, last)
   end
 
@@ -328,7 +328,7 @@ defmodule Toxic.Interpolation do
         {:error, err}
 
       [char | new_rest] when is_list(char) ->
-        tokenize_single(
+        next(
           new_rest,
           :lists.reverse(char, buffer),
           line,
@@ -341,7 +341,7 @@ defmodule Toxic.Interpolation do
         )
 
       [char | new_rest] when is_integer(char) ->
-        tokenize_single(
+        next(
           new_rest,
           [char | buffer],
           line,
@@ -354,7 +354,7 @@ defmodule Toxic.Interpolation do
         )
 
       [] ->
-        tokenize_single([], buffer, line, column, start_line, start_column, scope, interpol, last)
+        next([], buffer, line, column, start_line, start_column, scope, interpol, last)
     end
   end
 
@@ -366,7 +366,7 @@ defmodule Toxic.Interpolation do
          column, scope}
 
       {new_rest, new_buffer, column} ->
-        tokenize_single(
+        next(
           new_rest,
           new_buffer,
           line + 1,
@@ -391,7 +391,7 @@ defmodule Toxic.Interpolation do
          last
        ) do
     # TODO: all newlines should use scope column instead of hardcoded 1
-    tokenize_single(
+    next(
       rest,
       buffer,
       line + 1,

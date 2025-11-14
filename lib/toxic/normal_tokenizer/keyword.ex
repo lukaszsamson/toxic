@@ -1,15 +1,15 @@
-defmodule Toxic.Keyword do
+defmodule Toxic.NormalTokenizer.Keyword do
   @moduledoc false
   import Toxic.Token
   import Toxic.Util
-  import Toxic.Terminator
+  alias Toxic.NormalTokenizer.Terminator
 
   def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, tokens) do
     case tokenize_keyword_terminator(line, column, atom, length, tokens) do
       {:ok, list} ->
         {_, check} = List.last(list)
 
-        case handle_terminator(rest, line, column + length, scope, check, tokens) do
+        case Terminator.handle_terminator(rest, line, column + length, scope, check, tokens) do
           {:error, reason} ->
             {:error, reason}
 

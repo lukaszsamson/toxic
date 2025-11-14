@@ -1,19 +1,21 @@
-defmodule Toxic.Tokenizer do
+defmodule Toxic.NormalTokenizer do
   @moduledoc false
+  alias Toxic.NormalTokenizer
+  alias Toxic.NormalTokenizer.{Identifier, Alias, Number, Dot, Terminator, Sigil, Comment}
   import Toxic.CharacterClassifier
   import Toxic.Token
-  import Toxic.Operator
+  import Toxic.NormalTokenizer.Operator
   import Toxic.Util
   import Toxic.Scope
 
   # This cannot happen
-  # def tokenize_single([], _line, _column, _scope, _tokens) do
+  # def next([], _line, _column, _scope, _tokens) do
   #   :eof
   # end
 
   # VC merge conflict
 
-  def tokenize_single([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _tokens) do
+  def next([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _tokens) do
     first_line = Enum.take_while(original, fn c -> c != ?\n and c != ?\r end)
 
     err = %Toxic.Error{
@@ -28,28 +30,28 @@ defmodule Toxic.Tokenizer do
 
   # Base integers
 
-  def tokenize_single([?0, ?x, h | t], line, column, scope, _tokens) when is_hex(h) do
-    {rest, number, original_representation, length} = Toxic.Number.tokenize_hex(t, [h], 1)
+  def next([?0, ?x, h | t], line, column, scope, _tokens) when is_hex(h) do
+    {rest, number, original_representation, length} = Number.tokenize_hex(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def tokenize_single([?0, ?b, h | t], line, column, scope, _tokens) when is_bin(h) do
-    {rest, number, original_representation, length} = Toxic.Number.tokenize_bin(t, [h], 1)
+  def next([?0, ?b, h | t], line, column, scope, _tokens) when is_bin(h) do
+    {rest, number, original_representation, length} = Number.tokenize_bin(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def tokenize_single([?0, ?o, h | t], line, column, scope, _tokens) when is_octal(h) do
-    {rest, number, original_representation, length} = Toxic.Number.tokenize_octal(t, [h], 1)
+  def next([?0, ?o, h | t], line, column, scope, _tokens) when is_octal(h) do
+    {rest, number, original_representation, length} = Number.tokenize_octal(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
   # Comments
 
-  def tokenize_single([?# | string], line, column, scope, tokens) do
-    case Toxic.Comment.tokenize_comment(string, [?#]) do
+  def next([?# | string], line, column, scope, tokens) do
+    case Comment.tokenize_comment(string, [?#]) do
       {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
         token = :io_lib.format("\\u~4.16.0B", [char])
 
@@ -63,7 +65,7 @@ defmodule Toxic.Tokenizer do
         {:error, err}
 
       {rest, comment} ->
-        preserve_comments(line, column, tokens, comment, rest, scope)
+        Comment.preserve_comments(line, column, tokens, comment, rest, scope)
 
         case tokens do
           [{:eol, _meta} | _] -> reset_eol(rest, line, column, scope)
@@ -74,14 +76,14 @@ defmodule Toxic.Tokenizer do
 
   # Sigils
 
-  def tokenize_single([?~, h | _t] = original, line, column, scope, tokens)
+  def next([?~, h | _t] = original, line, column, scope, tokens)
       when is_upcase(h) or is_downcase(h) do
-    Toxic.Sigil.tokenize_sigil(original, line, column, scope, tokens)
+    Sigil.tokenize_sigil(original, line, column, scope, tokens)
   end
 
   # Char tokens
 
-  def tokenize_single([??, ?\\, h | t], line, column, scope, _tokens) do
+  def next([??, ?\\, h | t], line, column, scope, _tokens) do
     char = Toxic.Unescape.unescape_map(h)
 
     new_scope =
@@ -117,7 +119,7 @@ defmodule Toxic.Tokenizer do
     emit(token, rest, new_line, new_column, new_scope)
   end
 
-  def tokenize_single([??, char | t], line, column, scope, _tokens) do
+  def next([??, char | t], line, column, scope, _tokens) do
     new_scope =
       case handle_char(char) do
         {escape, name} ->
@@ -145,25 +147,25 @@ defmodule Toxic.Tokenizer do
 
   # Heredocs
 
-  def tokenize_single([?", ?", ?" | t], line, column, scope, tokens) do
-    Toxic.String.handle_heredocs(t, line, column, ?", scope, tokens)
+  def next([?", ?", ?" | t], line, column, scope, tokens) do
+    NormalTokenizer.String.handle_heredocs(t, line, column, ?", scope, tokens)
   end
 
-  def tokenize_single([?', ?', ?' | t], line, column, scope, tokens) do
+  def next([?', ?', ?' | t], line, column, scope, tokens) do
     # Note: Charlist deprecation warning will be emitted in the driver
-    Toxic.String.handle_heredocs(t, line, column, ?', scope, tokens)
+    NormalTokenizer.String.handle_heredocs(t, line, column, ?', scope, tokens)
   end
 
   # Strings
 
-  def tokenize_single([?" | t], line, column, scope, tokens) do
-    Toxic.String.handle_strings(t, line, column + 1, ?", scope, tokens)
+  def next([?" | t], line, column, scope, tokens) do
+    NormalTokenizer.String.handle_strings(t, line, column + 1, ?", scope, tokens)
   end
 
-  def tokenize_single([?' | t], line, column, scope, tokens) do
+  def next([?' | t], line, column, scope, tokens) do
     # Note: Don't emit charlist deprecation warning here yet
     # It will be emitted in the driver after we know if this is a keyword identifier or not
-    Toxic.String.handle_strings(t, line, column + 1, ?', scope, tokens)
+    NormalTokenizer.String.handle_strings(t, line, column + 1, ?', scope, tokens)
   end
 
   # Operator atoms
@@ -171,7 +173,7 @@ defmodule Toxic.Tokenizer do
     atom = List.to_atom(chars)
     length = length(chars) + 1
 
-    def tokenize_single([unquote_splicing(chars), ?: | rest], line, column, scope, _tokens)
+    def next([unquote_splicing(chars), ?: | rest], line, column, scope, _tokens)
         when is_space(hd(rest)) do
       token = kw_identifier(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, rest, line, column + unquote(length), scope)
@@ -182,14 +184,14 @@ defmodule Toxic.Tokenizer do
     atom = List.to_atom(chars)
     length = length(chars) + 1
 
-    def tokenize_single([?:, unquote_splicing(chars) | rest], line, column, scope, _tokens) do
+    def next([?:, unquote_splicing(chars) | rest], line, column, scope, _tokens) do
       token = atom(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, rest, line, column + unquote(length), scope)
     end
   end
 
   # Three Token Operators
-  def tokenize_single([?:, t1, t2, t3 | rest], line, column, scope, _tokens)
+  def next([?:, t1, t2, t3 | rest], line, column, scope, _tokens)
       when unary_op3(t1, t2, t3) or comp_op3(t1, t2, t3) or and_op3(t1, t2, t3) or
              or_op3(t1, t2, t3) or
              arrow_op3(t1, t2, t3) or xor_op3(t1, t2, t3) or concat_op3(t1, t2, t3) or
@@ -200,14 +202,14 @@ defmodule Toxic.Tokenizer do
 
   # Two Token Operators
 
-  def tokenize_single([?:, ?:, ?: | rest], line, column, scope, _tokens) do
+  def next([?:, ?:, ?: | rest], line, column, scope, _tokens) do
     warning = Toxic.Warning.ambiguous_triple_colon_atom(line, column)
     new_scope = Toxic.Scope.prepend_warning(warning, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
   end
 
-  def tokenize_single([?:, t1, t2 | rest], line, column, scope, _tokens)
+  def next([?:, t1, t2 | rest], line, column, scope, _tokens)
       when comp_op2(t1, t2) or rel_op2(t1, t2) or and_op(t1, t2) or or_op(t1, t2) or
              arrow_op(t1, t2) or in_match_op(t1, t2) or concat_op(t1, t2) or power_op(t1, t2) or
              stab_op(t1, t2) or range_op(t1, t2) do
@@ -216,7 +218,7 @@ defmodule Toxic.Tokenizer do
   end
 
   # Single Token Operators
-  def tokenize_single([?:, t | rest], line, column, scope, _tokens)
+  def next([?:, t | rest], line, column, scope, _tokens)
       when at_op(t) or unary_op(t) or capture_op(t) or dual_op(t) or mult_op(t) or
              rel_op(t) or match_op(t) or pipe_op(t) or t == ?. do
     token = atom(meta(line, column, 2, nil), List.to_atom([t]))
@@ -225,14 +227,14 @@ defmodule Toxic.Tokenizer do
 
   # Stand-alone tokens
 
-  def tokenize_single([?=, ?> | rest], line, column, scope, tokens) do
+  def next([?=, ?> | rest], line, column, scope, tokens) do
     token = {:assoc_op, meta(line, column, 2, previous_was_eol(tokens)), :"=>"}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
   # Ternary operator
 
-  def tokenize_single([?., ?., ?/, ?/ | rest] = string, line, column, scope, _tokens) do
+  def next([?., ?., ?/, ?/ | rest] = string, line, column, scope, _tokens) do
     case strip_horizontal_space(rest, 0) do
       {[?/ | _] = remaining, extra} ->
         token = {:identifier, meta(line, column, 4, nil), :..//}
@@ -257,7 +259,7 @@ defmodule Toxic.Tokenizer do
         :handle_op
       end
 
-    def tokenize_single([t1, t2, t3 | rest], line, column, scope, tokens)
+    def next([t1, t2, t3 | rest], line, column, scope, tokens)
         when unquote(token)(t1, t2, t3) do
       new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope)
 
@@ -275,22 +277,22 @@ defmodule Toxic.Tokenizer do
   end
 
   # Containers + punctuation tokens
-  def tokenize_single([?, | rest], line, column, scope, _tokens) do
+  def next([?, | rest], line, column, scope, _tokens) do
     token = {:",", meta(line, column, 1, 0)}
     emit(token, rest, line, column + 1, scope)
   end
 
-  def tokenize_single([?<, ?< | rest], line, column, scope, tokens) do
+  def next([?<, ?< | rest], line, column, scope, tokens) do
     token = {:"<<", meta(line, column, 2, nil)}
-    Toxic.Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
-  def tokenize_single([?>, ?> | rest], line, column, scope, tokens) do
+  def next([?>, ?> | rest], line, column, scope, tokens) do
     token = {:">>", meta(line, column, 2, previous_was_eol(tokens))}
-    Toxic.Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
-  def tokenize_single([?{ | _rest], line, column, _scope, [{:%, _} | _] = _tokens) do
+  def next([?{ | _rest], line, column, _scope, [{:%, _} | _] = _tokens) do
     err = %Toxic.Error{
       code: :map_unexpected_space_after_percent,
       domain: :map,
@@ -301,18 +303,18 @@ defmodule Toxic.Tokenizer do
     {:error, err}
   end
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
+  def next([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
     token = {List.to_atom([t]), meta(line, column, 1, nil)}
-    Toxic.Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
   end
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when t in [?), ?}, ?]] do
+  def next([t | rest], line, column, scope, tokens) when t in [?), ?}, ?]] do
     token = {List.to_atom([t]), meta(line, column, 1, previous_was_eol(tokens))}
-    Toxic.Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
   end
 
   # Two Token Operators
-  def tokenize_single([t1, t2 | rest], line, column, scope, tokens) when ternary_op(t1, t2) do
+  def next([t1, t2 | rest], line, column, scope, tokens) when ternary_op(t1, t2) do
     op = List.to_atom([t1, t2])
     token = {:ternary_op, meta(line, column, 2, previous_was_eol(tokens)), op}
     emit_with_eol(token, rest, line, column + 2, scope)
@@ -323,7 +325,7 @@ defmodule Toxic.Tokenizer do
   for token <- @two_token_ops do
     token_name = token |> to_string() |> String.replace_suffix("2", "") |> String.to_atom()
 
-    def tokenize_single([t1, t2 | rest], line, column, scope, tokens)
+    def next([t1, t2 | rest], line, column, scope, tokens)
         when unquote(token)(t1, t2) do
       handle_op(rest, line, column, unquote(token_name), 2, List.to_atom([t1, t2]), scope, tokens)
     end
@@ -331,7 +333,7 @@ defmodule Toxic.Tokenizer do
 
   # Single Token Operators
 
-  def tokenize_single([?& | rest], line, column, scope, _tokens) do
+  def next([?& | rest], line, column, scope, _tokens) do
     kind =
       case strip_horizontal_space(rest, 0) do
         {[int | _], 0} when is_digit(int) ->
@@ -362,14 +364,14 @@ defmodule Toxic.Tokenizer do
         :handle_op
       end
 
-    def tokenize_single([t | rest], line, column, scope, tokens) when unquote(token)(t) do
+    def next([t | rest], line, column, scope, tokens) when unquote(token)(t) do
       unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, tokens)
     end
   end
 
   # Non-operator Atoms
 
-  def tokenize_single(
+  def next(
         [?:, h | t],
         line,
         column,
@@ -395,14 +397,14 @@ defmodule Toxic.Tokenizer do
     {{:switch_to_interp, start_token, kind, true, h}, t, line, column + 2, scope}
   end
 
-  def tokenize_single(
+  def next(
         [?: | string] = _original,
         line,
         column,
         scope = scope(cursor_completion: cursor_completion),
         _tokens
       ) do
-    case Toxic.Identifier.tokenize_identifier(string, line, column, scope, false) do
+    case Identifier.tokenize_identifier(string, line, column, scope, false) do
       {_kind, unencoded, atom, rest, length, ascii?, _special} ->
         new_scope =
           maybe_warn_for_ambiguous_bang_before_equals(:atom, unencoded, rest, line, column, scope)
@@ -431,10 +433,10 @@ defmodule Toxic.Tokenizer do
   end
 
   # Integers and floats
-  def tokenize_single([h | t], line, column, scope, _tokens) when is_digit(h) do
+  def next([h | t], line, column, scope, _tokens) when is_digit(h) do
     scope(cursor_completion: cursor_completion) = scope
 
-    case Toxic.Number.tokenize_number(t, [h], 1, false) do
+    case Number.tokenize_number(t, [h], 1, false) do
       {:error, reason, original} ->
         err = %Toxic.Error{
           code: :number_invalid_float,
@@ -500,7 +502,7 @@ defmodule Toxic.Tokenizer do
 
   # Spaces
 
-  def tokenize_single([t | rest], line, column, scope, tokens) when is_horizontal_space(t) do
+  def next([t | rest], line, column, scope, tokens) when is_horizontal_space(t) do
     {remaining, stripped} = strip_horizontal_space(rest, 0)
     handle_space_sensitive_tokens(remaining, line, column + 1 + stripped, scope, tokens)
   end
@@ -508,7 +510,7 @@ defmodule Toxic.Tokenizer do
   # End of line
 
   # Consecutive semicolons - emit error
-  def tokenize_single([?; | _rest], line, column, _scope, [top | _] = _tokens)
+  def next([?; | _rest], line, column, _scope, [top | _] = _tokens)
       when elem(top, 0) == :";" do
     # Match Elixir's token format: ";" (column N, code point U+003B)
     token_display = [
@@ -533,18 +535,18 @@ defmodule Toxic.Tokenizer do
      }}
   end
 
-  def tokenize_single([?; | rest], line, column, scope, []) do
+  def next([?; | rest], line, column, scope, []) do
     token = {:";", meta(line, column, 1, 0)}
     emit(token, rest, line, column + 1, scope)
   end
 
-  def tokenize_single([?; | rest], line, column, scope, [top | _] = _tokens)
+  def next([?; | rest], line, column, scope, [top | _] = _tokens)
       when elem(top, 0) != :";" do
     token = {:";", meta(line, column, 1, 0)}
     emit(token, rest, line, column + 1, scope)
   end
 
-  def tokenize_single(~c"\\" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\" = _original, line, column, _scope, _tokens) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -554,7 +556,7 @@ defmodule Toxic.Tokenizer do
      }}
   end
 
-  def tokenize_single(~c"\\\n" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\\n" = _original, line, column, _scope, _tokens) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -564,7 +566,7 @@ defmodule Toxic.Tokenizer do
      }}
   end
 
-  def tokenize_single(~c"\\\r\n" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\\r\n" = _original, line, column, _scope, _tokens) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -574,25 +576,25 @@ defmodule Toxic.Tokenizer do
      }}
   end
 
-  def tokenize_single([?\\, ?\n | rest], line, _column, scope, _tokens) do
+  def next([?\\, ?\n | rest], line, _column, scope, _tokens) do
     tokenize_eol(rest, line, scope, nil)
   end
 
-  def tokenize_single([?\\, ?\r, ?\n | rest], line, _column, scope, _tokens) do
+  def next([?\\, ?\r, ?\n | rest], line, _column, scope, _tokens) do
     tokenize_eol(rest, line, scope, nil)
   end
 
-  def tokenize_single([?\n | rest], line, column, scope, tokens) do
+  def next([?\n | rest], line, column, scope, tokens) do
     tokenize_eol(rest, line, scope, eol(line, column, tokens))
   end
 
-  def tokenize_single([?\r, ?\n | rest], line, column, scope, tokens) do
+  def next([?\r, ?\n | rest], line, column, scope, tokens) do
     tokenize_eol(rest, line, scope, eol(line, column, tokens))
   end
 
   # Others
 
-  def tokenize_single([?%, ?( | _rest], line, column, _scope, _tokens) do
+  def next([?%, ?( | _rest], line, column, _scope, _tokens) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -603,7 +605,7 @@ defmodule Toxic.Tokenizer do
     {:error, err}
   end
 
-  def tokenize_single([?%, ?[ | _rest], line, column, _scope, _tokens) do
+  def next([?%, ?[ | _rest], line, column, _scope, _tokens) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -614,7 +616,7 @@ defmodule Toxic.Tokenizer do
     {:error, err}
   end
 
-  def tokenize_single(
+  def next(
         [?%, ?{ | t],
         line,
         column,
@@ -627,7 +629,7 @@ defmodule Toxic.Tokenizer do
     token = {:"{", meta(line, if(elixir_compatibility, do: column, else: column + 1), 1, nil)}
 
     {_, rest, line, column, scope} =
-      Toxic.Terminator.handle_terminator(t, line, column + 2, scope, token, [
+      Terminator.handle_terminator(t, line, column + 2, scope, token, [
         {:%{}, meta(line, column, 2, nil)} | tokens
       ])
 
@@ -635,25 +637,25 @@ defmodule Toxic.Tokenizer do
      scope}
   end
 
-  def tokenize_single([?% | t], line, column, scope, _tokens) do
+  def next([?% | t], line, column, scope, _tokens) do
     token = {:%, meta(line, column, 1, nil)}
     emit(token, t, line, column + 1, scope)
   end
 
-  def tokenize_single([?. | t], line, column, scope, tokens) do
-    Toxic.Dot.tokenize_dot(t, line, column + 1, meta(line, column, 1, nil), scope, tokens)
+  def next([?. | t], line, column, scope, tokens) do
+    Dot.tokenize_dot(t, line, column + 1, meta(line, column, 1, nil), scope, tokens)
   end
 
   # Identifiers
 
-  def tokenize_single(
+  def next(
         string,
         line,
         column,
         original_scope = scope(cursor_completion: cursor_completion),
         tokens
       ) do
-    case Toxic.Identifier.tokenize_identifier(
+    case Identifier.tokenize_identifier(
            string,
            line,
            column,
@@ -704,7 +706,7 @@ defmodule Toxic.Tokenizer do
              }}
 
           _ when kind == :alias ->
-            Toxic.Alias.tokenize_alias(
+            Alias.tokenize_alias(
               rest,
               line,
               column,
@@ -729,7 +731,7 @@ defmodule Toxic.Tokenizer do
               )
 
             token =
-              Toxic.Identifier.check_call_identifier(line, column, length, unencoded, atom, rest)
+              Identifier.check_call_identifier(line, column, length, unencoded, atom, rest)
 
             emit(token, rest, line, column + length, new_scope)
 
@@ -738,7 +740,7 @@ defmodule Toxic.Tokenizer do
         end
 
       {:keyword, atom, type, rest, length} ->
-        Toxic.Keyword.tokenize_keyword(
+        NormalTokenizer.Keyword.tokenize_keyword(
           type,
           rest,
           line,
@@ -871,22 +873,6 @@ defmodule Toxic.Tokenizer do
 
   defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) do
     no_token(string, line, column, scope)
-  end
-
-  def preserve_comments(
-        line,
-        column,
-        tokens,
-        comment,
-        rest,
-        scope(preserve_comments: preserve_comments)
-      )
-      when is_function(preserve_comments, 5) do
-    preserve_comments.(line, column, tokens, comment, rest)
-  end
-
-  def preserve_comments(_line, _column, _tokens, _comment, _rest, _scope) do
-    :ok
   end
 
   # Warning helper functions

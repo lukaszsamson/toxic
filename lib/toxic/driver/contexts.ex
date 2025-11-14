@@ -4,6 +4,7 @@ defmodule Toxic.Driver.Contexts do
   import Toxic.Scope
 
   alias Toxic.{Driver, Error, Identifier, Scope, Warning}
+  alias Toxic.NormalTokenizer.Identifier
 
   @spec pending_error(Driver.t()) ::
           {:missing_scope, term()}

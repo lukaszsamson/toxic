@@ -1,4 +1,4 @@
-defmodule Toxic.Alias do
+defmodule Toxic.NormalTokenizer.Alias do
   @moduledoc false
   import Toxic.Util
   import Toxic.Token

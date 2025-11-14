@@ -1,4 +1,4 @@
-defmodule Toxic.Terminator do
+defmodule Toxic.NormalTokenizer.Terminator do
   @moduledoc false
   import Toxic.Scope
   import Toxic.Util

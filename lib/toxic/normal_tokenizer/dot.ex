@@ -1,16 +1,16 @@
-defmodule Toxic.Dot do
+defmodule Toxic.NormalTokenizer.Dot do
   @moduledoc false
   import Toxic.Scope
   import Toxic.Util
-  import Toxic.Comment
-  import Toxic.Operator
+  import Toxic.NormalTokenizer.Operator
   import Toxic.CharacterClassifier
   import Toxic.Token
+  alias Toxic.NormalTokenizer.{Comment, Identifier}
 
   def tokenize_dot(t, line, column, dot_info, scope = scope(column: scope_column), tokens) do
     case strip_horizontal_space(t, 0) do
       {[?# | r], _} ->
-        case tokenize_comment(r, [?#]) do
+        case Comment.tokenize_comment(r, [?#]) do
           {:error, {code, char}}
           when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
             token = :io_lib.format("\\u~4.16.0B", [char])
@@ -24,7 +24,7 @@ defmodule Toxic.Dot do
              }}
 
           {rest, comment} ->
-            Toxic.Tokenizer.preserve_comments(line, column, tokens, comment, rest, scope)
+            Comment.preserve_comments(line, column, tokens, comment, rest, scope)
             tokenize_dot(rest, line, scope_column, dot_info, scope, tokens)
         end
 
@@ -96,7 +96,7 @@ defmodule Toxic.Dot do
 
   defp handle_call_identifier(rest, line, column, dot_info, length, unencoded_op, scope, _tokens) do
     op_token =
-      Toxic.Identifier.check_call_identifier(
+      Identifier.check_call_identifier(
         line,
         column,
         length,

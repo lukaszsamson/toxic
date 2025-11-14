@@ -1,4 +1,4 @@
-defmodule Toxic.Number do
+defmodule Toxic.NormalTokenizer.Number do
   @moduledoc false
   import Toxic.CharacterClassifier
 

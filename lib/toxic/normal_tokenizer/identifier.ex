@@ -1,4 +1,4 @@
-defmodule Toxic.Identifier do
+defmodule Toxic.NormalTokenizer.Identifier do
   @moduledoc false
   import Toxic.Util
   import Toxic.Token

@@ -1,6 +1,7 @@
-defmodule Toxic.Comment do
+defmodule Toxic.NormalTokenizer.Comment do
   @moduledoc false
   import Toxic.CharacterClassifier
+  import Toxic.Scope
 
   def tokenize_comment([?\r, ?\n | _] = rest, acc) do
     {rest, Enum.reverse(acc)}
@@ -24,5 +25,21 @@ defmodule Toxic.Comment do
 
   def tokenize_comment([], acc) do
     {[], Enum.reverse(acc)}
+  end
+
+  def preserve_comments(
+        line,
+        column,
+        tokens,
+        comment,
+        rest,
+        scope(preserve_comments: preserve_comments)
+      )
+      when is_function(preserve_comments, 5) do
+    preserve_comments.(line, column, tokens, comment, rest)
+  end
+
+  def preserve_comments(_line, _column, _tokens, _comment, _rest, _scope) do
+    :ok
   end
 end
