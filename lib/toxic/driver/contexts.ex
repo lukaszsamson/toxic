@@ -265,8 +265,8 @@ defmodule Toxic.Driver.Contexts do
           term(),
           pos_integer(),
           pos_integer(),
-          Scope.t()
-        ) :: Scope.t()
+          Scope.scope()
+        ) :: Scope.scope()
   def maybe_warn_unnecessary_quote(kind, content, _delim, line, column, scope) do
     warning =
       case kind do
