@@ -98,7 +98,7 @@ defmodule Toxic.Driver do
   @typedoc """
   Token as stored internally.
 
-  Same shapes as `Toxic.TokenStream.token()` but before being returned to the user.
+  Same shapes as `Toxic.token()` but before being returned to the user.
   """
   @type token ::
           {atom(), term()}
@@ -206,7 +206,7 @@ defmodule Toxic.Driver do
   Get the next token from the driver.
 
   This is the low-level single-token driver interface. Most users should use
-  `Toxic.TokenStream` instead, which provides buffering and lookahead.
+  `Toxic` instead, which provides buffering and lookahead.
 
   ## Parameters
   - `rest` - Remaining input as a charlist

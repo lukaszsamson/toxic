@@ -1,4 +1,4 @@
-defmodule ToxicScopeStateTest do
+defmodule Toxic.ScopeStateTest do
   @moduledoc """
   Tests that verify terminator stack state after error recovery.
   Ensures that the scope stack remains consistent and properly balanced

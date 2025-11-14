@@ -5,7 +5,7 @@ This guide keeps contributors and agents aligned on how to work in this repo. It
 ## Project Snapshot
 - Production-ready streaming tokenizer for Elixir with single-token driver and deferrals.
 - Linearized output including interpolation begin/end markers; precise ranged metas `{{sl, sc}, {el, ec}, extra}`.
-- TokenStream provides buffering, lookahead (`peek/1`, `peek_n/2`), pushback, checkpoints, and position API.
+- Toxic provides buffering, lookahead (`peek/1`, `peek_n/2`), pushback, checkpoints, and position API.
 - **Error handling FULLY IMPLEMENTED:** Both strict (halt on error) and tolerant (error recovery) modes working.
 - **Test Coverage:** 821 tests, 0 failures, 94.71% overall coverage.
 - **Status:** Production-ready for IDE integration and Pratt parser use.
@@ -78,7 +78,7 @@ This guide keeps contributors and agents aligned on how to work in this repo. It
 ## Error Handling Conventions
 - Prefer returning error tuples over raising: `{:error, reason, rest, state}`.
 - **Strict mode:** (fully implemented)
-  - TokenStream stores error and returns it on subsequent `next/peek/peek_n` without mutating state.
+  - Toxic stores error and returns it on subsequent `next/peek/peek_n` without mutating state.
   - Driver returns `{:error, reason_tuple, rest, state}` and halts.
 - **Tolerant mode:** ✅ **FULLY IMPLEMENTED**
   - Emits `{:error_token, meta, %Toxic.Error{}}` inline in the token stream.
@@ -124,7 +124,7 @@ This guide keeps contributors and agents aligned on how to work in this repo. It
 ## Next Steps Checklist
 
 ### ✅ Completed (2025-10-30)
-- ✅ Tolerant error path end-to-end (driver + TokenStream integration) - COMPLETE
+- ✅ Tolerant error path end-to-end (driver + Toxic integration) - COMPLETE
 - ✅ Recovery tests verifying metas, sync behavior, and continued progress - COMPLETE (150+ tests)
 - ✅ Update PLAN.md/PROJECT_STATE.md to reflect tolerant mode completion - COMPLETE
 - ✅ Update CLAUDE.md with current status - COMPLETE
@@ -153,11 +153,11 @@ This guide keeps contributors and agents aligned on how to work in this repo. It
 ```elixir
 # Tolerant mode (default)
 stream = Toxic.new(code, opts: [error_mode: :tolerant])
-{:ok, {:error_token, meta, %Toxic.Error{}}, stream} = TokenStream.next(stream)
+{:ok, {:error_token, meta, %Toxic.Error{}}, stream} = Toxic.next(stream)
 
 # Strict mode
 stream = Toxic.new(code, opts: [error_mode: :strict])
-{:error, reason, stream} = TokenStream.next(stream)
+{:error, reason, stream} = Toxic.next(stream)
 
 # Check terminators
 {terminators, stream} = Toxic.current_terminators(stream)

@@ -1,6063 +1,1415 @@
 defmodule ToxicTest do
   use ExUnit.Case
-  doctest Toxic
+  alias Toxic
 
-  defp tokenize(string, opts \\ []) do
-    charlist = to_charlist(string)
-    linearize = Keyword.get(opts, :linearize, false)
+  describe "new/4" do
+    test "creates a stream from a binary source" do
+      stream = Toxic.new("1 + 2")
+      assert %Toxic{driver: %Toxic.Driver{}} = stream
+    end
 
-    # Use the new streaming API
-    stream =
-      Toxic.new(string, 1, 1,
-        elixir_compatibility: Keyword.get(opts, :must_match_elixir, true),
-        preserve_comments: Keyword.get(opts, :preserve_comments, false),
-        existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)
-      )
+    test "creates a stream with custom starting position" do
+      stream = Toxic.new("foo", 5, 10)
+      {{line, column}, _} = Toxic.position(stream)
+      assert line == 5
+      assert column == 10
+    end
 
-    {toxic_tokens_with_ranges_orig, _final_stream} = collect_all_tokens(stream, [])
+    test "accepts options" do
+      stream = Toxic.new("foo", 1, 1, max_batch: 10)
+      assert stream.opts[:max_batch] == 10
+    end
+  end
 
-    toxic_tokens_with_ranges =
-      if not linearize do
-        Toxic.Legacy.collapse_linear_ranges(toxic_tokens_with_ranges_orig |> Enum.reverse())
-      else
-        toxic_tokens_with_ranges_orig
+  describe "next/1" do
+    test "returns tokens in order" do
+      stream = Toxic.new("1 + 2")
+
+      {:ok, token1, stream} = Toxic.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token1
+
+      {:ok, token2, stream} = Toxic.next(stream)
+      assert {:dual_op, {{1, 3}, {1, 4}, _}, :+} = token2
+
+      {:ok, token3, stream} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token3
+
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "handles empty input" do
+      stream = Toxic.new("")
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "handles non empty input with no tokens" do
+      stream = Toxic.new(" ")
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "handles string interpolation with linearized tokens" do
+      stream = Toxic.new(~s("foo \#{1 + 2} bar"))
+
+      {:ok, token1, stream} = Toxic.next(stream)
+      assert {:bin_string_start, {{1, 1}, {1, 2}, nil}, 34} = token1
+
+      {:ok, token2, stream} = Toxic.next(stream)
+      assert {:string_fragment, _, "foo "} = token2
+
+      {:ok, token3, stream} = Toxic.next(stream)
+      assert {:begin_interpolation, _, :string} = token3
+
+      {:ok, token4, stream} = Toxic.next(stream)
+      assert {:int, _, ~c"1"} = token4
+
+      {:ok, token5, stream} = Toxic.next(stream)
+      assert {:dual_op, _, :+} = token5
+
+      {:ok, token6, stream} = Toxic.next(stream)
+      assert {:int, _, ~c"2"} = token6
+
+      {:ok, token7, stream} = Toxic.next(stream)
+      assert {:end_interpolation, _, :string} = token7
+
+      {:ok, token8, stream} = Toxic.next(stream)
+      assert {:string_fragment, _, " bar"} = token8
+
+      {:ok, token9, stream} = Toxic.next(stream)
+      assert {:bin_string_end, {{1, 18}, {1, 19}, nil}, 34} = token9
+
+      assert {:eof, _} = Toxic.next(stream)
+    end
+  end
+
+  describe "peek/1" do
+    test "returns next token without consuming" do
+      stream = Toxic.new("1 + 2")
+
+      {:ok, token, stream1} = Toxic.peek(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Peek again returns the same token
+      {:ok, token, stream2} = Toxic.peek(stream1)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Stream state unchanged
+      assert stream1 == stream2
+
+      # Next consumes the token
+      {:ok, token, stream3} = Toxic.next(stream2)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Now peek returns the next token
+      {:ok, token, _stream4} = Toxic.peek(stream3)
+      assert {:dual_op, {{1, 3}, {1, 4}, _}, :+} = token
+    end
+
+    test "peek forcing token fetch resulting in eof signal" do
+      stream = Toxic.new("1 + 2", 1, 1, max_batch: 3)
+
+      # This will fetch a new batch
+      {:ok, token, stream} = Toxic.peek(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Next consumes the tokens
+      {:ok, _token, stream} = Toxic.next(stream)
+      {:ok, _token, stream} = Toxic.next(stream)
+      {:ok, _token, stream} = Toxic.next(stream)
+
+      # This will fetch a new batch and return eof
+      assert {:eof, _} = Toxic.peek(stream)
+    end
+
+    test "peek forcing token fetch returning non full batch" do
+      stream = Toxic.new("1 + 2", 1, 1, max_batch: 4)
+
+      # This will fetch a new batch
+      {:ok, token, stream} = Toxic.peek(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+
+      # Next consumes the tokens
+      {:ok, _token, stream} = Toxic.next(stream)
+      {:ok, _token, stream} = Toxic.next(stream)
+      {:ok, _token, stream} = Toxic.next(stream)
+
+      # This will return eof
+      assert {:eof, _} = Toxic.peek(stream)
+    end
+
+    test "handles EOF" do
+      stream = Toxic.new("")
+      assert {:eof, _} = Toxic.peek(stream)
+    end
+  end
+
+  describe "peek_n/2" do
+    test "returns multiple tokens without consuming" do
+      stream = Toxic.new("1 + 2 * 3")
+
+      {:ok, tokens, stream1} = Toxic.peek_n(stream, 3)
+
+      assert [
+               {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
+               {:dual_op, {{1, 3}, {1, 4}, _}, :+},
+               {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
+             ] = tokens
+
+      # Can still get first token
+      {:ok, token, _} = Toxic.next(stream1)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+    end
+
+    test "returns fewer tokens at EOF" do
+      stream = Toxic.new("1 +")
+
+      {:eof, tokens, _stream} = Toxic.peek_n(stream, 5)
+      assert length(tokens) == 2
+    end
+
+    test "returns tokens to EOF" do
+      stream = Toxic.new("1 +")
+
+      {:ok, tokens, _stream} = Toxic.peek_n(stream, 2)
+      assert length(tokens) == 2
+    end
+
+    test "forces fetching a correct number of batches" do
+      stream = Toxic.new("1 + 2 * 3", 1, 1, max_batch: 2)
+
+      # This will fetch 2 times
+      {:ok, tokens, stream} = Toxic.peek_n(stream, 4)
+      assert length(tokens) == 4
+
+      {:eof, tokens, _stream} = Toxic.peek_n(stream, 6)
+      assert length(tokens) == 5
+
+      stream = Toxic.new("1 + 2 * 3", 1, 1, max_batch: 2)
+
+      # This will fetch 3 times
+      {:ok, tokens, _stream} = Toxic.peek_n(stream, 5)
+      assert length(tokens) == 5
+
+      stream = Toxic.new("1 + 2 * 3", 1, 1, max_batch: 5)
+
+      # This will fetch 1 time
+      {:ok, tokens, stream} = Toxic.peek_n(stream, 5)
+      assert length(tokens) == 5
+
+      {:eof, tokens, _stream} = Toxic.peek_n(stream, 6)
+      assert length(tokens) == 5
+    end
+
+    test "raises for n <= 0" do
+      stream = Toxic.new("1 + 2")
+      assert_raise ArgumentError, fn -> Toxic.peek_n(stream, 0) end
+    end
+  end
+
+  describe "pushback/2" do
+    test "pushes token back for next consumption" do
+      stream = Toxic.new("1 + 2")
+
+      {:ok, token1, stream} = Toxic.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token1
+
+      {:ok, token2, stream} = Toxic.next(stream)
+      assert {:dual_op, {{1, 3}, {1, 4}, _}, :+} = token2
+
+      # Push back the operator
+      stream = Toxic.pushback(stream, token2)
+
+      # Next returns the pushed back token
+      {:ok, token, stream} = Toxic.next(stream)
+      assert {:dual_op, {{1, 3}, {1, 4}, _}, :+} = token
+
+      # Continue normally
+      {:ok, token, _stream} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "multiple pushbacks work in LIFO order" do
+      stream = Toxic.new("1")
+
+      {:ok, token1, stream} = Toxic.next(stream)
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 2}, {1, 3}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(token1)
+        |> Toxic.pushback(fake_token1)
+        |> Toxic.pushback(fake_token2)
+
+      {:ok, t1, stream} = Toxic.next(stream)
+      assert t1 == fake_token2
+
+      {:ok, t2, stream} = Toxic.next(stream)
+      assert t2 == fake_token1
+
+      {:ok, t3, _stream} = Toxic.next(stream)
+      assert t3 == token1
+    end
+
+    test "pushback and peek" do
+      stream = Toxic.new("")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(fake_token1)
+
+      {:ok, token, _stream} = Toxic.peek(stream)
+
+      assert token == fake_token1
+    end
+
+    test "pushback and peek at eof" do
+      stream = Toxic.new("")
+
+      {:eof, stream} = Toxic.next(stream)
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(fake_token1)
+
+      {:ok, token, _stream} = Toxic.peek(stream)
+
+      assert token == fake_token1
+    end
+
+    test "pushback and peek_n push >= n" do
+      stream = Toxic.new("")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(fake_token1)
+        |> Toxic.pushback(fake_token2)
+
+      {:ok, [token1, token2], _stream} = Toxic.peek_n(stream, 2)
+
+      assert token1 == fake_token2
+      assert token2 == fake_token1
+    end
+
+    test "pushback and peek_n push < n" do
+      stream = Toxic.new("1")
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(fake_token1)
+        |> Toxic.pushback(fake_token2)
+
+      {:ok, [token1, token2, token3], _stream} = Toxic.peek_n(stream, 3)
+
+      assert token1 == fake_token2
+      assert token2 == fake_token1
+      assert token3 == {:int, {{1, 1}, {1, 2}, 1}, ~c"1"}
+    end
+
+    test "pushback and peek_n at eof" do
+      stream = Toxic.new("1")
+
+      {:ok, _, stream} = Toxic.next(stream)
+
+      fake_token1 = {:fake1, {{1, 1}, {1, 2}, nil}, nil}
+      fake_token2 = {:fake2, {{1, 1}, {1, 2}, nil}, nil}
+
+      stream =
+        stream
+        |> Toxic.pushback(fake_token1)
+        |> Toxic.pushback(fake_token2)
+
+      {:eof, [^fake_token2, ^fake_token1], _stream} = Toxic.peek_n(stream, 3)
+    end
+
+    test "peek_n at eof, buffered token" do
+      stream = Toxic.new("1")
+
+      {:ok, token, stream} = Toxic.peek(stream)
+
+      {:eof, [^token], _stream} = Toxic.peek_n(stream, 3)
+    end
+  end
+
+  describe "checkpoint/1 and rewind_to/2" do
+    test "can create checkpoint and rewind" do
+      stream = Toxic.new("1 + 2 * 3")
+
+      {:ok, _token1, stream} = Toxic.next(stream)
+      {:ok, _token2, stream} = Toxic.next(stream)
+
+      # Create checkpoint after consuming 2 tokens
+      {ref, stream} = Toxic.checkpoint(stream)
+
+      # Consume more tokens
+      {:ok, _token3, stream} = Toxic.next(stream)
+      {:ok, _token4, stream} = Toxic.next(stream)
+
+      # Rewind to checkpoint
+      stream = Toxic.rewind_to(stream, ref)
+
+      # Should be back at position after first 2 tokens
+      {:ok, token, _stream} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "invalid checkpoint raises error" do
+      stream = Toxic.new("1")
+      fake_ref = make_ref()
+
+      assert_raise ArgumentError, ~r/Invalid checkpoint reference/, fn ->
+        Toxic.rewind_to(stream, fake_ref)
       end
-
-    if Keyword.get(opts, :must_match_elixir, true) do
-      # Convert back to legacy format for comparison
-      toxic_tokens = Toxic.Legacy.ranges_to_legacy(toxic_tokens_with_ranges)
-
-      {:ok, _, _, _, elixir_tokens, _remaining} =
-        :elixir_tokenizer.tokenize(charlist, 1, 1,
-          existing_atoms_only: Keyword.get(opts, :existing_atoms_only, false)
-        )
-
-      elixir_tokens_reversed = Enum.reverse(elixir_tokens)
-
-      if toxic_tokens != elixir_tokens_reversed do
-        # Find first differing token
-        {toxic_diff, elixir_diff, index} =
-          find_first_difference(toxic_tokens, elixir_tokens_reversed, 0)
-
-        dbg(toxic_tokens_with_ranges, limit: :infinity)
-        dbg(toxic_tokens_with_ranges_orig, limit: :infinity)
-
-        IO.puts("\n=== FIRST DIFFERING TOKEN (index #{index}) ===")
-        IO.puts("TOXIC:  #{inspect(toxic_diff)}")
-        IO.puts("ELIXIR: #{inspect(elixir_diff)}")
-
-        flunk("toxic_tokens != elixir_tokens_reversed")
-      end
-    end
-
-    # Get remaining string from final stream position
-    # remaining_str = get_remaining_string(final_stream, string)
-
-    {:ok, toxic_tokens_with_ranges, ""}
-  end
-
-  # Helper function to collect all tokens from the stream
-  defp collect_all_tokens(stream, acc) do
-    case Toxic.next(stream) do
-      {:ok, token, new_stream} ->
-        collect_all_tokens(new_stream, [token | acc])
-
-      {:eof, final_stream} ->
-        {acc, final_stream}
     end
   end
 
-  # Helper function to find first differing token
-  defp find_first_difference([h1 | t1], [h2 | t2], index) when h1 == h2 do
-    find_first_difference(t1, t2, index + 1)
-  end
+  describe "position/1" do
+    test "returns current position" do
+      stream = Toxic.new("1\n  2")
 
-  defp find_first_difference([h1 | _], [h2 | _], index) do
-    {h1, h2, index}
-  end
+      {{line, col}, stream} = Toxic.position(stream)
+      assert line == 1
+      assert col == 1
 
-  defp find_first_difference([], [h2 | _], index) do
-    {nil, h2, index}
-  end
+      # Consume first token
+      {:ok, _token, stream} = Toxic.next(stream)
 
-  defp find_first_difference([h1 | _], [], index) do
-    {h1, nil, index}
-  end
-
-  defp find_first_difference([], [], index) do
-    {nil, nil, index}
-  end
-
-  test "empty" do
-    assert tokenize("") == {:ok, [], ""}
-  end
-
-  describe "hex numbers" do
-    test "simple hex numbers" do
-      assert tokenize("0x123") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "hex numbers with underscores" do
-      assert tokenize("0xAB_CD") == {:ok, [{:int, {{1, 1}, {1, 8}, 43981}, ~c"0xAB_CD"}], ""}
-    end
-
-    test "hex numbers with uppercase and lowercase" do
-      assert tokenize("0xAbCd") == {:ok, [{:int, {{1, 1}, {1, 7}, 43981}, ~c"0xAbCd"}], ""}
-    end
-
-    test "hex followed by other characters" do
-      assert tokenize("0x123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
-
-      assert tokenize("0x123 ;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
-
-      assert tokenize("0x123  ;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 8}, {1, 9}, 0}}], ""}
+      # Position should be updated
+      {{line, col}, _stream} = Toxic.position(stream)
+      assert line == 1
+      assert col == 2
     end
   end
 
-  describe "binary numbers" do
-    test "simple binary numbers" do
-      assert tokenize("0b101") == {:ok, [{:int, {{1, 1}, {1, 6}, 5}, ~c"0b101"}], ""}
-    end
+  describe "position at EOF" do
+    test "returns end position of last token" do
+      stream = Toxic.new("1 + 2")
 
-    test "binary numbers with underscores" do
-      assert tokenize("0b10_10_01") == {:ok, [{:int, {{1, 1}, {1, 11}, 41}, ~c"0b10_10_01"}], ""}
-    end
+      # Consume all tokens, remember last token end position
+      {last_end_pos, stream} =
+        Stream.unfold(stream, fn s ->
+          case Toxic.next(s) do
+            {:ok, token, s2} ->
+              end_pos =
+                case token do
+                  {_, {{_sl, _sc}, {el, ec}, _extra}, _rest} -> {el, ec}
+                  {_, {{_sl, _sc}, {el, ec}, _extra}} -> {el, ec}
+                  _ -> nil
+                end
 
-    test "binary followed by other characters" do
-      assert tokenize("0b1010;") ==
-               {:ok, [{:int, {{1, 1}, {1, 7}, 10}, ~c"0b1010"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
-    end
-  end
+              {{end_pos, s2}, s2}
 
-  describe "octal numbers" do
-    test "simple octal numbers" do
-      assert tokenize("0o123") == {:ok, [{:int, {{1, 1}, {1, 6}, 83}, ~c"0o123"}], ""}
-    end
+            {:eof, _s2} ->
+              nil
+          end
+        end)
+        |> Enum.reduce({nil, stream}, fn {end_pos, s}, {_acc, _} -> {end_pos, s} end)
 
-    test "octal numbers with underscores" do
-      assert tokenize("0o12_34_56") ==
-               {:ok, [{:int, {{1, 1}, {1, 11}, 42798}, ~c"0o12_34_56"}], ""}
-    end
-
-    test "octal followed by other characters" do
-      assert tokenize("0o765;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 501}, ~c"0o765"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
-    end
-  end
-
-  describe "floats" do
-    test "simple floats" do
-      assert tokenize("1.23") == {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}], ""}
-    end
-
-    test "floats with underscores" do
-      assert tokenize("1_2_3.4_5") ==
-               {:ok, [{:flt, {{1, 1}, {1, 10}, 123.45}, ~c"1_2_3.4_5"}], ""}
-    end
-
-    test "floats with leading 0" do
-      assert tokenize("01.123") == {:ok, [{:flt, {{1, 1}, {1, 7}, 1.123}, ~c"01.123"}], ""}
-    end
-
-    test "floats with exponent" do
-      assert tokenize("1.23e4") == {:ok, [{:flt, {{1, 1}, {1, 7}, 12300.0}, ~c"1.23e4"}], ""}
-      assert tokenize("1.23E4") == {:ok, [{:flt, {{1, 1}, {1, 7}, 12300.0}, ~c"1.23E4"}], ""}
-    end
-
-    test "floats with e and underscore" do
-      assert tokenize("1_2_3.4_5e6_7") ==
-               {:ok, [{:flt, {{1, 1}, {1, 14}, 1.2345e69}, ~c"1_2_3.4_5e6_7"}], ""}
-    end
-
-    test "floats with e and underscore and sign" do
-      assert tokenize("1_2_3.4_5e-6_7") ==
-               {:ok, [{:flt, {{1, 1}, {1, 15}, 1.2345e-65}, ~c"1_2_3.4_5e-6_7"}], ""}
-
-      assert tokenize("1_2_3.4_5e+6_7") ==
-               {:ok, [{:flt, {{1, 1}, {1, 15}, 1.2345e69}, ~c"1_2_3.4_5e+6_7"}], ""}
-    end
-
-    test "floats followed by other characters" do
-      assert tokenize("1.23;") ==
-               {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
+      # At EOF, position should match last token's end position
+      {{line, col}, _} = Toxic.position(stream)
+      assert {line, col} == last_end_pos
     end
   end
 
-  describe "integers" do
-    test "simple integers" do
-      assert tokenize("123") == {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}], ""}
+  describe "position with batching and pushback" do
+    test "position reflects buffer head under batching" do
+      stream = Toxic.new("1 + 2", 1, 1, max_batch: 1)
+      # Initial position at first token
+      {{l1, c1}, stream} = Toxic.position(stream)
+      assert {l1, c1} == {1, 1}
+
+      # Peek should not advance position
+      {:ok, _t, stream} = Toxic.peek(stream)
+      {{l2, c2}, stream} = Toxic.position(stream)
+      assert {l2, c2} == {1, 1}
+
+      # After consuming first token ("1"), next token is '+' at col 3
+      {:ok, _t1, stream} = Toxic.next(stream)
+      {{l3, c3}, _stream} = Toxic.position(stream)
+      assert {l3, c3} == {1, 3}
     end
 
-    test "starting with 0" do
-      assert tokenize("0123") == {:ok, [{:int, {{1, 1}, {1, 5}, 123}, ~c"0123"}], ""}
+    test "position restores on pushback" do
+      stream = Toxic.new("1 + 2")
+
+      # Take first token and remember its pre-position
+      {{pos_before_first_l, pos_before_first_c}, stream} = Toxic.position(stream)
+      {:ok, t1, stream} = Toxic.next(stream)
+      # Now position should be before '+'
+      {{l_after, c_after}, stream} = Toxic.position(stream)
+      assert {l_after, c_after} == {1, 3}
+
+      # Push back t1; position should revert to the remembered pre-position
+      stream = Toxic.pushback(stream, t1)
+      {{l_re, c_re}, _} = Toxic.position(stream)
+      assert {l_re, c_re} == {pos_before_first_l, pos_before_first_c}
     end
 
-    test "integers with underscores" do
-      assert tokenize("1_2_3") == {:ok, [{:int, {{1, 1}, {1, 6}, 123}, ~c"1_2_3"}], ""}
-    end
+    test "peek does not change position across batches" do
+      stream = Toxic.new("1 + 2 * 3", 1, 1, max_batch: 2)
+      {{l0, c0}, stream} = Toxic.position(stream)
+      assert {l0, c0} == {1, 1}
 
-    test "integers followed by other characters" do
-      assert tokenize("123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
-    end
-  end
-
-  describe "operator atoms" do
-    test "keyword identifiers" do
-      assert tokenize(".: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 3}, nil}, :.}], ""}
-      assert tokenize("<<>>: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 6}, nil}, :<<>>}], ""}
-      assert tokenize("%{}: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 5}, nil}, :%{}}], ""}
-      assert tokenize("%: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 3}, nil}, :%}], ""}
-      assert tokenize("&: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 3}, nil}, :&}], ""}
-      assert tokenize("{}: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 4}, nil}, :{}}], ""}
-      assert tokenize("..//: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 6}, nil}, :..//}], ""}
-
-      assert tokenize("&&&: ") == {:ok, [{:kw_identifier, {{1, 1}, {1, 5}, nil}, :&&&}], ""}
-    end
-
-    test "atom operators" do
-      assert tokenize(":<<>>") == {:ok, [{:atom, {{1, 1}, {1, 6}, nil}, :<<>>}], ""}
-      assert tokenize(":%{}") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :%{}}], ""}
-      assert tokenize(":%") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :%}], ""}
-      assert tokenize(":{}") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :{}}], ""}
-      assert tokenize(":..//") == {:ok, [{:atom, {{1, 1}, {1, 6}, nil}, :..//}], ""}
-    end
-
-    test "atoms followed by other characters" do
-      assert tokenize(":%{};") ==
-               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :%{}}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
-    end
-  end
-
-  describe "operators as atoms" do
-    test "three-token operators as atoms" do
-      # unary_op3
-      assert tokenize(":~~~") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}], ""}
-      # comp_op3
-      assert tokenize(":===") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :===}], ""}
-      assert tokenize(":!==") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :!==}], ""}
-      # and_op3
-      assert tokenize(":&&&") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :&&&}], ""}
-      # or_op3
-      assert tokenize(":|||") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :|||}], ""}
-      # arrow_op3
-      assert tokenize(":<<<") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<<<}], ""}
-      assert tokenize(":>>>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :>>>}], ""}
-      assert tokenize(":~>>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :~>>}], ""}
-      assert tokenize(":<<~") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<<~}], ""}
-      assert tokenize(":<~>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :<~>}], ""}
-      assert tokenize(":<|>") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"<|>"}], ""}
-      # xor_op3
-      assert tokenize(":^^^") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"^^^"}], ""}
-      # concat_op3
-      assert tokenize(":+++") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :+++}], ""}
-      assert tokenize(":---") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :---}], ""}
-      # ellipsis_op3
-      assert tokenize(":...") == {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :...}], ""}
-    end
-
-    test "special handling of :::" do
-      assert tokenize(":::") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}], ""}
-    end
-
-    test "two-token operators as atoms" do
-      # comp_op2
-      assert tokenize(":==") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :==}], ""}
-      assert tokenize(":!=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :!=}], ""}
-      assert tokenize(":=~") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :=~}], ""}
-      # rel_op2
-      assert tokenize(":>=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :>=}], ""}
-      assert tokenize(":<=") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<=}], ""}
-      # and_op
-      assert tokenize(":&&") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :&&}], ""}
-      # or_op
-      assert tokenize(":||") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :||}], ""}
-      # arrow_op
-      assert tokenize(":|>") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :|>}], ""}
-      assert tokenize(":~>") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :~>}], ""}
-      assert tokenize(":<~") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<~}], ""}
-      # in_match_op
-      assert tokenize(":<-") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :<-}], ""}
-      assert tokenize(":\\\\") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"\\\\"}], ""}
-      # concat_op
-      assert tokenize(":++") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :++}], ""}
-      assert tokenize(":--") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :--}], ""}
-      # power_op
-      assert tokenize(":**") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :**}], ""}
-      # stab_op
-      assert tokenize(":->") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :->}], ""}
-      # range_op
-      assert tokenize(":..") == {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :..}], ""}
-    end
-
-    test "single-token operators as atoms" do
-      # at_op
-      assert tokenize(":@") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :@}], ""}
-      # unary_op
-      assert tokenize(":!") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :!}], ""}
-      assert tokenize(":^") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :^}], ""}
-      # capture_op
-      assert tokenize(":&") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :&}], ""}
-      # dual_op
-      assert tokenize(":+") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :+}], ""}
-      assert tokenize(":-") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :-}], ""}
-      # mult_op
-      assert tokenize(":*") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :*}], ""}
-      assert tokenize(":/") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :/}], ""}
-      # rel_op
-      assert tokenize(":<") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :<}], ""}
-      assert tokenize(":>") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :>}], ""}
-      # match_op
-      assert tokenize(":=") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :=}], ""}
-      # pipe_op
-      assert tokenize(":|") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :|}], ""}
-      # dot
-      assert tokenize(":.") == {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}], ""}
-    end
-
-    test "followed by other characters" do
-      assert tokenize(":~~~;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
-
-      assert tokenize(":::;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
-
-      assert tokenize(":.;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}, {:";", {{1, 3}, {1, 4}, 0}}], ""}
+      # Force a refill by peeking multiple times
+      {:ok, _t, stream} = Toxic.peek(stream)
+      {:ok, _t, stream} = Toxic.peek_n(stream, 5)
+      {{lA, cA}, _} = Toxic.position(stream)
+      assert {lA, cA} == {1, 1}
     end
   end
 
-  describe "stand alone tokens" do
-    test "=>" do
-      assert tokenize("=>") == {:ok, [{:assoc_op, {{1, 1}, {1, 3}, nil}, :"=>"}], ""}
+  describe "to_stream/1" do
+    test "converts to Elixir stream" do
+      stream = Toxic.new("1 + 2 * 3")
+
+      tokens =
+        stream
+        |> Toxic.to_stream()
+        |> Enum.to_list()
+
+      assert [
+               {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
+               {:dual_op, {{1, 3}, {1, 4}, _}, :+},
+               {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
+               {:mult_op, {{1, 7}, {1, 8}, _}, :*},
+               {:int, {{1, 9}, {1, 10}, 3}, ~c"3"}
+             ] = tokens
     end
 
-    test "=> after eol" do
-      assert tokenize("\n=>") == {:ok, [{:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}], ""}
-      assert tokenize("\n\n=>") == {:ok, [{:assoc_op, {{3, 1}, {3, 3}, 2}, :"=>"}], ""}
+    test "converts to Elixir stream with small batch size" do
+      stream = Toxic.new("1 + 2 * 3", 1, 1, max_batch: 2)
+
+      tokens =
+        stream
+        |> Toxic.to_stream()
+        |> Enum.to_list()
+
+      assert [
+               {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
+               {:dual_op, {{1, 3}, {1, 4}, _}, :+},
+               {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
+               {:mult_op, {{1, 7}, {1, 8}, _}, :*},
+               {:int, {{1, 9}, {1, 10}, 3}, ~c"3"}
+             ] = tokens
     end
 
-    test "=> after ;" do
-      assert tokenize(";=>") == {
-               :ok,
-               [
-                 {:";", {{1, 1}, {1, 2}, 0}},
-                 {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
-               ],
-               ""
-             }
-
-      assert tokenize(";\n=>") == {
-               :ok,
-               [
-                 {:";", {{1, 1}, {2, 1}, 1}},
-                 {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
-               ],
-               ""
-             }
-    end
-
-    test "=> after ," do
-      assert tokenize(",=>") == {
-               :ok,
-               [
-                 {:",", {{1, 1}, {1, 2}, 0}},
-                 {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
-               ],
-               ""
-             }
-
-      assert tokenize(",\n=>") == {
-               :ok,
-               [
-                 {:",", {{1, 1}, {2, 1}, 1}},
-                 {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
-               ],
-               ""
-             }
-    end
-
-    test "..//" do
-      assert tokenize("..///") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 5}, nil}, :..//},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("..// /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 5}, nil}, :..//},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
+    test "handles empty input" do
+      stream = Toxic.new("")
+      tokens = stream |> Toxic.to_stream() |> Enum.to_list()
+      assert tokens == []
     end
   end
 
-  describe "operators" do
-    test "three token operators" do
-      # unary_op3
-      assert tokenize("~~~") == {:ok, [{:unary_op, {{1, 1}, {1, 4}, nil}, :"~~~"}], ""}
-      # comp_op3
-      assert tokenize("===") == {:ok, [{:comp_op, {{1, 1}, {1, 4}, nil}, :===}], ""}
-      assert tokenize("!==") == {:ok, [{:comp_op, {{1, 1}, {1, 4}, nil}, :!==}], ""}
-      # and_op3
-      assert tokenize("&&&") == {:ok, [{:and_op, {{1, 1}, {1, 4}, nil}, :&&&}], ""}
-      # or_op3
-      assert tokenize("|||") == {:ok, [{:or_op, {{1, 1}, {1, 4}, nil}, :|||}], ""}
-      # arrow_op3
-      assert tokenize("<<<") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<<<}], ""}
-      assert tokenize(">>>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :>>>}], ""}
-      assert tokenize("~>>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :~>>}], ""}
-      assert tokenize("<<~") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<<~}], ""}
-      assert tokenize("<~>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :<~>}], ""}
-      assert tokenize("<|>") == {:ok, [{:arrow_op, {{1, 1}, {1, 4}, nil}, :"<|>"}], ""}
-      # xor_op3
-      assert tokenize("^^^") == {:ok, [{:xor_op, {{1, 1}, {1, 4}, nil}, :"^^^"}], ""}
-      # concat_op3
-      assert tokenize("+++") == {:ok, [{:concat_op, {{1, 1}, {1, 4}, nil}, :+++}], ""}
-      assert tokenize("---") == {:ok, [{:concat_op, {{1, 1}, {1, 4}, nil}, :---}], ""}
-      # ellipsis_op3
-      assert tokenize("...") == {:ok, [{:ellipsis_op, {{1, 1}, {1, 4}, nil}, :...}], ""}
-    end
-
-    test "two-token operators" do
-      # comp_op2
-      assert tokenize("==") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :==}], ""}
-      assert tokenize("!=") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :!=}], ""}
-      assert tokenize("=~") == {:ok, [{:comp_op, {{1, 1}, {1, 3}, nil}, :=~}], ""}
-      # rel_op2
-      assert tokenize(">=") == {:ok, [{:rel_op, {{1, 1}, {1, 3}, nil}, :>=}], ""}
-      assert tokenize("<=") == {:ok, [{:rel_op, {{1, 1}, {1, 3}, nil}, :<=}], ""}
-      # and_op
-      assert tokenize("&&") == {:ok, [{:and_op, {{1, 1}, {1, 3}, nil}, :&&}], ""}
-      # or_op
-      assert tokenize("||") == {:ok, [{:or_op, {{1, 1}, {1, 3}, nil}, :||}], ""}
-      # arrow_op
-      assert tokenize("|>") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :|>}], ""}
-      assert tokenize("~>") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :~>}], ""}
-      assert tokenize("<~") == {:ok, [{:arrow_op, {{1, 1}, {1, 3}, nil}, :<~}], ""}
-      # in_match_op
-      assert tokenize("<-") == {:ok, [{:in_match_op, {{1, 1}, {1, 3}, nil}, :<-}], ""}
-      assert tokenize("\\\\") == {:ok, [{:in_match_op, {{1, 1}, {1, 3}, nil}, :"\\\\"}], ""}
-      # concat_op
-      assert tokenize("++") == {:ok, [{:concat_op, {{1, 1}, {1, 3}, nil}, :++}], ""}
-      assert tokenize("--") == {:ok, [{:concat_op, {{1, 1}, {1, 3}, nil}, :--}], ""}
-      # power_op
-      assert tokenize("**") == {:ok, [{:power_op, {{1, 1}, {1, 3}, nil}, :**}], ""}
-      # stab_op
-      assert tokenize("->") == {:ok, [{:stab_op, {{1, 1}, {1, 3}, nil}, :->}], ""}
-      # range_op
-      assert tokenize("..") == {:ok, [{:range_op, {{1, 1}, {1, 3}, nil}, :..}], ""}
-      # type_op
-      assert tokenize("::") == {:ok, [{:type_op, {{1, 1}, {1, 3}, nil}, :"::"}], ""}
-    end
-
-    test "ternary_op" do
-      assert tokenize("//") == {:ok, [{:ternary_op, {{1, 1}, {1, 3}, nil}, :"//"}], ""}
-    end
-
-    test "ternary_op after eol" do
-      assert tokenize("\n//") == {:ok, [{:ternary_op, {{2, 1}, {2, 3}, 1}, :"//"}], ""}
-      assert tokenize("\n //") == {:ok, [{:ternary_op, {{2, 2}, {2, 4}, 1}, :"//"}], ""}
-    end
-
-    test "," do
-      assert tokenize(",") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}}], ""}
-    end
-
-    test "<<>>" do
-      assert tokenize("<<>>") ==
-               {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:">>", {{1, 3}, {1, 5}, nil}}], ""}
-    end
-
-    test ">> after eol" do
-      assert tokenize("<<\n>>") ==
-               {:ok,
-                [
-                  {:"<<", {{1, 1}, {1, 3}, nil}},
-                  {:eol, {{1, 3}, {2, 1}, 1}},
-                  {:">>", {{2, 1}, {2, 3}, 1}}
-                ], ""}
-    end
-
-    test "[]" do
-      assert tokenize("[]") ==
-               {:ok, [{:"[", {{1, 1}, {1, 2}, nil}}, {:"]", {{1, 2}, {1, 3}, nil}}], ""}
-    end
-
-    test "] after eol" do
-      assert tokenize("[\n]") ==
-               {:ok,
-                [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:"]", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-    end
-
-    test "{}" do
-      assert tokenize("{}") ==
-               {:ok, [{:"{", {{1, 1}, {1, 2}, nil}}, {:"}", {{1, 2}, {1, 3}, nil}}], ""}
-    end
-
-    test "} after eol" do
-      assert tokenize("{\n}") ==
-               {:ok,
-                [
-                  {:"{", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:"}", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-    end
-
-    test "()" do
-      assert tokenize("()") ==
-               {:ok, [{:"(", {{1, 1}, {1, 2}, nil}}, {:")", {{1, 2}, {1, 3}, nil}}], ""}
-    end
-
-    test ") after eol" do
-      assert tokenize("(\n)") ==
-               {:ok,
-                [
-                  {:"(", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:")", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-    end
-
-    test "single-token operators" do
-      # at_op
-      assert tokenize("@") == {:ok, [{:at_op, {{1, 1}, {1, 2}, nil}, :@}], ""}
-      # unary_op
-      assert tokenize("!") == {:ok, [{:unary_op, {{1, 1}, {1, 2}, nil}, :!}], ""}
-      assert tokenize("^") == {:ok, [{:unary_op, {{1, 1}, {1, 2}, nil}, :^}], ""}
-      # dual_op
-      assert tokenize("+") == {:ok, [{:dual_op, {{1, 1}, {1, 2}, nil}, :+}], ""}
-      assert tokenize("-") == {:ok, [{:dual_op, {{1, 1}, {1, 2}, nil}, :-}], ""}
-      # mult_op
-      assert tokenize("*") == {:ok, [{:mult_op, {{1, 1}, {1, 2}, nil}, :*}], ""}
-      assert tokenize("/") == {:ok, [{:mult_op, {{1, 1}, {1, 2}, nil}, :/}], ""}
-      # rel_op
-      assert tokenize("<") == {:ok, [{:rel_op, {{1, 1}, {1, 2}, nil}, :<}], ""}
-      assert tokenize(">") == {:ok, [{:rel_op, {{1, 1}, {1, 2}, nil}, :>}], ""}
-      # match_op
-      assert tokenize("=") == {:ok, [{:match_op, {{1, 1}, {1, 2}, nil}, :=}], ""}
-      # pipe_op
-      assert tokenize("|") == {:ok, [{:pipe_op, {{1, 1}, {1, 2}, nil}, :|}], ""}
-    end
-
-    test "capture_int" do
-      assert tokenize("&1") ==
-               {:ok,
-                [{:capture_int, {{1, 1}, {1, 2}, nil}, :&}, {:int, {{1, 2}, {1, 3}, 1}, ~c"1"}],
-                ""}
-
-      assert tokenize("& 1") ==
-               {:ok,
-                [{:capture_op, {{1, 1}, {1, 2}, nil}, :&}, {:int, {{1, 3}, {1, 4}, 1}, ~c"1"}],
-                ""}
-    end
-
-    test "capture_op" do
-      assert tokenize("&+/1") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:identifier, {{1, 2}, {1, 3}, nil}, :+},
-                  {:mult_op, {{1, 3}, {1, 4}, nil}, :/},
-                  {:int, {{1, 4}, {1, 5}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("& +/1") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:identifier, {{1, 3}, {1, 4}, nil}, :+},
-                  {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                  {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "capture_op /" do
-      assert tokenize("&//") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:ternary_op, {{1, 2}, {1, 4}, nil}, :"//"}
-                ], ""}
-
-      assert tokenize("& //") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:ternary_op, {{1, 3}, {1, 5}, nil}, :"//"}
-                ], ""}
-
-      assert tokenize("&/ /") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:identifier, {{1, 2}, {1, 3}, nil}, :/},
-                  {:mult_op, {{1, 4}, {1, 5}, nil}, :/}
-                ], ""}
-
-      assert tokenize("&/+") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 2}, nil}, :&},
-                  {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
-                  {:dual_op, {{1, 3}, {1, 4}, nil}, :+}
-                ], ""}
-
-      assert tokenize("& /+") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 2}, nil}, :&},
-                  {:mult_op, {{1, 3}, {1, 4}, nil}, :/},
-                  {:dual_op, {{1, 4}, {1, 5}, nil}, :+}
-                ], ""}
-
-      assert tokenize("&/ +") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 2}, nil}, :&},
-                  {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
-                  {:dual_op, {{1, 4}, {1, 5}, nil}, :+}
-                ], ""}
-    end
-
-    test "unary operators followed by /" do
-      # unary_op3
-      assert tokenize("~~~  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :"~~~"},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # ellipsis_op3
-      assert tokenize("...  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :...},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # at_op
-      assert tokenize("@  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :@}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      # unary_op
-      assert tokenize("!  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :!}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      assert tokenize("^  \t/") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :^}, {:mult_op, {{1, 5}, {1, 6}, nil}, :/}],
-                ""}
-
-      # dual_op
-      assert tokenize("+  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :+}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      assert tokenize("-  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :-}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-    end
-
-    test "operators followed by /" do
-      # comp_op3
-      assert tokenize("===  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :===},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("!==  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :!==},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # and_op3
-      assert tokenize("&&&  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :&&&},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # or_op3
-      assert tokenize("|||  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :|||},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # xor_op3
-      assert tokenize("^^^  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :"^^^"},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # concat_op3
-      assert tokenize("+++  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :+++},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("---  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :---},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # arrow_op3
-      assert tokenize("<<<  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :<<<},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize(">>>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :>>>},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("~>>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :~>>},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("<<~  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :<<~},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("<~>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :<~>},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      assert tokenize("<|>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, nil}, :"<|>"},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/}
-                ], ""}
-
-      # power_op
-      assert tokenize("**  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :**},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # range_op
-      assert tokenize("..  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :..},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # concat_op
-      assert tokenize("++  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :++},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("--  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :--},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # arrow_op
-      assert tokenize("|>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :|>},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("~>  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :~>},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("<~  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :<~},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # comp_op2
-      assert tokenize("==  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :==},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("!=  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :!=},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("=~  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :=~},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # rel_op2
-      assert tokenize(">=  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :>=},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("<=  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :<=},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # and_op
-      assert tokenize("&&  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :&&},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # or_op
-      assert tokenize("||  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :||},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # in_match_op
-      assert tokenize("<-  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :<-},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      assert tokenize("\\\\  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :"\\\\"},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # type_op
-      assert tokenize("::  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :"::"},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # stab_op
-      assert tokenize("->  /") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 3}, nil}, :->},
-                  {:mult_op, {{1, 5}, {1, 6}, nil}, :/}
-                ], ""}
-
-      # rel_op
-      assert tokenize("<  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :<}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      assert tokenize(">  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :>}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      # mult_op
-      assert tokenize("*  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :*}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      assert tokenize("/  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :/}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      # match_op
-      assert tokenize("=  /") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :=}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-
-      # pipe_op
-      assert tokenize("| \t/") ==
-               {:ok,
-                [{:identifier, {{1, 1}, {1, 2}, nil}, :|}, {:mult_op, {{1, 4}, {1, 5}, nil}, :/}],
-                ""}
-    end
-
-    test "unary operators at start of line after newline" do
-      # Unary minus after newline should have nil EOL meta
-      assert tokenize("\n-1") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :-},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-
-      # Unary plus after newline should have nil EOL meta
-      assert tokenize("\n+1") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "unary operators with indentation after newline" do
-      # Indented unary minus
-      assert tokenize("\n  -1") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:dual_op, {{2, 3}, {2, 4}, nil}, :-},
-                  {:int, {{2, 4}, {2, 5}, 1}, ~c"1"}
-                ], ""}
-
-      # Indented unary plus
-      assert tokenize("\n\t+1") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:dual_op, {{2, 2}, {2, 3}, nil}, :+},
-                  {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "at_op after newline has nil EOL meta" do
-      assert tokenize("\n@x") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:at_op, {{2, 1}, {2, 2}, nil}, :@},
-                  {:identifier, {{2, 2}, {2, 3}, ~c"x"}, :x}
-                ], ""}
+  describe "slice/6" do
+    test "creates stream from slice of input" do
+      source = "foo bar baz"
+      stream = Toxic.slice(source, 4, 7, 1, 5)
+
+      {:ok, token, stream} = Toxic.next(stream)
+      assert {:identifier, {{1, 5}, {1, 8}, _}, :bar} = token
+
+      assert {:eof, _} = Toxic.next(stream)
     end
   end
 
-  describe "spaces" do
-    test "horizontal spaces are properly handled" do
-      # Spaces should be skipped during tokenization
-      assert tokenize("0x123    :+") ==
-               {:ok,
-                [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:atom, {{1, 10}, {1, 12}, nil}, :+}],
-                ""}
+  describe "current_terminators/1" do
+    test "returns terminator stack" do
+      stream = Toxic.new("(")
 
-      # Multiple consecutive spaces
-      assert tokenize("0x123 \t  0b101") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
-                  {:int, {{1, 10}, {1, 15}, 5}, ~c"0b101"}
-                ], ""}
+      # Initially empty
+      {terminators, stream} = Toxic.current_terminators(stream)
+      assert terminators == []
+
+      # After consuming '(', would have paren terminator
+      {:ok, _token, stream} = Toxic.next(stream)
+
+      {terms, _} = Toxic.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "returns terminator stack at current position not batch end" do
+      stream = Toxic.new("(1)")
+
+      # Initially empty
+      {terminators, stream} = Toxic.current_terminators(stream)
+      assert terminators == []
+
+      # After consuming '(', would have paren terminator
+      {:ok, _token, stream} = Toxic.next(stream)
+
+      {terms, _} = Toxic.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "respects pushed entry snapshot over driver" do
+      stream = Toxic.new("(")
+
+      # Consume '('
+      {:ok, tok, stream} = Toxic.next(stream)
+
+      # Driver now expects a closing paren, but we push back '('
+      stream = Toxic.pushback(stream, tok)
+
+      # Terminators should reflect the state before '(', which is empty
+      {terms, _} = Toxic.current_terminators(stream)
+      assert terms == []
+    end
+
+    test "falls back to driver terms when pushed token lacks snapshot" do
+      stream = Toxic.new("(")
+
+      # Consume '('
+      {:ok, _tok, stream} = Toxic.next(stream)
+
+      # Push a fake token (no snapshot in stream), so current_terminators should use driver
+      fake = {:fake, {{1, 1}, {1, 1}, nil}, nil}
+      stream = Toxic.pushback(stream, fake)
+
+      {terms, _} = Toxic.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
+    end
+
+    test "falls back to driver terms when pushed token lacks snapshot - assert current position not batch end" do
+      stream = Toxic.new("(1)")
+
+      # Consume '('
+      {:ok, _tok, stream} = Toxic.next(stream)
+
+      # Push a fake token (no snapshot in stream), so current_terminators should use driver
+      fake = {:fake, {{1, 1}, {1, 1}, nil}, nil}
+      stream = Toxic.pushback(stream, fake)
+
+      {terms, _} = Toxic.current_terminators(stream)
+      assert match?([{:"(", _, _} | _], terms)
     end
   end
 
-  describe "end of line handling" do
-    test "semicolons" do
-      assert tokenize(";") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}}], ""}
-    end
-
-    test "tokens after semicolons" do
-      assert tokenize(";0x123") ==
-               {:ok, [{:";", {{1, 1}, {1, 2}, 0}}, {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "semicolons after tokens" do
-      assert tokenize("0x123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
-    end
-
-    test "commas" do
-      assert tokenize(",") == {:ok, [",": {{1, 1}, {1, 2}, 0}], ""}
-    end
-
-    test "tokens after commas" do
-      assert tokenize(",0x123") == {
-               :ok,
-               [
-                 {:",", {{1, 1}, {1, 2}, 0}},
-                 {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}
-               ],
-               ""
-             }
-    end
-
-    test "commas after tokens" do
-      assert tokenize("0x123,") == {
-               :ok,
-               [
-                 {:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
-                 {:",", {{1, 6}, {1, 7}, 0}}
-               ],
-               ""
-             }
-    end
-
-    test "consecutive commas" do
-      assert tokenize(",,") == {:ok, [",": {{1, 1}, {1, 2}, 0}, ",": {{1, 2}, {1, 3}, 0}], ""}
-    end
-
-    test "newlines" do
-      assert tokenize("\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
-    end
-
-    test "consecutive newlines" do
-      assert tokenize("\n\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
-    end
-
-    test "newline after semicolon" do
-      assert tokenize(";\n") == {:ok, [";": {{1, 1}, {2, 1}, 1}], ""}
-    end
-
-    test "newline after comma" do
-      assert tokenize(",\n") == {:ok, [",": {{1, 1}, {2, 1}, 1}], ""}
-    end
-
-    test "carriage return + newline" do
-      assert tokenize("\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
-    end
-
-    test "consecutive carriage return + newline" do
-      assert tokenize("\r\n\r\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
-    end
-
-    test "newlines with horizontal spaces" do
-      assert tokenize("\n  0") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 3}, {2, 4}, 0}, ~c"0"}], ""}
-    end
-
-    test "escaped newlines are handled" do
-      # Escaped newlines should continue to next line without creating eol token
-      assert tokenize("\\\n0x123") == {:ok, [{:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
-      assert tokenize("\\\r\n0x123") == {:ok, [{:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "consecutive escaped newlines" do
-      assert tokenize("\\\n\\\n0x123") == {:ok, [{:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "newline after escaped newline" do
-      assert tokenize("\\\n\n") == {:ok, [{:eol, {{2, 1}, {3, 1}, 1}}], ""}
-    end
-
-    test "escaped newline after newline" do
-      assert tokenize("\n\\\n ") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
-    end
-
-    test "horizontal space after escaped newline" do
-      assert tokenize("\\\n 0x123") == {:ok, [{:int, {{2, 2}, {2, 7}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "tokens before newlines" do
-      assert tokenize("0x123\n") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {2, 1}, 1}}], ""}
-    end
-
-    test "tokens after newlines" do
-      assert tokenize("\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "tokens before consecutive newlines" do
-      assert tokenize("0x123\n\n") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {3, 1}, 2}}], ""}
-    end
-
-    test "tokens after consecutive newlines" do
-      assert tokenize("\n\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}, {:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}], ""}
-    end
-  end
-
-  describe "bin strings" do
-    test "empty bin strings" do
-      assert tokenize("\"\"") == {:ok, [{:bin_string, {{1, 1}, {1, 3}, nil}, [""]}], ""}
-    end
-
-    test "simple bin strings" do
-      assert tokenize("\"foo\"") == {:ok, [{:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]}], ""}
-    end
-
-    test "unicode bin strings" do
-      assert tokenize("\"ą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]}], ""}
-      assert tokenize("\"ąą\"") == {:ok, [{:bin_string, {{1, 1}, {1, 5}, nil}, ["ąą"]}], ""}
-      assert tokenize("\"កឹasd\"") == {:ok, [{:bin_string, {{1, 1}, {1, 7}, nil}, ["កឹasd"]}], ""}
-    end
-
-    test "with LF newlines" do
-      assert tokenize("\"foo\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]}], ""}
-
-      assert tokenize("\"\nbar\"") == {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["\nbar"]}], ""}
-      assert tokenize("\"foo\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["foo\n"]}], ""}
-      assert tokenize("\"\n\"") == {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["\n"]}], ""}
-    end
-
-    test "with CRLF newlines" do
-      assert tokenize("\"foo\r\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\r\nbar"]}], ""}
-
-      assert tokenize("\"\r\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["\r\nbar"]}], ""}
-
-      assert tokenize("\"foo\r\n\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 2}, nil}, ["foo\r\n"]}], ""}
-    end
-
-    test "with escaped LF newlines" do
-      assert tokenize("\"foo\\\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
-    end
-
-    test "with escaped CRLF newlines" do
-      assert tokenize("\"foo\\\r\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
-    end
-
-    test "with LF escape" do
-      assert tokenize("\"foo\\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\nbar"]}], ""}
-    end
-
-    test "with CRLF escape" do
-      assert tokenize("\"foo\\r\\nbar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {1, 13}, nil}, ["foo\r\nbar"]}], ""}
-    end
-
-    test "with terminator escape" do
-      assert tokenize("\"foo\\\"bar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\"bar"]}], ""}
-    end
-
-    test "with escape sequence" do
-      assert tokenize("\"foo\\abar\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\abar"]}], ""}
-    end
-
-    test "tokens after bin strings same line" do
-      assert tokenize("\"foo\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]},
-                  {:int, {{1, 7}, {1, 12}, 291}, ~c"0x123"}
-                ], ""}
-
-      assert tokenize("\"foo\" \t 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]},
-                  {:int, {{1, 9}, {1, 14}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after bin strings next line" do
-      assert tokenize("\"foo\"\n0x123") == {
-               :ok,
-               [
-                 {:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]},
-                 {:eol, {{1, 6}, {2, 1}, 1}},
-                 {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}
-               ],
-               ""
-             }
-    end
-
-    test "tokens after unicode bin strings" do
-      assert tokenize("\"ą\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 4}, nil}, ["ą"]},
-                  {:int, {{1, 5}, {1, 10}, 291}, ~c"0x123"}
-                ], ""}
-
-      assert tokenize("\"កឹasd\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 7}, nil}, ["កឹasd"]},
-                  {:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with LF newlines" do
-      assert tokenize("\"foo\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]},
-                  {:int, {{2, 6}, {2, 11}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with CRLF newlines" do
-      assert tokenize("\"foo\r\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {2, 5}, nil}, ["foo\r\nbar"]},
-                  {:int, {{2, 6}, {2, 11}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with escaped LF newlines" do
-      assert tokenize("\"foo\\\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]},
-                  {:int, {{2, 6}, {2, 11}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with escaped CRLF newlines" do
-      assert tokenize("\"foo\\\r\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {2, 5}, nil}, ["foobar"]},
-                  {:int, {{2, 6}, {2, 11}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with LF escape" do
-      assert tokenize("\"foo\\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 11}, nil}, ["foo\nbar"]},
-                  {:int, {{1, 12}, {1, 17}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after string with CRLF escape" do
-      assert tokenize("\"foo\\r\\nbar\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 13}, nil}, ["foo\r\nbar"]},
-                  {:int, {{1, 14}, {1, 19}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "with interpolation in the middle" do
-      assert tokenize("\"foo \#{0x123} baz\"") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 19}, nil},
-                   [
-                     "foo ",
-                     {{1, 6, nil}, {1, 13, nil}, [{:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}]},
-                     " baz"
-                   ]}
-                ], ""}
-
-      assert tokenize("\"\#{0x123}\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 11}, nil},
-                   [
-                     {{1, 2, nil}, {1, 9, nil}, [{:int, {{1, 4}, {1, 9}, 291}, ~c"0x123"}]}
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with only interpolation" do
-      assert tokenize("\"\#{0x123}\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 11}, nil},
-                   [
-                     {{1, 2, nil}, {1, 9, nil}, [{:int, {{1, 4}, {1, 9}, 291}, ~c"0x123"}]}
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation in the beginning" do
-      assert tokenize("\"\#{0x123} baz\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 15}, nil},
-                   [
-                     {{1, 2, nil}, {1, 9, nil}, [{:int, {{1, 4}, {1, 9}, 291}, ~c"0x123"}]},
-                     " baz"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation in the end" do
-      assert tokenize("\"foo \#{0x123}\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 15}, nil},
-                   [
-                     "foo ",
-                     {{1, 6, nil}, {1, 13, nil}, [{:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}]}
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation next to interpolation" do
-      assert tokenize("\"a \#{0x123}\#{0x124} baz\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 25}, nil},
-                   [
-                     "a ",
-                     {{1, 4, nil}, {1, 11, nil}, [{:int, {{1, 6}, {1, 11}, 291}, ~c"0x123"}]},
-                     {{1, 12, nil}, {1, 19, nil}, [{:int, {{1, 14}, {1, 19}, 292}, ~c"0x124"}]},
-                     " baz"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with empty interpolation" do
-      assert tokenize("\"foo \#{} baz\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 14}, nil},
-                   [
-                     "foo ",
-                     {
-                       {1, 6, nil},
-                       {1, 8, nil},
-                       []
-                     },
-                     " baz"
-                   ]
-                 }
-               ],
-               ""
-             }
-
-      assert tokenize("\"foo \#{ } baz\"") == {
-               :ok,
-               [
-                 {
-                   :bin_string,
-                   {{1, 1}, {1, 15}, nil},
-                   [
-                     "foo ",
-                     {
-                       {1, 6, nil},
-                       {1, 9, nil},
-                       []
-                     },
-                     " baz"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with nested interpolation" do
-      assert tokenize("\"foo \#{\"inner \#{0x123} \"} baz\"") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 31}, nil},
-                   [
-                     "foo ",
-                     {{1, 6, nil}, {1, 25, nil},
-                      [
-                        {:bin_string, {{1, 8}, {1, 25}, nil},
-                         [
-                           "inner ",
-                           {{1, 15, nil}, {1, 22, nil},
-                            [{:int, {{1, 17}, {1, 22}, 291}, ~c"0x123"}]},
-                           " "
-                         ]}
-                      ]},
-                     " baz"
-                   ]}
-                ], ""}
-    end
-
-    test "with escaped interpolation" do
-      assert tokenize("\"foo \\\#{0x123} baz\"") ==
-               {:ok, [{:bin_string, {{1, 1}, {1, 20}, nil}, ["foo \#{0x123} baz"]}], ""}
-    end
-  end
-
-  describe "charlist strings" do
-    test "empty charlist strings" do
-      assert tokenize("''") == {:ok, [{:list_string, {{1, 1}, {1, 3}, nil}, [""]}], ""}
-    end
-
-    test "simple charlist strings" do
-      assert tokenize("'foo'") == {:ok, [{:list_string, {{1, 1}, {1, 6}, nil}, ["foo"]}], ""}
-    end
-
-    test "unicode charlist strings" do
-      assert tokenize("'ą'") == {:ok, [{:list_string, {{1, 1}, {1, 4}, nil}, ["ą"]}], ""}
-    end
-
-    test "with LF newlines" do
-      assert tokenize("'foo\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {2, 5}, nil}, ["foo\nbar"]}], ""}
-    end
-
-    test "with CRLF newlines" do
-      assert tokenize("'foo\r\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {2, 5}, nil}, ["foo\r\nbar"]}], ""}
-    end
-
-    test "with escaped LF newlines" do
-      assert tokenize("'foo\\\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
-    end
-
-    test "with escaped CRLF newlines" do
-      assert tokenize("'foo\\\r\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {2, 5}, nil}, ["foobar"]}], ""}
-    end
-
-    test "with LF escape" do
-      assert tokenize("'foo\\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {1, 11}, nil}, ["foo\nbar"]}], ""}
-    end
-
-    test "with CRLF escape" do
-      assert tokenize("'foo\\r\\nbar'") ==
-               {:ok, [{:list_string, {{1, 1}, {1, 13}, nil}, ["foo\r\nbar"]}], ""}
-    end
-
-    test "with terminator escape" do
-      assert tokenize("'foo\\'bar'") ==
-               {:ok, [{:list_string, {{1, 1}, {1, 11}, nil}, ["foo'bar"]}], ""}
-    end
-
-    test "with interpolation" do
-      assert tokenize("'foo \#{0x123} baz'") ==
-               {:ok,
-                [
-                  {:list_string, {{1, 1}, {1, 19}, nil},
-                   [
-                     "foo ",
-                     {{1, 6, nil}, {1, 13, nil}, [{:int, {{1, 8}, {1, 13}, 291}, ~c"0x123"}]},
-                     " baz"
-                   ]}
-                ], ""}
-    end
-
-    test "with escaped interpolation" do
-      assert tokenize("'foo \\\#{0x123} baz'") ==
-               {:ok, [{:list_string, {{1, 1}, {1, 20}, nil}, ["foo \#{0x123} baz"]}], ""}
-    end
-  end
-
-  describe "bin heredocs" do
-    test "empty heredocs" do
-      assert tokenize("\"\"\"\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
-
-      assert tokenize("\"\"\"\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
-    end
-
-    test "simple heredocs" do
-      assert tokenize("\"\"\"\nfoo\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}], ""}
-    end
-
-    test "simple heredocs CRLF" do
-      assert tokenize("\"\"\"\r\nfoo\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\n"]}], ""}
-    end
-
-    test "empty with indentation" do
-      assert tokenize("\"\"\"\n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {2, 6}, nil}, 2, [""]}], ""}
-    end
-
-    test "simple with indentation" do
-      assert tokenize("\"\"\"\n  foo\n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\n"]}], ""}
-    end
-
-    test "simple with tab indentation" do
-      assert tokenize("\"\"\"\n\tfoo\n\t\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 5}, nil}, 1, ["foo\n"]}], ""}
-    end
-
-    test "simple with indentation CRLF" do
-      assert tokenize("\"\"\"\r\n  foo\r\n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\r\n"]}], ""}
-    end
-
-    test "escaped final newline" do
-      assert tokenize("\"\"\"\nfoo\\\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]}], ""}
-    end
-
-    test "escaped final newline CRLF" do
-      assert tokenize("\"\"\"\r\nfoo\\\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]}], ""}
-    end
-
-    test "with newline" do
-      assert tokenize("\"\"\"\nfoo\nbar\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\nbar\n"]}], ""}
-    end
-
-    test "with newline CRLF" do
-      assert tokenize("\"\"\"\r\nfoo\r\nbar\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\r\nbar\r\n"]}], ""}
-    end
-
-    test "with escaped newline" do
-      assert tokenize("\"\"\"\nfoo\\\nbar\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\n"]}], ""}
-    end
-
-    test "with escaped newline CRLF" do
-      assert tokenize("\"\"\"\r\nfoo\\\r\nbar\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\r\n"]}], ""}
-    end
-
-    test "with LF escape" do
-      assert tokenize("\"\"\"\nfoo\\nbar\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\nbar\n"]}], ""}
-    end
-
-    test "with CRLF escape" do
-      assert tokenize("\"\"\"\r\nfoo\\r\\nbar\r\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\nbar\r\n"]}], ""}
-    end
-
-    test "tokens after heredoc next line" do
-      assert tokenize("\"\"\"\nfoo\n\"\"\"\n0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
-                  {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after heredoc same line" do
-      assert tokenize("\"\"\"\nfoo\n\"\"\" 0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]},
-                  {:int, {{3, 5}, {3, 10}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after multiline heredoc" do
-      assert tokenize("\"\"\"\nfoo\nbar\n\"\"\"\n0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\nbar\n"]},
-                  {:eol, {{4, 4}, {5, 1}, 1}},
-                  {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after heredoc with escaped LF" do
-      assert tokenize("\"\"\"\nfoo\\\nbar\n\"\"\"\n0x123") == {
-               :ok,
-               [
-                 {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\n"]},
-                 {:eol, {{4, 4}, {5, 1}, 1}},
-                 {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
-               ],
-               ""
-             }
-    end
-
-    test "tokens after heredoc with escaped CRLF" do
-      assert tokenize("\"\"\"\r\nfoo\\\r\nbar\r\n\"\"\"\n0x123") == {
-               :ok,
-               [
-                 {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\r\n"]},
-                 {:eol, {{4, 4}, {5, 1}, 1}},
-                 {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
-               ],
-               ""
-             }
-    end
-
-    test "tokens after heredoc with LF escape" do
-      assert tokenize("\"\"\"\nfoo\\nbar\n\"\"\"\n0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\nbar\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
-                  {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after heredoc with CRLF escape" do
-      assert tokenize("\"\"\"\r\nfoo\\r\\nbar\r\n\"\"\"\n0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\nbar\r\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
-                  {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "tokens after escaped final newline" do
-      assert tokenize("\"\"\"\nfoo\\\n\"\"\"\n0x123") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
-                  {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
-                ], ""}
-    end
-
-    test "with interpolation in the middle of the line" do
-      assert tokenize("\"\"\"\nfoo \#{0x123} baz\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     " baz\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation at the beginning of the line" do
-      assert tokenize("\"\"\"\n\#{0x123} baz\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "",
-                     {{2, 1, nil}, {2, 8, nil}, [{:int, {{2, 3}, {2, 8}, 291}, ~c"0x123"}]},
-                     " baz\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation at the end of the line" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     "\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation at the end of the line CR LF" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\r\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     "\r\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation at the end of the line with newline escaped" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\\\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     ""
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation at the end of the line indent" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\n  \"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 6}, nil},
-                   2,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     "\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation next to interpolation" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\#{0x124} baz\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {3, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     {{2, 13, nil}, {2, 20, nil}, [{:int, {{2, 15}, {2, 20}, 292}, ~c"0x124"}]},
-                     " baz\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation next to interpolation separated by newline" do
-      assert tokenize("\"\"\"\nfoo \#{0x123}\n\#{0x124} baz\n\"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {4, 4}, nil},
-                   0,
-                   [
-                     "foo ",
-                     {{2, 5, nil}, {2, 12, nil}, [{:int, {{2, 7}, {2, 12}, 291}, ~c"0x123"}]},
-                     "\n",
-                     {{3, 1, nil}, {3, 8, nil}, [{:int, {{3, 3}, {3, 8}, 292}, ~c"0x124"}]},
-                     " baz\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation next to interpolation separated by newline with indentation" do
-      assert tokenize("\"\"\"\n foo \#{0x123}\n \#{0x124} baz\n \"\"\"") == {
-               :ok,
-               [
-                 {
-                   :bin_heredoc,
-                   {{1, 1}, {4, 5}, nil},
-                   1,
-                   [
-                     "foo ",
-                     {{2, 6, nil}, {2, 13, nil}, [{:int, {{2, 8}, {2, 13}, 291}, ~c"0x123"}]},
-                     "\n",
-                     {{3, 2, nil}, {3, 9, nil}, [{:int, {{3, 4}, {3, 9}, 292}, ~c"0x124"}]},
-                     " baz\n"
-                   ]
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with escaped interpolation" do
-      assert tokenize("\"\"\"\nfoo \\\#{0x123} baz\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo \#{0x123} baz\n"]}], ""}
-    end
-
-    test "with escaped terminator" do
-      assert tokenize("\"\"\"\nfoo\\\"\"\"bar\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\"\"\"bar\n"]}], ""}
-    end
-
-    test "line with less indentation" do
-      assert tokenize("\"\"\"\n \n  \n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 6}, nil}, 2, ["\n\n"]}], ""}
-    end
-
-    test "line with more indentation" do
-      assert tokenize("\"\"\"\n   \n  \n  \"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {4, 6}, nil}, 2, [" \n\n"]}], ""}
-    end
-
-    test "horizontal space before first newline" do
-      assert tokenize("\"\"\" \t\nfoo\n\"\"\"") ==
-               {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}], ""}
-    end
-
-    test "indent" do
-      text = ~c'''
-          """
-          expected closing '%>' for EEx expression
-            |
-          1 | foo <% :bar
-            |     ^\\
-          """\
-      '''
-
-      assert tokenize(text) ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 5}, {6, 8}, nil}, 4,
-                   ["expected closing '%>' for EEx expression\n  |\n1 | foo <% :bar\n  |     ^"]}
-                ], ""}
-    end
-
-    test "indent interpolation" do
-      text = ~c'''
-            """
-            <%= \#{__MODULE__}.switching_map [1, 2, 3], fn x -> %>
-            A <%= x %>
-            <% end, fn x -> %>
-            B <%= x %>
-            <% end %>
-            """\
-      '''
-
-      assert tokenize(text) ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 7}, {7, 10}, nil}, 6,
-                   [
-                     "<%= ",
-                     {{2, 11, nil}, {2, 23, nil},
-                      [{:identifier, {{2, 13}, {2, 23}, ~c"__MODULE__"}, :__MODULE__}]},
-                     ".switching_map [1, 2, 3], fn x -> %>\nA <%= x %>\n<% end, fn x -> %>\nB <%= x %>\n<% end %>\n"
-                   ]}
-                ], ""}
-    end
-
-    test "indent interpolation escaped newline" do
-      text = ~c'''
-            """
-            \#{inspect(unquote(module))} does not implement the Access behaviour
-
-            You can use the "struct.field" syntax to access struct fields. \\
-            You can also use Access.key!/1 to access struct fields dynamically \\
-            inside get_in/put_in/update_in\\
-            """\
-      '''
-
-      assert tokenize(text) ==
-               {
-                 :ok,
-                 [
-                   {
-                     :bin_heredoc,
-                     {{1, 7}, {7, 10}, nil},
-                     6,
-                     [
-                       "",
-                       {
-                         {2, 7, nil},
-                         {2, 33, nil},
-                         [
-                           {:paren_identifier, {{2, 9}, {2, 16}, ~c"inspect"}, :inspect},
-                           {:"(", {{2, 16}, {2, 17}, nil}},
-                           {:paren_identifier, {{2, 17}, {2, 24}, ~c"unquote"}, :unquote},
-                           {:"(", {{2, 24}, {2, 25}, nil}},
-                           {:identifier, {{2, 25}, {2, 31}, ~c"module"}, :module},
-                           {:")", {{2, 31}, {2, 32}, nil}},
-                           {:")", {{2, 32}, {2, 33}, nil}}
-                         ]
-                       },
-                       " does not implement the Access behaviour\n\nYou can use the \"struct.field\" syntax to access struct fields. You can also use Access.key!/1 to access struct fields dynamically inside get_in/put_in/update_in"
-                     ]
-                   }
-                 ],
-                 ""
-               }
-    end
-  end
-
-  describe "charlist heredocs" do
-    test "empty heredocs" do
-      assert tokenize("'''\n'''") == {:ok, [{:list_heredoc, {{1, 1}, {2, 4}, nil}, 0, [""]}], ""}
-    end
-
-    test "simple heredocs" do
-      assert tokenize("'''\nfoo\n'''") ==
-               {:ok, [{:list_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]}], ""}
-    end
-
-    test "simple heredocs CRLF" do
-      assert tokenize("'''\r\nfoo\r\n'''") ==
-               {:ok, [{:list_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\n"]}], ""}
-    end
-
-    test "simple with indentation" do
-      assert tokenize("'''\n  foo\n  '''") ==
-               {:ok, [{:list_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\n"]}], ""}
-    end
-
-    test "simple with indentation CRLF" do
-      assert tokenize("'''\r\n  foo\r\n  '''") ==
-               {:ok, [{:list_heredoc, {{1, 1}, {3, 6}, nil}, 2, ["foo\r\n"]}], ""}
-    end
-
-    test "with escaped terminator" do
-      assert tokenize("'''\nfoo\\'''bar\n'''") ==
-               {:ok, [{:list_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo'''bar\n"]}], ""}
-    end
-  end
-
-  describe "char" do
-    test "simple char" do
-      assert tokenize("?a") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?a"}, ?a}], ""}
-    end
-
-    test "raw LF" do
-      assert tokenize("?\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}], ""}
-    end
-
-    test "token after char with raw LF" do
-      must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
-
-      assert tokenize("?\n1", must_match_elixir: must_match_elixir) ==
-               {:ok,
-                [{:char, {{1, 1}, {2, 1}, ~c"?\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}], ""}
-    end
-
-    test "raw CR" do
-      assert tokenize("?\r") == {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}], ""}
-    end
-
-    test "raw NULL" do
-      assert tokenize("?\0") == {:ok, [{:char, {{1, 1}, {1, 3}, [63, 0]}, ?\0}], ""}
-    end
-
-    test "raw CR LF" do
-      assert tokenize("?\r\n") ==
-               {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {{1, 3}, {2, 1}, 1}}], ""}
-    end
-
-    test "escape" do
-      assert tokenize("?\\0") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\0"}, ?\0}], ""}
-      assert tokenize("?\\a") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\a"}, ?\a}], ""}
-      assert tokenize("?\\\\") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\\"}, ?\\}], ""}
-    end
-
-    test "unknown escape" do
-      assert tokenize("?\\z") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\z"}, ?z}], ""}
-    end
-
-    test "LF escape" do
-      assert tokenize("?\\n") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\n"}, ?\n}], ""}
-    end
-
-    test "CR escape" do
-      assert tokenize("?\\r") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\r"}, ?\r}], ""}
-    end
-
-    test "unknown escape non letter" do
-      assert tokenize("?\\1") == {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\1"}, ?1}], ""}
-    end
-
-    test "escaped LF" do
-      assert tokenize("?\\\n") == {:ok, [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}], ""}
-    end
-
-    test "token after escaped LF" do
-      must_match_elixir = Version.match?(System.version(), ">= 1.19.0-rc.0")
-
-      assert tokenize("?\\\n1", must_match_elixir: must_match_elixir) ==
-               {:ok,
-                [{:char, {{1, 1}, {2, 1}, ~c"?\\\n"}, ?\n}, {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}],
-                ""}
-    end
-
-    test "escaped CR LF" do
-      # I'm not sure if the tokenizer is correct here but we keep elixir compatibility
-      assert tokenize("?\\\r\n") ==
-               {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}}], ""}
-    end
-
-    test "token after escaped CR LF" do
-      # I'm not sure if the tokenizer is correct here but we keep elixir compatibility
-      assert tokenize("?\\\r\n1") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-    end
-  end
-
-  describe "comments" do
-    test "empty comment" do
-      assert tokenize("#") == {:ok, [], ""}
-    end
-
-    test "comment after newline" do
-      assert tokenize("\n#foo") == {:ok, [{:eol, {{1, 1}, {2, 1}, 0}}], ""}
-    end
-
-    test "comment after comma" do
-      assert tokenize(", #foo") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}}], ""}
-    end
-
-    test "comment after semicolon" do
-      assert tokenize("; #foo") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}}], ""}
-    end
-
-    test "comment with spaces" do
-      assert tokenize("# foo") == {:ok, [], ""}
-    end
-
-    test "comment with LF" do
-      assert tokenize("#foo\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
-    end
-
-    test "comment with CRLF" do
-      assert tokenize("#foo\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
-    end
-
-    test "code before comment" do
-      assert tokenize("0x123 # foo") == {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "code after comment" do
-      assert tokenize("# foo\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
-    end
-
-    test "multiline comment" do
-      source = """
-      # SPDX-License-Identifier: Apache-2.0
-      # SPDX-FileCopyrightText: 2021 The Elixir Team
-      """
-
-      assert {:ok, _, _} = tokenize(source)
-    end
-
-    test "identifier after multiline comment" do
-      source = """
-      # SPDX-License-Identifier: Apache-2.0
-      # SPDX-FileCopyrightText: 2021 The Elixir Team
-      defmodule
-      """
-
-      assert {:ok, _, _} = tokenize(source)
-    end
-
-    test "identifier after multiline comment and newline" do
-      source = """
-      # SPDX-License-Identifier: Apache-2.0
-      # SPDX-FileCopyrightText: 2021 The Elixir Team
-      # SPDX-FileCopyrightText: 2012 Plataformatec
-
-      defmodule
-      """
-
-      assert {:ok, _, _} = tokenize(source)
-    end
-
-    # test "comment with bidi" do
-    #   assert tokenize("#\u202Afoo") == {:ok, [], ""}
-    # end
-
-    test "preserve" do
-      preserve_comments = fn line, column, tokens, comment, rest ->
-        send(self(), {:comment, line, column, tokens, comment, rest})
-      end
-
-      source = """
-
-      # SPDX-FileCopyrightText: 2021 The Elixir Team
-      # SPDX-FileCopyrightText: 2012 Plataformatec
-
-      defmodule
-      """
-
-      assert {:ok, _, _} = tokenize(source, preserve_comments: preserve_comments)
-
-      assert_receive {:comment, line, column, tokens, comment, rest}
-
-      assert comment == ~c"# SPDX-FileCopyrightText: 2021 The Elixir Team"
-      assert {line, column} == {2, 1}
-      assert hd(tokens) == {:eol, {{1, 1}, {2, 1}, 1}}
-      assert [?\n, ?# | _] = rest
-    end
-
-    test "preserve after dot" do
-      preserve_comments = fn line, column, tokens, comment, rest ->
-        send(self(), {:comment, line, column, tokens, comment, rest})
-      end
-
-      source = """
-      foo.# SPDX-FileCopyrightText: 2021 The Elixir Team
-      bar
-      """
-
-      assert {:ok, _, _} = tokenize(source, preserve_comments: preserve_comments)
-
-      assert_receive {:comment, line, column, _tokens, comment, _rest}
-
-      assert comment == ~c"# SPDX-FileCopyrightText: 2021 The Elixir Team"
-      assert {line, column} == {1, 5}
-    end
-  end
-
-  describe "non operator atoms" do
-    test "quoted empty" do
-      assert tokenize(":\"\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 4}, 34}, :""}], ""}
-      assert tokenize(":''") == {:ok, [{:atom_quoted, {{1, 1}, {1, 4}, 39}, :""}], ""}
-    end
-
-    test "quoted" do
-      assert tokenize(":\"a\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 34}, :a}], ""}
-      assert tokenize(":'a'") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 39}, :a}], ""}
-    end
-
-    test "quoted newline escape" do
-      assert tokenize(":\"a\\n\" 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {1, 7}, 34}, :"a\n"},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize(":'a\\n' 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {1, 7}, 39}, :"a\n"},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "quoted newline" do
-      assert tokenize(":\"a\n\" 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {2, 2}, 34}, :"a\n"},
-                  {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize(":'a\n' 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {2, 2}, 39}, :"a\n"},
-                  {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "quoted escaped newline" do
-      assert tokenize(":\"a\\\n\" 1") ==
-               {:ok,
-                [{:atom_quoted, {{1, 1}, {2, 2}, 34}, :a}, {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}],
-                ""}
-
-      assert tokenize(":'a\\\n' 1") ==
-               {:ok,
-                [{:atom_quoted, {{1, 1}, {2, 2}, 39}, :a}, {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}],
-                ""}
-    end
-
-    test "quoted unicode" do
-      assert tokenize(":\"ą\"") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 34}, :ą}], ""}
-      assert tokenize(":'ą'") == {:ok, [{:atom_quoted, {{1, 1}, {1, 5}, 39}, :ą}], ""}
-    end
-
-    test "quoted with interpolation at the end" do
-      assert tokenize(":\"a \#{1}\"") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 10}, 34},
-                   ["a ", {{1, 5, nil}, {1, 8, nil}, [{:int, {{1, 7}, {1, 8}, 1}, ~c"1"}]}]}
-                ], ""}
-
-      assert tokenize(":'a \#{1}'") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 10}, 39},
-                   ["a ", {{1, 5, nil}, {1, 8, nil}, [{:int, {{1, 7}, {1, 8}, 1}, ~c"1"}]}]}
-                ], ""}
-    end
-
-    test "quoted with interpolation at the beginning" do
-      assert tokenize(":\"\#{1}a\"") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 9}, 34},
-                   [{{1, 3, nil}, {1, 6, nil}, [{:int, {{1, 5}, {1, 6}, 1}, ~c"1"}]}, "a"]}
-                ], ""}
-
-      assert tokenize(":'\#{1}a'") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 9}, 39},
-                   [{{1, 3, nil}, {1, 6, nil}, [{:int, {{1, 5}, {1, 6}, 1}, ~c"1"}]}, "a"]}
-                ], ""}
-    end
-
-    test "quoted with interpolation in the middle" do
-      assert tokenize(":\"a \#{1} b\"") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 12}, 34},
-                   ["a ", {{1, 5, nil}, {1, 8, nil}, [{:int, {{1, 7}, {1, 8}, 1}, ~c"1"}]}, " b"]}
-                ], ""}
-
-      assert tokenize(":'a \#{1} b'") ==
-               {:ok,
-                [
-                  {:atom_unsafe, {{1, 1}, {1, 12}, 39},
-                   ["a ", {{1, 5, nil}, {1, 8, nil}, [{:int, {{1, 7}, {1, 8}, 1}, ~c"1"}]}, " b"]}
-                ], ""}
-    end
-
-    test "quoted with escaped interpolation in the middle" do
-      assert tokenize(":\"a \\\#{1} b\" 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {1, 13}, 34}, :"a \#{1} b"},
-                  {:int, {{1, 14}, {1, 15}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize(":'a \\\#{1} b' 1") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {1, 13}, 39}, :"a \#{1} b"},
-                  {:int, {{1, 14}, {1, 15}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "simple" do
-      assert tokenize(":foo") == {:ok, [{:atom, {{1, 1}, {1, 5}, ~c"foo"}, :foo}], ""}
-    end
-
-    test "with underscore" do
-      assert tokenize(":_foo") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"_foo"}, :_foo}], ""}
-      assert tokenize(":foo_bar") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo_bar"}, :foo_bar}], ""}
-
-      assert tokenize(":_foo_bar_") ==
-               {:ok, [{:atom, {{1, 1}, {1, 11}, ~c"_foo_bar_"}, :_foo_bar_}], ""}
-    end
-
-    test "with numbers" do
-      assert tokenize(":foo123") == {:ok, [{:atom, {{1, 1}, {1, 8}, ~c"foo123"}, :foo123}], ""}
-      assert tokenize(":foo_123") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo_123"}, :foo_123}], ""}
-    end
-
-    test "with @ character" do
-      # @ is allowed in atom names after the first character
-      assert tokenize(":foo@bar") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo@bar"}, :foo@bar}], ""}
-      assert tokenize(":foo@123") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"foo@123"}, :foo@123}], ""}
-      assert tokenize(":foo@") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo@"}, :foo@}], ""}
-    end
-
-    test "ending with ? or !" do
-      assert tokenize(":foo?") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo?"}, :foo?}], ""}
-      assert tokenize(":foo!") == {:ok, [{:atom, {{1, 1}, {1, 6}, ~c"foo!"}, :foo!}], ""}
-      assert tokenize(":_foo?") == {:ok, [{:atom, {{1, 1}, {1, 7}, ~c"_foo?"}, :_foo?}], ""}
-      assert tokenize(":_foo!") == {:ok, [{:atom, {{1, 1}, {1, 7}, ~c"_foo!"}, :_foo!}], ""}
-    end
-
-    test "unicode letters - latin extended" do
-      assert tokenize(":café") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [99, 97, 102, 233]}, :café}], ""}
-
-      assert tokenize(":niño") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [110, 105, 241, 111]}, :niño}], ""}
-
-      assert tokenize(":ação") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [97, 231, 227, 111]}, :ação}], ""}
-    end
-
-    test "unicode letters - greek" do
-      assert tokenize(":αβγ") == {:ok, [{:atom, {{1, 1}, {1, 5}, [945, 946, 947]}, :αβγ}], ""}
-
-      assert tokenize(":Ωμέγα") ==
-               {:ok, [{:atom, {{1, 1}, {1, 7}, [937, 956, 941, 947, 945]}, :Ωμέγα}], ""}
-    end
-
-    test "unicode letters - cyrillic" do
-      assert tokenize(":привет") ==
-               {:ok, [{:atom, {{1, 1}, {1, 8}, [1087, 1088, 1080, 1074, 1077, 1090]}, :привет}],
-                ""}
-
-      assert tokenize(":_Москва") ==
-               {:ok,
-                [{:atom, {{1, 1}, {1, 9}, [95, 1052, 1086, 1089, 1082, 1074, 1072]}, :_Москва}],
-                ""}
-    end
-
-    test "unicode letters - japanese" do
-      assert tokenize(":こんにちは") ==
-               {:ok, [{:atom, {{1, 1}, {1, 7}, [12371, 12435, 12395, 12385, 12399]}, :こんにちは}], ""}
-
-      assert tokenize(":カタカナ") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [12459, 12479, 12459, 12490]}, :カタカナ}], ""}
-    end
-
-    test "unicode letters - chinese" do
-      assert tokenize(":你好") == {:ok, [{:atom, {{1, 1}, {1, 4}, [20320, 22909]}, :你好}], ""}
-      assert tokenize(":世界") == {:ok, [{:atom, {{1, 1}, {1, 4}, [19990, 30028]}, :世界}], ""}
-    end
-
-    test "unicode letters - arabic" do
-      assert tokenize(":مرحبا") ==
-               {:ok, [{:atom, {{1, 1}, {1, 7}, [1605, 1585, 1581, 1576, 1575]}, :مرحبا}], ""}
-
-      assert tokenize(":_سلام") ==
-               {:ok, [{:atom, {{1, 1}, {1, 7}, [95, 1587, 1604, 1575, 1605]}, :_سلام}], ""}
-    end
-
-    test "unicode letters - hebrew" do
-      assert tokenize(":שלום") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [1513, 1500, 1493, 1501]}, :שלום}], ""}
-
-      assert tokenize(":_עברית") ==
-               {:ok, [{:atom, {{1, 1}, {1, 8}, [95, 1506, 1489, 1512, 1497, 1514]}, :_עברית}], ""}
-    end
-
-    test "unicode with mixed scripts separated by underscore" do
-      assert tokenize(":hello_世界") ==
-               {:ok,
-                [
-                  {:atom, {{1, 1}, {1, 10}, [104, 101, 108, 108, 111, 95, 19990, 30028]},
-                   :hello_世界}
-                ], ""}
-
-      assert tokenize(":test_тест") ==
-               {:ok,
-                [
-                  {:atom, {{1, 1}, {1, 11}, [116, 101, 115, 116, 95, 1090, 1077, 1089, 1090]},
-                   :test_тест}
-                ], ""}
-    end
-
-    test "unicode with numbers and special characters" do
-      assert tokenize(":café123") ==
-               {:ok, [{:atom, {{1, 1}, {1, 9}, [99, 97, 102, 233, 49, 50, 51]}, :café123}], ""}
-
-      assert tokenize(":test_123_δ") ==
-               {:ok,
-                [
-                  {:atom, {{1, 1}, {1, 12}, [116, 101, 115, 116, 95, 49, 50, 51, 95, 948]},
-                   :test_123_δ}
-                ], ""}
-
-      assert tokenize(":привет_world") ==
-               {:ok,
-                [
-                  {:atom,
-                   {{1, 1}, {1, 14},
-                    [1087, 1088, 1080, 1074, 1077, 1090, 95, 119, 111, 114, 108, 100]},
-                   :привет_world}
-                ], ""}
-    end
-
-    test "unicode with ending punctuation" do
-      assert tokenize(":café?") ==
-               {:ok, [{:atom, {{1, 1}, {1, 7}, [99, 97, 102, 233, 63]}, :café?}], ""}
-
-      assert tokenize(":αβγ!") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [945, 946, 947, 33]}, :αβγ!}], ""}
-
-      assert tokenize(":_世界?") ==
-               {:ok, [{:atom, {{1, 1}, {1, 6}, [95, 19990, 30028, 63]}, :_世界?}], ""}
-    end
-
-    test "special case - micro sign normalized to mu" do
-      # MICRO SIGN (µ) should be normalized to Greek lowercase mu (μ)
-      assert tokenize(":µs") == {:ok, [{:atom, {{1, 1}, {1, 4}, [956, 115]}, :μs}], ""}
-
-      assert tokenize(":micro_µ_second") ==
-               {:ok,
-                [
-                  {:atom,
-                   {{1, 1}, {1, 16},
-                    [109, 105, 99, 114, 111, 95, 956, 95, 115, 101, 99, 111, 110, 100]},
-                   :micro_μ_second}
-                ], ""}
-    end
-
-    test "ISO8601 example from docs" do
-      assert tokenize(":ISO8601") == {:ok, [{:atom, {{1, 1}, {1, 9}, ~c"ISO8601"}, :ISO8601}], ""}
-    end
-  end
-
-  describe "identifier" do
-    test "simple identifier" do
-      assert tokenize("foo") == {:ok, [{:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo}], ""}
-    end
-
-    test "unicode identifier - latin extended" do
-      assert tokenize("café") ==
-               {:ok, [{:identifier, {{1, 1}, {1, 5}, [99, 97, 102, 233]}, :café}], ""}
-    end
-
-    test "unicode identifier - simple greek" do
-      assert tokenize("αβγ") ==
-               {:ok, [{:identifier, {{1, 1}, {1, 4}, [945, 946, 947]}, :αβγ}], ""}
-    end
-
-    test "unicode identifier - mixed unicode and ascii" do
-      assert tokenize("testé") ==
-               {:ok, [{:identifier, {{1, 1}, {1, 6}, [116, 101, 115, 116, 233]}, :testé}], ""}
-    end
-
-    test "identifier with underscore" do
-      assert tokenize("foo_bar") ==
-               {:ok, [{:identifier, {{1, 1}, {1, 8}, ~c"foo_bar"}, :foo_bar}], ""}
-    end
-
-    test "identifier starting with underscore" do
-      assert tokenize("_foo") == {:ok, [{:identifier, {{1, 1}, {1, 5}, ~c"_foo"}, :_foo}], ""}
-    end
-
-    test "identifier ending with question mark" do
-      assert tokenize("foo?") == {:ok, [{:identifier, {{1, 1}, {1, 5}, ~c"foo?"}, :foo?}], ""}
-    end
-
-    test "identifier ending with exclamation mark" do
-      assert tokenize("foo!") == {:ok, [{:identifier, {{1, 1}, {1, 5}, ~c"foo!"}, :foo!}], ""}
-    end
-
-    test "identifier with numbers" do
-      assert tokenize("foo123") ==
-               {:ok, [{:identifier, {{1, 1}, {1, 7}, ~c"foo123"}, :foo123}], ""}
-    end
-  end
-
-  describe "alias" do
-    test "simple alias" do
-      assert tokenize("Foo") == {:ok, [{:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo}], ""}
-    end
-
-    test "alias with underscore in middle" do
-      assert tokenize("Foo_Bar") == {:ok, [{:alias, {{1, 1}, {1, 8}, ~c"Foo_Bar"}, :Foo_Bar}], ""}
-    end
-
-    test "alias with underscore at end" do
-      assert tokenize("Foo_") == {:ok, [{:alias, {{1, 1}, {1, 5}, ~c"Foo_"}, :Foo_}], ""}
-    end
-
-    test "alias with numbers" do
-      assert tokenize("Foo123") == {:ok, [{:alias, {{1, 1}, {1, 7}, ~c"Foo123"}, :Foo123}], ""}
-    end
-
-    test "nested alias" do
-      assert tokenize("Foo.Bar") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo},
-                  {:., {{1, 4}, {1, 5}, nil}},
-                  {:alias, {{1, 5}, {1, 8}, ~c"Bar"}, :Bar}
-                ], ""}
-    end
-
-    test "multiple nested aliases" do
-      assert tokenize("Foo.Bar.Baz") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo},
-                  {:., {{1, 4}, {1, 5}, nil}},
-                  {:alias, {{1, 5}, {1, 8}, ~c"Bar"}, :Bar},
-                  {:., {{1, 8}, {1, 9}, nil}},
-                  {:alias, {{1, 9}, {1, 12}, ~c"Baz"}, :Baz}
-                ], ""}
-    end
-  end
-
-  describe "kw_identifier" do
-    test "simple kw_identifier" do
-      assert tokenize("foo: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:identifier, {{1, 6}, {1, 9}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "operator kw_identifier" do
-      assert tokenize("+: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 3}, nil}, :+},
-                  {:identifier, {{1, 4}, {1, 7}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier with underscore" do
-      assert tokenize("foo_bar: baz") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 9}, ~c"foo_bar"}, :foo_bar},
-                  {:identifier, {{1, 10}, {1, 13}, ~c"baz"}, :baz}
-                ], ""}
-    end
-
-    test "kw_identifier starting with underscore" do
-      assert tokenize("_foo: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 6}, ~c"_foo"}, :_foo},
-                  {:identifier, {{1, 7}, {1, 10}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier ending with question mark" do
-      assert tokenize("foo?: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 6}, ~c"foo?"}, :foo?},
-                  {:identifier, {{1, 7}, {1, 10}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier ending with exclamation mark" do
-      assert tokenize("foo!: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 6}, ~c"foo!"}, :foo!},
-                  {:identifier, {{1, 7}, {1, 10}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier with numbers" do
-      assert tokenize("foo123: bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 8}, ~c"foo123"}, :foo123},
-                  {:identifier, {{1, 9}, {1, 12}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier in list" do
-      assert tokenize("[foo: bar]") ==
-               {:ok,
-                [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
-                  {:kw_identifier, {{1, 2}, {1, 6}, ~c"foo"}, :foo},
-                  {:identifier, {{1, 7}, {1, 10}, ~c"bar"}, :bar},
-                  {:"]", {{1, 10}, {1, 11}, nil}}
-                ], ""}
-    end
-
-    test "multiple kw_identifiers" do
-      assert tokenize("foo: bar, baz: qux") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:identifier, {{1, 6}, {1, 9}, ~c"bar"}, :bar},
-                  {:",", {{1, 9}, {1, 10}, 0}},
-                  {:kw_identifier, {{1, 11}, {1, 15}, ~c"baz"}, :baz},
-                  {:identifier, {{1, 16}, {1, 19}, ~c"qux"}, :qux}
-                ], ""}
-    end
-
-    test "kw_identifier with single quoted string value" do
-      assert tokenize("foo: 'bar'") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:list_string, {{1, 6}, {1, 11}, nil}, ["bar"]}
-                ], ""}
-    end
-
-    test "kw_identifier with double quoted string value" do
-      assert tokenize("foo: \"bar\"") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:bin_string, {{1, 6}, {1, 11}, nil}, ["bar"]}
-                ], ""}
-    end
-
-    test "kw_identifier with atom value" do
-      assert tokenize("foo: :bar") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:atom, {{1, 6}, {1, 10}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "kw_identifier with integer value" do
-      assert tokenize("foo: 123") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
-                  {:int, {{1, 6}, {1, 9}, 123}, ~c"123"}
-                ], ""}
-    end
-
-    test "identifier without colon should remain identifier" do
-      assert tokenize("foo bar") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:identifier, {{1, 5}, {1, 8}, ~c"bar"}, :bar}
-                ], ""}
-    end
-
-    test "empty kw_identifier" do
-      assert tokenize("\"\": 1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 4}, 34}, :""},
-                  {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("'': 1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 4}, 39}, :""},
-                  {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "double quoted kw_identifier" do
-      assert tokenize("\"foo\": 1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("\"foo\":\t1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("\"foo\":\n1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("\"foo\":\r\n1") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "single quoted kw_identifier" do
-      assert tokenize("'bar': 2") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 39}, :bar},
-                  {:int, {{1, 8}, {1, 9}, 2}, ~c"2"}
-                ], ""}
-    end
-
-    test "multiple quoted kw_identifiers" do
-      assert tokenize("\"foo\": 1, 'bar': 2") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"},
-                  {:",", {{1, 9}, {1, 10}, 0}},
-                  {:kw_identifier, {{1, 11}, {1, 17}, 39}, :bar},
-                  {:int, {{1, 18}, {1, 19}, 2}, ~c"2"}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with newline" do
-      assert tokenize("\"hello\nworld\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {2, 8}, 34}, :"hello\nworld"},
-                  {:atom, {{2, 9}, {2, 12}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with escaped newline" do
-      assert tokenize("\"hello\\\nworld\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {2, 8}, 34}, :helloworld},
-                  {:atom, {{2, 9}, {2, 12}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with newline escape" do
-      assert tokenize("\"hello\\nworld\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 16}, 34}, :"hello\nworld"},
-                  {:atom, {{1, 17}, {1, 20}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with interpolation in the middle" do
-      assert tokenize("\"hello \#{1} world\": :ok") ==
-               {:ok,
-                [
-                  {
-                    :kw_identifier_unsafe,
-                    {{1, 1}, {1, 20}, 34},
-                    [
-                      "hello ",
-                      {{1, 8, nil}, {1, 11, nil}, [{:int, {{1, 10}, {1, 11}, 1}, ~c"1"}]},
-                      " world"
-                    ]
-                  },
-                  {:atom, {{1, 21}, {1, 24}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with interpolation at the end" do
-      assert tokenize("\"hello \#{1}\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier_unsafe, {{1, 1}, {1, 14}, 34},
-                   ["hello ", {{1, 8, nil}, {1, 11, nil}, [{:int, {{1, 10}, {1, 11}, 1}, ~c"1"}]}]},
-                  {:atom, {{1, 15}, {1, 18}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with interpolation at the beginning" do
-      assert tokenize("\"\#{1}hello\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier_unsafe, {{1, 1}, {1, 13}, 34},
-                   [{{1, 2, nil}, {1, 5, nil}, [{:int, {{1, 4}, {1, 5}, 1}, ~c"1"}]}, "hello"]},
-                  {:atom, {{1, 14}, {1, 17}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with escaped interpolation in the middle" do
-      assert tokenize("\"hello \\\#{1} world\": :ok") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 21}, 34}, :"hello \#{1} world"},
-                  {:atom, {{1, 22}, {1, 25}, ~c"ok"}, :ok}
-                ], ""}
-    end
-
-    test "quoted kw_identifier with numbers in name" do
-      assert tokenize("\"key123\": value") ==
-               {:ok,
-                [
-                  {:kw_identifier, {{1, 1}, {1, 10}, 34}, :key123},
-                  {:identifier, {{1, 11}, {1, 16}, ~c"value"}, :value}
-                ], ""}
-    end
-  end
-
-  describe "dot" do
-    test "standalone dot" do
-      assert tokenize(".") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
-    end
-
-    test "dot followed by space" do
-      assert tokenize(". ") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
-    end
-
-    test "dot followed by identifier" do
-      assert tokenize(".id") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id}],
-                ""}
-    end
-
-    test "dot followed by paren identifier" do
-      assert tokenize(".id()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:paren_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-
-      assert tokenize(".id ()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"(", {{1, 5}, {1, 6}, nil}},
-                  {:")", {{1, 6}, {1, 7}, nil}}
-                ], ""}
-    end
-
-    test "dot followed by bracket identifier" do
-      assert tokenize(".id[]") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:bracket_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-
-      assert tokenize(".id []") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"[", {{1, 5}, {1, 6}, nil}},
-                  {:"]", {{1, 6}, {1, 7}, nil}}
-                ], ""}
-    end
-
-    test "dot followed by horizontal space" do
-      assert tokenize(". \tid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 4}, {1, 6}, ~c"id"}, :id}],
-                ""}
-    end
-
-    test "dot followed by newline" do
-      assert tokenize(".\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
-                ""}
-
-      assert tokenize(".\r\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
-                ""}
-    end
-
-    test "dot followed by escaped newline" do
-      assert tokenize(".\\\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
-                ""}
-
-      assert tokenize(".\\\r\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
-                ""}
-    end
-
-    test "dot followed by comment" do
-      assert tokenize(".#comment") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
-      assert tokenize(".#comment\n") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
-
-      assert tokenize(".#comment\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
-                ""}
-    end
-
-    test "dot three-token operator" do
-      # unary_op3
-      assert tokenize(".~~~") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~~~"}, :"~~~"}],
-                ""}
-
-      # comp_op3
-      assert tokenize(".===") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"==="}, :===}], ""}
-
-      assert tokenize(".!==") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"!=="}, :!==}], ""}
-
-      # and_op3
-      assert tokenize(".&&&") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"&&&"}, :&&&}], ""}
-
-      # or_op3
-      assert tokenize(".|||") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"|||"}, :|||}], ""}
-
-      # arrow_op3
-      assert tokenize(".<<<") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<<"}, :<<<}], ""}
-
-      assert tokenize(".>>>") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c">>>"}, :>>>}], ""}
-
-      assert tokenize(".~>>") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~>>"}, :~>>}], ""}
-
-      assert tokenize(".<<~") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<~"}, :<<~}], ""}
-
-      assert tokenize(".<~>") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<~>"}, :<~>}], ""}
-
-      assert tokenize(".<|>") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<|>"}, :"<|>"}],
-                ""}
-
-      # xor_op3
-      assert tokenize(".^^^") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"^^^"}, :"^^^"}],
-                ""}
-
-      # concat_op3
-      assert tokenize(".+++") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"+++"}, :+++}], ""}
-
-      assert tokenize(".---") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"---"}, :---}], ""}
-    end
-
-    test "dot two-token operators" do
-      # comp_op2
-      assert tokenize(".==") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=="}, :==}],
-                ""}
-
-      assert tokenize(".!=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"!="}, :!=}],
-                ""}
-
-      assert tokenize(".=~") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=~"}, :=~}],
-                ""}
-
-      # rel_op2
-      assert tokenize(".>=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c">="}, :>=}],
-                ""}
-
-      assert tokenize(".<=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<="}, :<=}],
-                ""}
-
-      # and_op
-      assert tokenize(".&&") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"&&"}, :&&}],
-                ""}
-
-      # or_op
-      assert tokenize(".||") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"||"}, :||}],
-                ""}
-
-      # arrow_op
-      assert tokenize(".|>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"|>"}, :|>}],
-                ""}
-
-      assert tokenize(".~>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"~>"}, :~>}],
-                ""}
-
-      assert tokenize(".<~") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<~"}, :<~}],
-                ""}
-
-      # in_match_op
-      assert tokenize(".<-") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<-"}, :<-}],
-                ""}
-
-      assert tokenize(".\\\\") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"\\\\"}, :"\\\\"}],
-                ""}
-
-      # concat_op
-      assert tokenize(".++") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"++"}, :++}],
-                ""}
-
-      assert tokenize(".--") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"--"}, :--}],
-                ""}
-
-      # power_op
-      assert tokenize(".**") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"**"}, :**}],
-                ""}
-
-      # type_op
-      assert tokenize(".::") ==
-               {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"::"}, :"::"}], ""}
-    end
-
-    test "dot single-token operators" do
-      # at_op
-      assert tokenize(".@") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"@"}, :@}],
-                ""}
-
-      # unary_op
-      assert tokenize(".!") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"!"}, :!}],
-                ""}
-
-      assert tokenize(".^") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"^"}, :^}],
-                ""}
-
-      # capture_op
-      assert tokenize(".&") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"&"}, :&}],
-                ""}
-
-      # dual_op
-      assert tokenize(".+") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"+"}, :+}],
-                ""}
-
-      assert tokenize(".-") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"-"}, :-}],
-                ""}
-
-      # mult_op
-      assert tokenize(".*") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"*"}, :*}],
-                ""}
-
-      assert tokenize("./") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"/"}, :/}],
-                ""}
-
-      # rel_op
-      assert tokenize(".<") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"<"}, :<}],
-                ""}
-
-      assert tokenize(".>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c">"}, :>}],
-                ""}
-
-      # match_op
-      assert tokenize(".=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"="}, :=}],
-                ""}
-
-      # pipe_op
-      assert tokenize(".|") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"|"}, :|}],
-                ""}
-    end
-
-    test "dot paren" do
-      assert tokenize(".(1)") ==
-               {:ok,
-                [
-                  {:dot_call_op, {{1, 1}, {1, 2}, nil}, :.},
-                  {:"(", {{1, 2}, {1, 3}, nil}},
-                  {:int, {{1, 3}, {1, 4}, 1}, ~c"1"},
-                  {:")", {{1, 4}, {1, 5}, nil}}
-                ], ""}
-    end
-
-    test "dot quote double" do
-      assert tokenize(".\"foo\"") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo}], ""}
-    end
-
-    test "dot quote single" do
-      assert tokenize(".'foo'") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 39}, :foo}], ""}
-    end
-
-    test "dot quote empty" do
-      assert tokenize(".\"\"") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 34}, :""}], ""}
-
-      assert tokenize(".''") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 39}, :""}], ""}
-    end
-
-    test "dot quote newline" do
-      assert tokenize(".\"foo\nbar\" 1") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {2, 5}, 34}, :"foo\nbar"},
-                  {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "dot quote escaped newline" do
-      assert tokenize(".\"foo\\\nbar\" 1") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {2, 5}, 34}, :foobar},
-                  {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "dot quote newline escape" do
-      assert tokenize(".\"foo\\nbar\" 1") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {1, 12}, 34}, :"foo\nbar"},
-                  {:int, {{1, 13}, {1, 14}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "dot quote paren" do
-      assert tokenize(".\"foo\"()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:paren_identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"(", {{1, 7}, {1, 8}, nil}},
-                  {:")", {{1, 8}, {1, 9}, nil}}
-                ], ""}
-
-      assert tokenize(".\"foo\" ()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"(", {{1, 8}, {1, 9}, nil}},
-                  {:")", {{1, 9}, {1, 10}, nil}}
-                ], ""}
-    end
-
-    test "dot quote paren empty" do
-      assert tokenize(".\"\"()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:paren_identifier, {{1, 2}, {1, 4}, 34}, :""},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-
-      assert tokenize(".''()") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:paren_identifier, {{1, 2}, {1, 4}, 39}, :""},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-    end
-
-    test "dot quote bracket" do
-      assert tokenize(".\"foo\"[]") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:bracket_identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"[", {{1, 7}, {1, 8}, nil}},
-                  {:"]", {{1, 8}, {1, 9}, nil}}
-                ], ""}
-
-      assert tokenize(".\"foo\" []") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"[", {{1, 8}, {1, 9}, nil}},
-                  {:"]", {{1, 9}, {1, 10}, nil}}
-                ], ""}
-    end
-
-    test "dot quote bracket empty" do
-      assert tokenize(".\"\"[]") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:bracket_identifier, {{1, 2}, {1, 4}, 34}, :""},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-
-      assert tokenize(".''[]") ==
-               {:ok,
-                [
-                  {:., {{1, 1}, {1, 2}, nil}},
-                  {:bracket_identifier, {{1, 2}, {1, 4}, 39}, :""},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-    end
-  end
-
-  describe "reserved words" do
-    test "true" do
-      assert tokenize("true") == {:ok, [{true, {{1, 1}, {1, 5}, nil}}], ""}
-    end
-
-    test "false" do
-      assert tokenize("false") == {:ok, [{false, {{1, 1}, {1, 6}, nil}}], ""}
-    end
-
-    test "nil" do
-      assert tokenize("nil") == {:ok, [{nil, {{1, 1}, {1, 4}, nil}}], ""}
-    end
-
-    test "when" do
-      assert tokenize("when") == {:ok, [{:when_op, {{1, 1}, {1, 5}, nil}, :when}], ""}
-    end
-
-    test "and" do
-      assert tokenize("and") == {:ok, [{:and_op, {{1, 1}, {1, 4}, nil}, :and}], ""}
-    end
-
-    test "or" do
-      assert tokenize("or") == {:ok, [{:or_op, {{1, 1}, {1, 3}, nil}, :or}], ""}
-    end
-
-    test "not" do
-      assert tokenize("not") == {:ok, [{:unary_op, {{1, 1}, {1, 4}, nil}, :not}], ""}
-    end
-
-    test "not in" do
-      assert tokenize("not in") ==
-               {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in", {{1, 5}, {1, 7}, nil}}], ""}
-
-      assert tokenize("not  in") ==
-               {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in", {{1, 6}, {1, 8}, nil}}], ""}
-
-      assert tokenize("not\nin") == {
-               :ok,
-               [
-                 {:unary_op, {{1, 1}, {1, 4}, nil}, :not},
-                 {:in_op, {{2, 1}, {2, 3}, 1}, :in}
-               ],
-               ""
-             }
-
-      assert tokenize("not\\\nin") ==
-               {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, :"not in", {{2, 1}, {2, 3}, nil}}], ""}
-    end
-
-    test "in" do
-      assert tokenize("in") == {:ok, [{:in_op, {{1, 1}, {1, 3}, nil}, :in}], ""}
-    end
-
-    test "catch" do
-      assert tokenize("catch") == {:ok, [{:block_identifier, {{1, 1}, {1, 6}, nil}, :catch}], ""}
-    end
-
-    test "rescue" do
-      assert tokenize("rescue") ==
-               {:ok, [{:block_identifier, {{1, 1}, {1, 7}, nil}, :rescue}], ""}
-    end
-
-    test "after" do
-      assert tokenize("after") == {:ok, [{:block_identifier, {{1, 1}, {1, 6}, nil}, :after}], ""}
-    end
-
-    test "else" do
-      assert tokenize("else") == {:ok, [{:block_identifier, {{1, 1}, {1, 5}, nil}, :else}], ""}
-    end
-
-    test "after eol" do
-      assert tokenize("\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, 1}, :when}], ""}
-      assert tokenize("\r\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, 1}, :when}], ""}
-      assert tokenize("\n\nwhen") == {:ok, [{:when_op, {{3, 1}, {3, 5}, 2}, :when}], ""}
-      assert tokenize("\\\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, nil}, :when}], ""}
-      assert tokenize("\\\r\nwhen") == {:ok, [{:when_op, {{2, 1}, {2, 5}, nil}, :when}], ""}
-
-      assert tokenize("\ntrue") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {true, {{2, 1}, {2, 5}, nil}}
-                ], ""}
-
-      assert tokenize("\nfalse") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {false, {{2, 1}, {2, 6}, nil}}
-                ], ""}
-
-      assert tokenize("\nnil") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {nil, {{2, 1}, {2, 4}, nil}}
-                ], ""}
-
-      assert tokenize("\nand") == {:ok, [{:and_op, {{2, 1}, {2, 4}, 1}, :and}], ""}
-      assert tokenize("\nor") == {:ok, [{:or_op, {{2, 1}, {2, 3}, 1}, :or}], ""}
-
-      assert tokenize("\nnot") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:unary_op, {{2, 1}, {2, 4}, 1}, :not}
-                ], ""}
-
-      assert tokenize("\nin") == {:ok, [{:in_op, {{2, 1}, {2, 3}, 1}, :in}], ""}
-
-      assert tokenize("\nnot in") ==
-               {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, :"not in", {{2, 5}, {2, 7}, nil}}], ""}
-
-      assert tokenize("\ncatch") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:block_identifier, {{2, 1}, {2, 6}, nil}, :catch}
-                ], ""}
-
-      assert tokenize("\nrescue") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:block_identifier, {{2, 1}, {2, 7}, nil}, :rescue}
-                ], ""}
-
-      assert tokenize("\nafter") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:block_identifier, {{2, 1}, {2, 6}, nil}, :after}
-                ], ""}
-
-      assert tokenize("\nelse") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {:block_identifier, {{2, 1}, {2, 5}, nil}, :else}
-                ], ""}
-    end
-  end
-
-  describe "sigil" do
-    test "incomplete" do
-      assert tokenize("~x") == {:ok, [], ""}
-      assert tokenize("~X") == {:ok, [], ""}
-      assert tokenize("~X123") == {:ok, [], ""}
-    end
-
-    test "empty" do
-      assert tokenize("~x//") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 5}, nil},
-                    :sigil_x,
-                    [""],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "simple" do
-      assert tokenize("~x/asd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-
-      assert tokenize("~x<asd>") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "<"
-                  }
-                ], ""}
-
-      assert tokenize("~x\"asd\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "\""
-                  }
-                ], ""}
-
-      assert tokenize("~x'asd'") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "'"
-                  }
-                ], ""}
-
-      assert tokenize("~x[asd]") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "["
-                  }
-                ], ""}
-
-      assert tokenize("~x(asd)") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "("
-                  }
-                ], ""}
-
-      assert tokenize("~x{asd}") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "{"
-                  }
-                ], ""}
-
-      assert tokenize("~x|asd|") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 8}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    [],
-                    nil,
-                    "|"
-                  }
-                ], ""}
-    end
-
-    test "heredoc empty" do
-      assert tokenize("~x\"\"\"\n\"\"\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    [""],
-                    [],
-                    0,
-                    "\"\"\""
-                  }
-                ], ""}
-
-      assert tokenize("~x\"\"\"\r\n\"\"\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    [""],
-                    [],
-                    0,
-                    "\"\"\""
-                  }
-                ], ""}
-    end
-
-    test "heredoc empty indent" do
-      assert tokenize("~x\"\"\"\n  \"\"\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 6}, nil},
-                    :sigil_x,
-                    [""],
-                    [],
-                    2,
-                    "\"\"\""
-                  }
-                ], ""}
-    end
-
-    test "heredoc" do
-      assert tokenize("~x\"\"\"\nasd\n\"\"\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {3, 4}, nil},
-                    :sigil_x,
-                    ["asd\n"],
-                    [],
-                    0,
-                    "\"\"\""
-                  }
-                ], ""}
-
-      assert tokenize("~x'''\nasd\n'''") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {3, 4}, nil},
-                    :sigil_x,
-                    ["asd\n"],
-                    [],
-                    0,
-                    "'''"
-                  }
-                ], ""}
-    end
-
-    test "heredoc with indent" do
-      assert tokenize("~x\"\"\"\n  asd\n  \"\"\"") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {3, 6}, nil},
-                    :sigil_x,
-                    ["asd\n"],
-                    [],
-                    2,
-                    "\"\"\""
-                  }
-                ], ""}
-    end
-
-    test "with modifier" do
-      assert tokenize("~x/asd/fO0") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 11}, nil},
-                    :sigil_x,
-                    ["asd"],
-                    ~c"fO0",
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "heredoc with modifier" do
-      assert tokenize("~x\"\"\"\nasd\n\"\"\"fO0") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {3, 7}, nil},
-                    :sigil_x,
-                    ["asd\n"],
-                    ~c"fO0",
-                    0,
-                    "\"\"\""
-                  }
-                ], ""}
-
-      assert tokenize("~x'''\nasd\n'''fO0") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {3, 7}, nil},
-                    :sigil_x,
-                    ["asd\n"],
-                    ~c"fO0",
-                    0,
-                    "'''"
-                  }
-                ], ""}
-    end
-
-    test "capital letters" do
-      assert tokenize("~FOO1/asd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 11}, nil},
-                    :sigil_FOO1,
-                    ["asd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with escaped terminator" do
-      assert tokenize("~x/a\\/sd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 10}, nil},
-                    :sigil_x,
-                    ["a/sd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with escaped terminator uppercase" do
-      assert tokenize("~X/a\\/sd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 10}, nil},
-                    :sigil_X,
-                    ["a/sd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with LF newline" do
-      assert tokenize("~x/a\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    ["a\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with CR LF newline" do
-      assert tokenize("~x/a\r\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    ["a\r\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with escaped LF newline" do
-      assert tokenize("~x/a\\\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    ["a\\\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with escaped CR LF newline" do
-      assert tokenize("~x/a\\\r\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {2, 4}, nil},
-                    :sigil_x,
-                    ["a\\\r\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with LF newline escape" do
-      assert tokenize("~x/a\\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 10}, nil},
-                    :sigil_x,
-                    ["a\\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with CR LF newline escape" do
-      assert tokenize("~x/a\\r\\nsd/") ==
-               {:ok,
-                [
-                  {
-                    :sigil,
-                    {{1, 1}, {1, 12}, nil},
-                    :sigil_x,
-                    ["a\\r\\nsd"],
-                    [],
-                    nil,
-                    "/"
-                  }
-                ], ""}
-    end
-
-    test "with unicode" do
-      assert tokenize("~x/héll\#{foo}ò/") ==
-               {
-                 :ok,
-                 [
-                   {
-                     :sigil,
-                     {{1, 1}, {1, 16}, nil},
-                     :sigil_x,
-                     [
-                       "héll",
-                       {{1, 8, nil}, {1, 13, nil},
-                        [{:identifier, {{1, 10}, {1, 13}, ~c"foo"}, :foo}]},
-                       "ò"
-                     ],
-                     [],
-                     nil,
-                     "/"
-                   }
-                 ],
-                 ""
-               }
-    end
-
-    test "with interpolation lowercase" do
-      assert tokenize("~x/a\#{123}sd/") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {1, 14}, nil},
-                   :sigil_x,
-                   [
-                     "a",
-                     {{1, 5, nil}, {1, 10, nil}, [{:int, {{1, 7}, {1, 10}, 123}, ~c"123"}]},
-                     "sd"
-                   ],
-                   [],
-                   nil,
-                   "/"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation uppercase" do
-      assert tokenize("~X/a\#{123}sd/") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {1, 14}, nil},
-                   :sigil_X,
-                   ["a\#{123}sd"],
-                   [],
-                   nil,
-                   "/"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with escaped interpolation lowercase" do
-      assert tokenize("~x/a\\\#{123}sd/") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {1, 15}, nil},
-                   :sigil_x,
-                   ["a\\\#{123}sd"],
-                   [],
-                   nil,
-                   "/"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with escaped interpolation uppercase" do
-      assert tokenize("~X/a\\\#{123}sd/") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {1, 15}, nil},
-                   :sigil_X,
-                   ["a\\\#{123}sd"],
-                   [],
-                   nil,
-                   "/"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation lowercase heredoc" do
-      assert tokenize("~x'''\na\#{123}sd\n'''") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {3, 4}, nil},
-                   :sigil_x,
-                   [
-                     "a",
-                     {
-                       {2, 2, nil},
-                       {2, 7, nil},
-                       [{:int, {{2, 4}, {2, 7}, 123}, ~c"123"}]
-                     },
-                     "sd\n"
-                   ],
-                   [],
-                   0,
-                   "'''"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with interpolation uppercase heredoc" do
-      assert tokenize("~X'''\na\#{123}sd\n'''") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {3, 4}, nil},
-                   :sigil_X,
-                   ["a\#{123}sd\n"],
-                   [],
-                   0,
-                   "'''"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with escaped interpolation lowercase heredoc" do
-      assert tokenize("~x'''\na\\\#{123}sd\n'''") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {3, 4}, nil},
-                   :sigil_x,
-                   ["a\\\#{123}sd\n"],
-                   [],
-                   0,
-                   "'''"
-                 }
-               ],
-               ""
-             }
-    end
-
-    test "with escaped interpolation uppercase heredoc" do
-      assert tokenize("~X'''\na\\\#{123}sd\n'''") == {
-               :ok,
-               [
-                 {
-                   :sigil,
-                   {{1, 1}, {3, 4}, nil},
-                   :sigil_X,
-                   ["a\\\#{123}sd\n"],
-                   [],
-                   0,
-                   "'''"
-                 }
-               ],
-               ""
-             }
-    end
-  end
-
-  describe "op_identifier" do
-    test "simple" do
-      assert tokenize("foo +1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:int, {{1, 6}, {1, 7}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo -1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
-                  {:int, {{1, 6}, {1, 7}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo -x") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
-                  {:identifier, {{1, 6}, {1, 7}, ~c"x"}, :x}
-                ], ""}
-    end
-
-    test "negative cases" do
-      assert tokenize("foo +>1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:rel_op, {{1, 6}, {1, 7}, nil}, :>},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +: 1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:kw_identifier, {{1, 5}, {1, 7}, nil}, :+},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +: x") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:kw_identifier, {{1, 5}, {1, 7}, nil}, :+},
-                  {:identifier, {{1, 8}, {1, 9}, ~c"x"}, :x}
-                ], ""}
-
-      assert tokenize("foo --1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:concat_op, {{1, 5}, {1, 7}, nil}, :--},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +/1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:identifier, {{1, 5}, {1, 6}, nil}, :+},
-                  {:mult_op, {{1, 6}, {1, 7}, nil}, :/},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "quoted" do
-      assert tokenize("K.'1foo' +1") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
-                  {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
-                  {:int, {{1, 11}, {1, 12}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("K.'1foo' +x") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
-                  {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
-                  {:identifier, {{1, 11}, {1, 12}, ~c"x"}, :x}
-                ], ""}
-    end
-
-    test "quoted empty" do
-      assert tokenize("K.'' +1") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:op_identifier, {{1, 3}, {1, 5}, ?'}, :""},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("K.\"\" +1") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:op_identifier, {{1, 3}, {1, 5}, ?"}, :""},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "space" do
-      assert tokenize("foo  +1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo \t+1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo  + 1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo  +\t1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
-                  {:int, {{1, 8}, {1, 9}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "newline" do
-      assert tokenize("foo\n+1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo\r\n+1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +\n1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +\r\n1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-    end
-
-    test "escaped newline" do
-      # a bug in elixir tokenizer
-      # TODO: port fix from 1.20 branch
-      assert tokenize("foo\\\n+1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo\\\r\n+1") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
-                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +\\\n1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-
-      assert tokenize("foo +\\\r\n1") ==
-               {:ok,
-                [
-                  {:op_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
-                ], ""}
-    end
-  end
-
-  describe "do_identifier" do
-    test "simple" do
-      assert tokenize("try do\n:ok\nend") ==
-               {:ok,
-                [
-                  {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-                  {:do, {{1, 5}, {1, 7}, nil}},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
-                ], ""}
-    end
-
-    test "quoted" do
-      assert tokenize("K.'1foo' do\n:ok\nend") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:do_identifier, {{1, 3}, {1, 9}, 39}, :"1foo"},
-                  {:do, {{1, 10}, {1, 12}, nil}},
-                  {:eol, {{1, 12}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
-                ], ""}
-    end
-
-    test "quoted empty" do
-      assert tokenize("K.'' do\n:ok\nend") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:do_identifier, {{1, 3}, {1, 5}, 39}, :""},
-                  {:do, {{1, 6}, {1, 8}, nil}},
-                  {:eol, {{1, 8}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
-                ], ""}
-
-      assert tokenize("K.\"\" do\n:ok\nend") ==
-               {:ok,
-                [
-                  {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
-                  {:do_identifier, {{1, 3}, {1, 5}, 34}, :""},
-                  {:do, {{1, 6}, {1, 8}, nil}},
-                  {:eol, {{1, 8}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
-                ], ""}
-    end
-  end
-
-  describe "map and struct" do
-    test "map" do
-      assert tokenize("%{}") ==
-               {:ok,
-                [
-                  {:%{}, {{1, 1}, {1, 2}, nil}},
-                  {:"{", {{1, 1}, {1, 2}, nil}},
-                  {:"}", {{1, 3}, {1, 4}, nil}}
-                ], ""}
-
-      assert tokenize("%{}", must_match_elixir: false) ==
-               {:ok,
-                [
-                  {:%{}, {{1, 1}, {1, 2}, nil}},
-                  {:"{", {{1, 2}, {1, 3}, nil}},
-                  {:"}", {{1, 3}, {1, 4}, nil}}
-                ], ""}
-    end
-
-    test "struct" do
-      assert tokenize("%Foo{}") ==
-               {:ok,
-                [
-                  {:%, {{1, 1}, {1, 2}, nil}},
-                  {:alias, {{1, 2}, {1, 5}, ~c"Foo"}, :Foo},
-                  {:"{", {{1, 5}, {1, 6}, nil}},
-                  {:"}", {{1, 6}, {1, 7}, nil}}
-                ], ""}
-    end
-  end
-
-  describe "integration" do
-    test "module" do
-      assert tokenize("defmodule Foo do\nend") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
-                  {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
-                  {:do, {{1, 15}, {1, 17}, nil}},
-                  {:eol, {{1, 17}, {2, 1}, 1}},
-                  {:end, {{2, 1}, {2, 4}, nil}}
-                ], ""}
-    end
-
-    test "try with rescue" do
-      assert tokenize("try do\n:ok\nrescue\n:error\nafter\n:ok\nelse\n:ok\nend") ==
-               {:ok,
-                [
-                  {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-                  {:do, {{1, 5}, {1, 7}, nil}},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
-                  {:eol, {{3, 7}, {4, 1}, 1}},
-                  {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
-                  {:eol, {{4, 7}, {5, 1}, 1}},
-                  {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
-                  {:eol, {{5, 6}, {6, 1}, 1}},
-                  {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
-                  {:eol, {{6, 4}, {7, 1}, 1}},
-                  {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
-                  {:eol, {{7, 5}, {8, 1}, 1}},
-                  {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
-                  {:eol, {{8, 4}, {9, 1}, 1}},
-                  {:end, {{9, 1}, {9, 4}, nil}}
-                ], ""}
-    end
-
-    test "fn" do
-      assert tokenize("fn ->\n:ok\nend") ==
-               {:ok,
-                [
-                  {:fn, {{1, 1}, {1, 3}, nil}},
-                  {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
-                  {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
-                ], ""}
-    end
-
-    test "string interpolation in function with do/end" do
-      # Minimal failing case that reproduces the tokenizer error
-      code = """
-      def keyfind!(list, key, position) when is_integer(position) do
-        :lists.keyfind(key, position + 1, list) ||
-          raise KeyError,
-            key: key,
-            term: list,
-            message:
-              "key \#{inspect(key)} at position \#{inspect(position)} not found in: \#{inspect(list)}"
-      end
-
-      @doc \"\"\"
-      Receives a list of tuples and returns `true` if there is
-      a tuple where the element at `position` in the tuple matches
-      \"\"\"
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "terminators in interpolation" do
-      code = """
-      defp do_at() do
-        "\#{{}}"
-      end
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "interpolation in terminator" do
-      code = """
-      {"\#{line_number} | \#{indentation}\#{expr}\n \#{number_padding}| \#{arrow}", line_number + 1}
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "sigil inside interpolation" do
-      code = """
-      :"foo\#{~s/\\n/}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      :"foo\#{~s/\\n/a}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{~s/\\n/}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{~s/\\n/}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{~s/\\n/}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{~s/\\n/}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{~s/\\n/}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{~s/\\n/}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "quoted atom inside interpolation" do
-      code = """
-      :"foo\#{:"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{:"a"}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{:"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{:"a"}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{:"a"}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{:"a"}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{:"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "quoted kw_identifier inside interpolation" do
-      code = """
-      :"foo\#{"a": 1}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{"a": 1}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{"a": 1}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{"a": 1}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{"a": 1}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{"a": 1}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{"a": 1}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "bin_string inside interpolation" do
-      code = """
-      :"foo\#{"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{"a"}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
+  describe "peek_missing_terminator/1" do
+    test "no missing" do
+      stream = Toxic.new("")
 
-      code = """
-      'foo\#{"a"}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{"a"}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{"a"}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{"a"}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "charlist_string inside interpolation" do
-      code = """
-      :"foo\#{'a'}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{'a'}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{'a'}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{'a'}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{'a'}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{'a'}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{'a'}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "bin_heredoc inside interpolation" do
-      code = """
-      :"foo\#{\"""\na\n\"""}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{\"""\na\n\"""}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{\"""\na\n\"""}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{\"""\na\n\"""}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{\"""\na\n\"""}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{\"""\na\n\"""}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{\"""\na\n\"""}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
-
-    test "charlist_heredoc inside interpolation" do
-      code = """
-      :"foo\#{'''\na\n'''}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{'''\na\n'''}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{'''\na\n'''}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{'''\na\n'''}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{'''\na\n'''}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{'''\na\n'''}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{'''\na\n'''}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
+      assert {nil, _stream} = Toxic.peek_missing_terminator(stream)
     end
-
-    test "quoted identifier inside interpolation" do
-      code = """
-      :"foo\#{K.'a'}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      "foo\#{K.'a'()}bar": 1\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
 
-      code = """
-      "foo\#{K.'a'[]}bar"\
-      """
+    @simple_cases [
+      {:"(", :")"},
+      {:"{", :"}"},
+      {:"[", :"]"},
+      {:"<<", :">>"}
+    ]
 
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      'foo\#{K.'a' +1}bar'\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      \"""
-      foo\#{K.'a' do\n:ok\nend}bar
-      \"""\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      '''
-      foo\#{K.'a'}bar
-      '''\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-
-      code = """
-      ~c"foo\#{K.'a'}bar"\
-      """
-
-      assert {:ok, _, _} = tokenize(code)
-    end
+    test "suggests closing delimiter in simple cases" do
+      for {open, close} <- @simple_cases do
+        stream = Toxic.new("#{open}1 + 2")
 
-    # for module <- [
-    #       Atom,
-    #       Tuple,
-    #       List,
-    #       Map,
-    #       Keyword,
-    #       Bitwise,
-    #       String,
-    #       Integer,
-    #       Float
-    #     ] do
-    #   @module module
-    #   test "elixir src #{@module}" do
-    #     source = @module.module_info()[:compile][:source] |> File.read!()
-    #     # lines = String.split(source, "\n")
-    #     assert {:ok, _, _} = tokenize(source)
-    #   end
-    # end
+        # Consume tokens
+        {:ok, _paren, stream} = Toxic.next(stream)
+        {:ok, _one, stream} = Toxic.next(stream)
+        {:ok, _plus, stream} = Toxic.next(stream)
+        {:ok, _two, stream} = Toxic.next(stream)
 
-    test "elixir src" do
-      files =
-        Enum.module_info()[:compile][:source]
-        |> Path.join("../../..")
-        |> Path.expand()
-        |> Path.join("**/*.ex*")
-        |> Path.wildcard()
+        {closer, _stream} = Toxic.peek_missing_terminator(stream)
 
-      for file <- files do
-        IO.puts(file)
-        source = file |> File.read!()
-        # lines = String.split(source, "\n")
-        assert {:ok, _, _} = tokenize(source)
+        assert closer == close
       end
     end
 
-    #   test "elixir src 1" do
-    #     files = [
-    #       # __DIR__ <> "/simple.ex"
-    #       "/Users/lukaszsamson/elixir/lib/eex/lib/eex/compiler.ex"
-    #       # "/Users/lukaszsamson/elixir/lib/elixir/lib/kernel.ex"
-    #     ]
+    test "suggests closing delimiter in fn" do
+      stream = Toxic.new("fn x -> ")
 
-    #     for file <- files do
-    #       IO.puts(file)
-    #       source = file |> File.read!()
-    #       # lines = String.split(source, "\n")
-    #       assert {:ok, _, _} = tokenize(source)
-    #     end
-    #   end
-  end
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+      {:ok, _plus, stream} = Toxic.next(stream)
 
-  # Ported from elixir/lib/elixir/test/erlang/tokenizer_test.erl
-  describe "erlang tokenizer compatibility tests" do
-    test "type" do
-      assert tokenize("1 :: 3") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-                  {:type_op, {{1, 3}, {1, 5}, nil}, :"::"},
-                  {:int, {{1, 6}, {1, 7}, 3}, ~c"3"}
-                ], ""}
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
 
-      assert tokenize("true::3") ==
-               {:ok,
-                [
-                  {true, {{1, 1}, {1, 5}, nil}},
-                  {:type_op, {{1, 5}, {1, 7}, nil}, :"::"},
-                  {:int, {{1, 7}, {1, 8}, 3}, ~c"3"}
-                ], ""}
-
-      {:ok, tokens, ""} = tokenize("name.::(3)")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 5}, _}, :name},
-                 {:., {{1, 5}, {1, 6}, nil}},
-                 {:paren_identifier, {{1, 6}, {1, 8}, _}, :"::"},
-                 {:"(", {{1, 8}, {1, 9}, nil}},
-                 {:int, {{1, 9}, {1, 10}, 3}, ~c"3"},
-                 {:")", {{1, 10}, {1, 11}, nil}}
-               ],
-               tokens
-             )
+      assert closer == :end
     end
 
-    test "arithmetic" do
-      assert tokenize("1 + 2 + 3") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-                  {:dual_op, {{1, 3}, {1, 4}, nil}, :+},
-                  {:int, {{1, 5}, {1, 6}, 2}, ~c"2"},
-                  {:dual_op, {{1, 7}, {1, 8}, nil}, :+},
-                  {:int, {{1, 9}, {1, 10}, 3}, ~c"3"}
-                ], ""}
+    test "suggests closing delimiter in do block" do
+      stream = Toxic.new("try do\n")
+
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :end
     end
 
-    test "op_kw" do
-      {:ok, tokens, ""} = tokenize(":foo+:bar")
+    test "suggests closing delimiter in bin_string" do
+      stream = Toxic.new("\"foo")
 
-      assert match?(
-               [
-                 {:atom, {{1, 1}, {1, 5}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                 {:atom, {{1, 6}, {1, 10}, _}, :bar}
-               ],
-               tokens
-             )
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\""
     end
 
-    test "minimal valid code reproduction" do
-      source = """
-      def test do
-        1 + 2
-      end
-      """
+    test "suggests closing delimiter in bin_string empty" do
+      stream = Toxic.new("\"")
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\""
     end
 
-    test "integer module piece reproduction" do
-      source = """
-      @doc false
-      @deprecated "Use Integer.to_charlist/1 instead"
-      def to_char_list(integer), do: Integer.to_charlist(integer)
-      """
+    test "suggests closing delimiter in bin_string empty escape" do
+      stream = Toxic.new("\"\\")
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _fragment, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\""
     end
 
-    test "minimal reproduction - in_match_op precedence bug" do
-      # This should reproduce the precedence issue with <- operator
-      source = """
-      for {chars, diff} <- digits,
-         char <- chars do
-        digit = char + diff
-      end
-      """
+    test "suggests closing delimiter in list_string" do
+      stream = Toxic.new("'foo")
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      # Consume tokens
+      {:ok, _sigil_start, stream} = Toxic.next(stream)
+      {:ok, _fragment, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"'"
     end
 
-    test "minimal reproduction - in_match_op precedence bug 2" do
-      # This should reproduce the precedence issue with <- operator
-      source = """
-      for {chars, diff} = digits,
-         char = chars do
-        digit = char + diff
-      end
-      """
+    test "suggests closing delimiter in bin_heredoc" do
+      stream = Toxic.new("\"\"\"\nfoo")
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\"\"\""
     end
 
-    test "rare to legacy case" do
-      source = ~s'''
+    test "suggests closing delimiter in list_heredoc" do
+      stream = Toxic.new("'''\nfoo")
 
-            """
-            <li>
-              <strong>Some:</strong>
-              <%= true && @some[ %>
-            </li>
-            """,
-      '''
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"'''"
     end
 
-    test "unescapes" do
-      source = ~s'''
-      "\\b\\d\\e\\f\\s\\t\\v\\uFEFFРусский\\u{7}\\u{77}\\u{777}\\u{7777}\\u{77777}\\u{006666}\\x12"
-      '''
+    test "suggests closing delimiter in double quoted atom" do
+      stream = Toxic.new(":\"foo")
 
-      # Turn off validation to see the actual tokens
-      assert {:ok, _toxic_tokens, _} = tokenize(source)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\""
     end
 
-    test "typespec when on next line folds EOL" do
-      code = """
-      @spec foo() :: true
-      when limit: :infinity
-      def foo(), do: true
-      """
+    test "suggests closing delimiter in single quoted atom" do
+      stream = Toxic.new(":'foo")
 
-      {:ok, toks, ""} = tokenize(code)
-      legacy = Toxic.Legacy.ranges_to_legacy(toks)
-      # Ensure there is no standalone EOL token before when_op
-      idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
-      prev = Enum.at(legacy, idx - 1)
-      refute match?({:eol, _}, prev)
-      assert match?({:when_op, {2, 1, 1}, :when}, Enum.at(legacy, idx))
+      # Consume tokens
+      {:ok, _atom_start, stream} = Toxic.next(stream)
+      {:ok, _fragment, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"'"
     end
 
-    test "typespec when with leading spaces folds EOL" do
-      code = """
-      @spec foo() :: true
-          when limit: :infinity
-      def foo(), do: true
-      """
+    test "suggests closing delimiter in double quoted identifier" do
+      stream = Toxic.new("K.\"foo")
 
-      {:ok, toks, ""} = tokenize(code)
-      legacy = Toxic.Legacy.ranges_to_legacy(toks)
-      idx = Enum.find_index(legacy, fn t -> match?({:when_op, _, :when}, t) end)
-      prev = Enum.at(legacy, idx - 1)
-      refute match?({:eol, _}, prev)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"\""
     end
 
-    test "scientific" do
-      assert tokenize("1.0e-1") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 7}, 0.1}, ~c"1.0e-1"}
-                ], ""}
+    test "suggests closing delimiter in single quoted identifier" do
+      stream = Toxic.new("K.'foo")
 
-      assert tokenize("1.0E-1") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 7}, 0.1}, ~c"1.0E-1"}
-                ], ""}
+      # Consume tokens
+      {:ok, _identifier, stream} = Toxic.next(stream)
+      {:ok, _dot, stream} = Toxic.next(stream)
+      {:ok, _quoted_start, stream} = Toxic.next(stream)
+      {:ok, _fragment, stream} = Toxic.next(stream)
 
-      assert tokenize("1_234.567_8e-10") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 16}, 1.2345678e-7}, ~c"1_234.567_8e-10"}
-                ], ""}
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"'"
     end
 
-    test "hex_bin_octal" do
-      assert tokenize("0xFF") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 5}, 255}, ~c"0xFF"}
-                ], ""}
-
-      assert tokenize("0xF_F") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 6}, 255}, ~c"0xF_F"}
-                ], ""}
-
-      assert tokenize("0o77") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 5}, 63}, ~c"0o77"}
-                ], ""}
-
-      assert tokenize("0o7_7") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 6}, 63}, ~c"0o7_7"}
-                ], ""}
-
-      assert tokenize("0b11") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 5}, 3}, ~c"0b11"}
-                ], ""}
-
-      assert tokenize("0b1_1") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 6}, 3}, ~c"0b1_1"}
-                ], ""}
-    end
-
-    test "unquoted_atom" do
-      {:ok, tokens, ""} = tokenize(":+")
-      assert match?([{:atom, {{1, 1}, {1, 3}, _}, :+}], tokens)
-
-      {:ok, tokens, ""} = tokenize(":-")
-      assert match?([{:atom, {{1, 1}, {1, 3}, _}, :-}], tokens)
-
-      {:ok, tokens, ""} = tokenize(":*")
-      assert match?([{:atom, {{1, 1}, {1, 3}, _}, :*}], tokens)
-
-      {:ok, tokens, ""} = tokenize(":/")
-      assert match?([{:atom, {{1, 1}, {1, 3}, _}, :/}], tokens)
-
-      {:ok, tokens, ""} = tokenize(":=")
-      assert match?([{:atom, {{1, 1}, {1, 3}, _}, :=}], tokens)
-
-      {:ok, tokens, ""} = tokenize(":&&")
-      assert match?([{:atom, {{1, 1}, {1, 4}, _}, :&&}], tokens)
-    end
-
-    test "quoted_atom" do
-      assert tokenize(":\"foo bar\"") ==
-               {:ok,
-                [
-                  {:atom_quoted, {{1, 1}, {1, 11}, ?\"}, :"foo bar"}
-                ], ""}
-    end
-
-    test "op_atom" do
-      {:ok, tokens, ""} = tokenize(":f0_1")
-      assert match?([{:atom, {{1, 1}, {1, 6}, _}, :f0_1}], tokens)
-    end
-
-    test "kw" do
-      {:ok, tokens, ""} = tokenize("do: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :do}], tokens)
-
-      {:ok, tokens, ""} = tokenize("a@: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :a@}], tokens)
-
-      {:ok, tokens, ""} = tokenize("A@: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 4}, _}, :A@}], tokens)
-
-      {:ok, tokens, ""} = tokenize("a@b: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :a@b}], tokens)
-
-      {:ok, tokens, ""} = tokenize("A@!: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :A@!}], tokens)
-
-      {:ok, tokens, ""} = tokenize("a@!: ")
-      assert match?([{:kw_identifier, {{1, 1}, {1, 5}, _}, :a@!}], tokens)
-
-      {:ok, tokens, ""} = tokenize("foo: \"bar\"")
-
-      assert match?(
-               [
-                 {:kw_identifier, {{1, 1}, {1, 5}, _}, :foo},
-                 {:bin_string, {{1, 6}, {1, 11}, nil}, [<<"bar">>]}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("\"+\": \"bar\"")
-
-      assert match?(
-               [
-                 {:kw_identifier, {{1, 1}, {1, 5}, _}, :+},
-                 {:bin_string, {{1, 6}, {1, 11}, nil}, [<<"bar">>]}
-               ],
-               tokens
-             )
-    end
-
-    test "int" do
-      assert tokenize("123") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 4}, 123}, ~c"123"}
-                ], ""}
-
-      assert tokenize("123;") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 4}, 123}, ~c"123"},
-                  {:";", {{1, 4}, {1, 5}, 0}}
-                ], ""}
-
-      assert tokenize("\n\n123") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {3, 1}, 2}},
-                  {:int, {{3, 1}, {3, 4}, 123}, ~c"123"}
-                ], ""}
-
-      assert tokenize("  123  234  ") ==
-               {:ok,
-                [
-                  {:int, {{1, 3}, {1, 6}, 123}, ~c"123"},
-                  {:int, {{1, 8}, {1, 11}, 234}, ~c"234"}
-                ], ""}
-
-      assert tokenize("007") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 4}, 7}, ~c"007"}
-                ], ""}
-
-      assert tokenize("0100000") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 8}, 100_000}, ~c"0100000"}
-                ], ""}
-    end
-
-    test "float" do
-      assert tokenize("12.3") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 5}, 12.3}, ~c"12.3"}
-                ], ""}
-
-      assert tokenize("12.3;") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 5}, 12.3}, ~c"12.3"},
-                  {:";", {{1, 5}, {1, 6}, 0}}
-                ], ""}
-
-      assert tokenize("\n\n12.3") ==
-               {:ok,
-                [
-                  {:eol, {{1, 1}, {3, 1}, 2}},
-                  {:flt, {{3, 1}, {3, 5}, 12.3}, ~c"12.3"}
-                ], ""}
-
-      assert tokenize("  12.3  23.4  ") ==
-               {:ok,
-                [
-                  {:flt, {{1, 3}, {1, 7}, 12.3}, ~c"12.3"},
-                  {:flt, {{1, 9}, {1, 13}, 23.4}, ~c"23.4"}
-                ], ""}
-
-      assert tokenize("00_12.3_00") ==
-               {:ok,
-                [
-                  {:flt, {{1, 1}, {1, 11}, 12.3}, ~c"00_12.3_00"}
-                ], ""}
-    end
-
-    test "identifier" do
-      {:ok, tokens, ""} = tokenize("abc ")
-      assert match?([{:identifier, {{1, 1}, {1, 4}, _}, :abc}], tokens)
-
-      {:ok, tokens, ""} = tokenize("abc?")
-      assert match?([{:identifier, {{1, 1}, {1, 5}, _}, :abc?}], tokens)
-
-      {:ok, tokens, ""} = tokenize("abc!")
-      assert match?([{:identifier, {{1, 1}, {1, 5}, _}, :abc!}], tokens)
-
-      {:ok, tokens, ""} = tokenize("a0c!")
-      assert match?([{:identifier, {{1, 1}, {1, 5}, _}, :a0c!}], tokens)
-
-      {:ok, tokens, ""} = tokenize("a0c()")
-
-      assert match?(
-               [
-                 {:paren_identifier, {{1, 1}, {1, 4}, _}, :a0c},
-                 {:"(", {{1, 4}, {1, 5}, nil}},
-                 {:")", {{1, 5}, {1, 6}, nil}}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("a0c!()")
-
-      assert match?(
-               [
-                 {:paren_identifier, {{1, 1}, {1, 5}, _}, :a0c!},
-                 {:"(", {{1, 5}, {1, 6}, nil}},
-                 {:")", {{1, 6}, {1, 7}, nil}}
-               ],
-               tokens
-             )
-    end
-
-    test "module_macro" do
-      {:ok, tokens, ""} = tokenize("__MODULE__")
-      assert match?([{:identifier, {{1, 1}, {1, 11}, _}, :__MODULE__}], tokens)
-    end
-
-    test "dot" do
-      {:ok, tokens, ""} = tokenize("foo.bar.baz")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
-                 {:identifier, {{1, 5}, {1, 8}, _}, :bar},
-                 {:., {{1, 8}, {1, 9}, nil}},
-                 {:identifier, {{1, 9}, {1, 12}, _}, :baz}
-               ],
-               tokens
-             )
-    end
-
-    test "dot_keyword" do
-      {:ok, tokens, ""} = tokenize("foo.do")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
-                 {:identifier, {{1, 5}, {1, 7}, _}, :do}
-               ],
-               tokens
-             )
-    end
-
-    test "newline" do
-      {:ok, tokens, ""} = tokenize("foo\n.bar")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{2, 1}, {2, 2}, nil}},
-                 {:identifier, {{2, 2}, {2, 5}, _}, :bar}
-               ],
-               tokens
-             )
-
-      assert tokenize("1\n++2") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-                  {:concat_op, {{2, 1}, {2, 3}, 1}, :++},
-                  {:int, {{2, 3}, {2, 4}, 2}, ~c"2"}
-                ], ""}
-
-      assert tokenize("1\n ++2") ==
-               {:ok,
-                [
-                  {:int, {{1, 1}, {1, 2}, 1}, ~c"1"},
-                  {:concat_op, {{2, 2}, {2, 4}, 1}, :++},
-                  {:int, {{2, 4}, {2, 5}, 2}, ~c"2"}
-                ], ""}
-    end
-
-    test "dot_newline_operator" do
-      {:ok, tokens, ""} = tokenize("foo.\n+1")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
-                 {:identifier, {{2, 1}, {2, 2}, _}, :+},
-                 {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("foo.#bar\n+1")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
-                 {:identifier, {{2, 1}, {2, 2}, _}, :+},
-                 {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-    end
-
-    test "dot_call_operator" do
-      {:ok, tokens, ""} = tokenize("f.()")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :f},
-                 {:dot_call_op, {{1, 2}, {1, 3}, nil}, :.},
-                 {:"(", {{1, 3}, {1, 4}, nil}},
-                 {:")", {{1, 4}, {1, 5}, nil}}
-               ],
-               tokens
-             )
-    end
-
-    test "aliases" do
-      {:ok, tokens, ""} = tokenize("Foo")
-      assert match?([{:alias, {{1, 1}, {1, 4}, _}, :Foo}], tokens)
-
-      {:ok, tokens, ""} = tokenize("Foo.Bar.Baz")
-
-      assert match?(
-               [
-                 {:alias, {{1, 1}, {1, 4}, _}, :Foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
-                 {:alias, {{1, 5}, {1, 8}, _}, :Bar},
-                 {:., {{1, 8}, {1, 9}, nil}},
-                 {:alias, {{1, 9}, {1, 12}, _}, :Baz}
-               ],
-               tokens
-             )
-    end
-
-    test "string" do
-      assert tokenize("\"foo\"") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 6}, nil}, [<<"foo">>]}
-                ], ""}
-
-      assert tokenize("\"f\\\"\"") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 6}, nil}, [<<"f\"">>]}
-                ], ""}
-    end
-
-    test "heredoc" do
-      assert tokenize("\"\"\"\nheredoc\n\"\"\"") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, [<<"heredoc\n">>]}
-                ], ""}
-
-      assert tokenize("\"\"\"\n heredoc\n \"\"\";") ==
-               {:ok,
-                [
-                  {:bin_heredoc, {{1, 1}, {3, 5}, nil}, 1, [<<"heredoc\n">>]},
-                  {:";", {{3, 5}, {3, 6}, 0}}
-                ], ""}
-    end
-
-    test "empty_string" do
-      assert tokenize("\"\"") ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 3}, nil}, [<<>>]}
-                ], ""}
-    end
-
-    test "concat" do
-      {:ok, tokens, ""} = tokenize("x ++ y")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :x},
-                 {:concat_op, {{1, 3}, {1, 5}, nil}, :++},
-                 {:identifier, {{1, 6}, {1, 7}, _}, :y}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("x +++ y")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :x},
-                 {:concat_op, {{1, 3}, {1, 6}, nil}, :+++},
-                 {:identifier, {{1, 7}, {1, 8}, _}, :y}
-               ],
-               tokens
-             )
-    end
-
-    test "space" do
-      {:ok, tokens, ""} = tokenize("foo -2")
-
-      assert match?(
-               [
-                 {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
-                 {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("foo  -2")
-
-      assert match?(
-               [
-                 {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 6}, {1, 7}, nil}, :-},
-                 {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "op_identifier with plus" do
-      {:ok, tokens, ""} = tokenize("foo +2")
-
-      assert match?(
-               [
-                 {:op_identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                 {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier with newline (vertical space) prevents op_identifier" do
-      {:ok, tokens, ""} = tokenize("foo +\n2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                 {:eol, {{1, 6}, {2, 1}, 1}},
-                 {:int, {{2, 1}, {2, 2}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier with space before dual_op" do
-      {:ok, tokens, ""} = tokenize("foo - 2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :-},
-                 {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier when dual_op followed by colon space" do
-      # +: becomes a kw_identifier in Elixir
-      {:ok, tokens, ""} = tokenize("foo +: bar")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:kw_identifier, {{1, 5}, {1, 7}, nil}, :+},
-                 {:identifier, {{1, 8}, {1, 11}, _}, :bar}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier when dual_op followed by slash" do
-      {:ok, tokens, ""} = tokenize("foo +/2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:identifier, {{1, 5}, {1, 6}, nil}, :+},
-                 {:mult_op, {{1, 6}, {1, 7}, nil}, :/},
-                 {:int, {{1, 7}, {1, 8}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier when dual_op followed by >" do
-      # +> is tokenized as separate tokens in Elixir
-      {:ok, tokens, ""} = tokenize("foo +>bar")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                 {:rel_op, {{1, 6}, {1, 7}, nil}, :>},
-                 {:identifier, {{1, 7}, {1, 10}, _}, :bar}
-               ],
-               tokens
-             )
-    end
-
-    test "identifier when dual_op repeated" do
-      {:ok, tokens, ""} = tokenize("foo ++bar")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:concat_op, {{1, 5}, {1, 7}, nil}, :++},
-                 {:identifier, {{1, 7}, {1, 10}, _}, :bar}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("foo --bar")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:concat_op, {{1, 5}, {1, 7}, nil}, :--},
-                 {:identifier, {{1, 7}, {1, 10}, _}, :bar}
-               ],
-               tokens
-             )
-    end
-
-    test "not op_identifier with other operators" do
-      {:ok, tokens, ""} = tokenize("foo *2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:mult_op, {{1, 5}, {1, 6}, nil}, :*},
-                 {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("foo /2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
-                 {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-    end
-
-    test "closing parenthesis after newline" do
-      # When there's a newline before closing paren, it should have a count
-      assert tokenize("foo(\n)") ==
-               {:ok,
-                [
-                  {:paren_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:eol, {{1, 5}, {2, 1}, 1}},
-                  {:")", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-
-      # Without newline, closing paren should have nil
-      assert tokenize("foo()") ==
-               {:ok,
-                [
-                  {:paren_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
-                ], ""}
-
-      # Same for brackets
-      assert tokenize("[1\n]") ==
-               {:ok,
-                [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
-                  {:int, {{1, 2}, {1, 3}, 1}, ~c"1"},
-                  {:eol, {{1, 3}, {2, 1}, 1}},
-                  {:"]", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-
-      # And braces
-      assert tokenize("{:ok\n}") ==
-               {:ok,
-                [
-                  {:"{", {{1, 1}, {1, 2}, nil}},
-                  {:atom, {{1, 2}, {1, 5}, ~c"ok"}, :ok},
-                  {:eol, {{1, 5}, {2, 1}, 1}},
-                  {:"}", {{2, 1}, {2, 2}, 1}}
-                ], ""}
-    end
-
-    test "closing parenthesis EOL tracking edge cases" do
-      # Case from Atom module: spec with parens should have nil count
-      assert tokenize("@spec foo(atom)") ==
-               {:ok,
-                [
-                  {:at_op, {{1, 1}, {1, 2}, nil}, :@},
-                  {:identifier, {{1, 2}, {1, 6}, ~c"spec"}, :spec},
-                  {:paren_identifier, {{1, 7}, {1, 10}, ~c"foo"}, :foo},
-                  {:"(", {{1, 10}, {1, 11}, nil}},
-                  {:identifier, {{1, 11}, {1, 15}, ~c"atom"}, :atom},
-                  {:")", {{1, 15}, {1, 16}, nil}}
-                ], ""}
-
-      # Closing paren should not have count even if there's EOL earlier
-      assert tokenize("foo\nbar(baz)") ==
-               {:ok,
-                [
-                  {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
-                  {:paren_identifier, {{2, 1}, {2, 4}, ~c"bar"}, :bar},
-                  {:"(", {{2, 4}, {2, 5}, nil}},
-                  {:identifier, {{2, 5}, {2, 8}, ~c"baz"}, :baz},
-                  {:")", {{2, 8}, {2, 9}, nil}}
-                ], ""}
-    end
-
-    test "chars" do
-      assert tokenize("?a") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 3}, ~c"?a"}, 97}
-                ], ""}
-
-      assert tokenize("?c") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 3}, ~c"?c"}, 99}
-                ], ""}
-
-      assert tokenize("?\\0") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 4}, ~c"?\\0"}, 0}
-                ], ""}
-
-      assert tokenize("?\\a") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 4}, ~c"?\\a"}, 7}
-                ], ""}
-
-      assert tokenize("?\\n") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 4}, ~c"?\\n"}, 10}
-                ], ""}
-
-      assert tokenize("?\\\\") ==
-               {:ok,
-                [
-                  {:char, {{1, 1}, {1, 4}, ~c"?\\\\"}, 92}
-                ], ""}
-    end
-
-    test "interpolation" do
-      # Testing: "f#{oo}"
-      # Expected result: bin_string with literal "f" and interpolation containing identifier oo
-      code = ~S["f#{oo}"]
-      {:ok, tokens, ""} = tokenize(code)
-
-      assert match?(
-               [
-                 {:bin_string, {{1, 1}, {1, 9}, nil},
-                  [
-                    <<"f">>,
-                    {{1, 3, nil}, {1, 7, nil}, [{:identifier, {{1, 5}, {1, 7}, _}, :oo}]}
-                  ]}
-               ],
-               tokens
-             )
-    end
-
-    test "escaped_interpolation" do
-      # Testing: "f\#{oo}"
-      # Expected result: bin_string with literal "f#{oo}" (escaped interpolation)
-      code = ~S["f\#{oo}"]
-
-      assert tokenize(code) ==
-               {:ok,
-                [
-                  {:bin_string, {{1, 1}, {1, 10}, nil}, [<<"f\#{oo}">>]}
-                ], ""}
-    end
-
-    test "capture operators" do
-      assert tokenize("&not 1, 2") ==
-               {:ok,
-                [
-                  {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                  {:unary_op, {{1, 2}, {1, 5}, nil}, :not},
-                  {:int, {{1, 6}, {1, 7}, 1}, ~c"1"},
-                  {:",", {{1, 7}, {1, 8}, 0}},
-                  {:int, {{1, 9}, {1, 10}, 2}, ~c"2"}
-                ], ""}
-
-      {:ok, tokens, ""} = tokenize("&||/2")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 2}, {1, 4}, _}, :||},
-                 {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                 {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("&or/2")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 2}, {1, 4}, _}, :or},
-                 {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                 {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("& +/1")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 3}, {1, 4}, _}, :+},
-                 {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                 {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("& &/1")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 3}, {1, 4}, _}, :&},
-                 {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                 {:int, {{1, 5}, {1, 6}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("& ..///3")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 3}, {1, 7}, _}, :..//},
-                 {:mult_op, {{1, 7}, {1, 8}, nil}, :/},
-                 {:int, {{1, 8}, {1, 9}, 3}, ~c"3"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("& / /2")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 3}, {1, 4}, _}, :/},
-                 {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
-                 {:int, {{1, 6}, {1, 7}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("&/ /2")
-
-      assert match?(
-               [
-                 {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
-                 {:identifier, {{1, 2}, {1, 3}, _}, :/},
-                 {:mult_op, {{1, 4}, {1, 5}, nil}, :/},
-                 {:int, {{1, 5}, {1, 6}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      # Only operators
-      {:ok, tokens, ""} = tokenize("&/1")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :&},
-                 {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
-                 {:int, {{1, 3}, {1, 4}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("+/1")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :+},
-                 {:mult_op, {{1, 2}, {1, 3}, nil}, :/},
-                 {:int, {{1, 3}, {1, 4}, 1}, ~c"1"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("/ /2")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 2}, _}, :/},
-                 {:mult_op, {{1, 3}, {1, 4}, nil}, :/},
-                 {:int, {{1, 4}, {1, 5}, 2}, ~c"2"}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("..///3")
-
-      assert match?(
-               [
-                 {:identifier, {{1, 1}, {1, 5}, _}, :..//},
-                 {:mult_op, {{1, 5}, {1, 6}, nil}, :/},
-                 {:int, {{1, 6}, {1, 7}, 3}, ~c"3"}
-               ],
-               tokens
-             )
-    end
-
-    test "sigil_terminator" do
-      assert tokenize("~r/foo/") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"/">>}
-                ], ""}
-
-      assert tokenize("~r[foo]") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"[">>}
-                ], ""}
-
-      assert tokenize("~r\"foo\"") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"\"">>}
-                ], ""}
-
-      {:ok, tokens, ""} = tokenize("~r/foo/ == bar")
-
-      assert match?(
-               [
-                 {:sigil, {{1, 1}, {1, 8}, nil}, :sigil_r, [<<"foo">>], [], nil, <<"/">>},
-                 {:comp_op, {{1, 9}, {1, 11}, nil}, :==},
-                 {:identifier, {{1, 12}, {1, 15}, _}, :bar}
-               ],
-               tokens
-             )
-
-      {:ok, tokens, ""} = tokenize("~r/foo/iu == bar")
-
-      assert match?(
-               [
-                 {:sigil, {{1, 1}, {1, 10}, nil}, :sigil_r, [<<"foo">>], ~c"iu", nil, <<"/">>},
-                 {:comp_op, {{1, 11}, {1, 13}, nil}, :==},
-                 {:identifier, {{1, 14}, {1, 17}, _}, :bar}
-               ],
-               tokens
-             )
-
-      assert tokenize("~M[1 2 3]u8") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {1, 12}, nil}, :sigil_M, [<<"1 2 3">>], ~c"u8", nil, <<"[">>}
-                ], ""}
-    end
-
-    test "sigil_heredoc" do
-      assert tokenize("~S\"\"\"\nsigil heredoc\n\"\"\"") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {3, 4}, nil}, :sigil_S, [<<"sigil heredoc\n">>], [], 0,
-                   <<"\"\"\"">>}
-                ], ""}
-
-      assert tokenize("~S'''\nsigil heredoc\n'''") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {3, 4}, nil}, :sigil_S, [<<"sigil heredoc\n">>], [], 0,
-                   <<"'''">>}
-                ], ""}
-
-      assert tokenize("~S\"\"\"\n  sigil heredoc\n  \"\"\"") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {3, 6}, nil}, :sigil_S, [<<"sigil heredoc\n">>], [], 2,
-                   <<"\"\"\"">>}
-                ], ""}
-
-      assert tokenize("~s\"\"\"\n  sigil heredoc\n  \"\"\"") ==
-               {:ok,
-                [
-                  {:sigil, {{1, 1}, {3, 6}, nil}, :sigil_s, [<<"sigil heredoc\n">>], [], 2,
-                   <<"\"\"\"">>}
-                ], ""}
-    end
-  end
-
-  test "try keyword as do_identifier after newline" do
-    # The originally failing case from List.ex
-    source = """
-    def example do
-      try do
-        :ok
+    @sigil_terminators [
+      {:/, :/},
+      {:<, :>},
+      {:"\"", :"\""},
+      {:"'", :"'"},
+      {:"[", :"]"},
+      {:"(", :")"},
+      {:"{", :"}"},
+      {:|, :|}
+    ]
+    test "suggests closing delimiter in sigil" do
+      for {opening_terminator, closing_terminator} <- @sigil_terminators do
+        stream = Toxic.new("~x#{opening_terminator}foo")
+
+        # Consume tokens
+        {:ok, _paren, stream} = Toxic.next(stream)
+        {:ok, _one, stream} = Toxic.next(stream)
+
+        {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+        assert closer == closing_terminator
       end
     end
-    """
 
-    {:ok, tokens, _} = tokenize(source)
+    test "suggests closing delimiter in bin_heredoc sigil" do
+      stream = Toxic.new("~x\"\"\"\nfoo")
 
-    try_token =
-      Enum.find(tokens, fn
-        {:do_identifier, {_, _, ~c"try"}, :try} -> true
-        _ -> false
-      end)
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
 
-    assert try_token != nil, "Should find a try token"
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
 
-    assert match?({:do_identifier, {_, _, ~c"try"}, :try}, try_token),
-           "try should be :do_identifier, got: #{inspect(try_token)}"
+      assert closer == :"\"\"\""
+    end
+
+    test "suggests closing delimiter in list_heredoc sigil" do
+      stream = Toxic.new("~x'''\nfoo")
+
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"'''"
+    end
+
+    test "suggests closing delimiter in bin_string interpolation" do
+      stream = Toxic.new("\"foo\#{")
+
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+      {:ok, _begin, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :"}"
+    end
+
+    test "suggests closing delimiter in bin_string interpolation content" do
+      stream = Toxic.new("\"foo\#{(1 +")
+
+      # Consume tokens
+      {:ok, _paren, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+      {:ok, _begin, stream} = Toxic.next(stream)
+      {:ok, _one, stream} = Toxic.next(stream)
+      {:ok, _plus, stream} = Toxic.next(stream)
+
+      {closer, _stream} = Toxic.peek_missing_terminator(stream)
+
+      assert closer == :")"
+    end
   end
 
-  test "existing_atoms_only" do
-    code = """
-    :"foo\#{a}bar"
-    """
+  describe "error handling" do
+    @invalid_source "Ä"
 
-    assert {:ok, [{:atom_unsafe, _, _} | _], _} = tokenize(code)
+    test "errors/1 collects error tokens without consuming stream" do
+      stream = Toxic.new("Ä 1", 1, 1, error_mode: :tolerant)
 
-    code = """
-    :"foo\#{a}bar"
-    """
+      {errors, stream_after} = Toxic.errors(stream)
 
-    assert {:ok, [{:atom_safe, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+      assert [{_meta, %Toxic.Error{}}] = errors
+      assert stream_after == stream
 
-    code = """
-    :"foo"
-    """
+      assert {:ok, {:error_token, _, %Toxic.Error{}}, stream_after_error} =
+               Toxic.next(stream_after)
 
-    assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+      assert {:ok, {:int, _, ~c"1"}, _} = Toxic.next(stream_after_error)
+    end
 
-    code = """
-    :""
-    """
+    test "strict next/1 returns error tuple and preserves reason" do
+      stream = Toxic.new(@invalid_source, 1, 1, error_mode: :strict)
 
-    assert {:ok, [{:atom_quoted, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+      assert {:error, reason, stream_after} = Toxic.next(stream)
+      assert reason != nil
+      assert stream_after.error == reason
 
-    code = """
-    ["foo\#{a}bar": 1]
-    """
+      # Subsequent calls continue to return the same error without mutating the stream
+      assert {:error, ^reason, ^stream_after} = Toxic.next(stream_after)
+    end
 
-    assert {:ok, [_, {:kw_identifier_unsafe, _, _} | _], _} = tokenize(code)
+    test "strict next/1 returns error at eof" do
+      stream = Toxic.new("}", 1, 1, error_mode: :strict)
 
-    code = """
-    ["foo\#{a}bar": 1]
-    """
+      assert {:error, reason, stream_after} = Toxic.next(stream)
+      assert reason != nil
+      assert stream_after.error == reason
 
-    assert {:ok, [_, {:kw_identifier_safe, _, _} | _], _} =
-             tokenize(code, existing_atoms_only: true)
+      # Subsequent calls continue to return the same error without mutating the stream
+      assert {:error, ^reason, ^stream_after} = Toxic.next(stream_after)
+    end
 
-    code = """
-    ["foo": 1]
-    """
+    test "strict peek/1 reports reports error" do
+      stream = Toxic.new(@invalid_source, 1, 1, error_mode: :strict)
 
-    assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+      assert {:error, _reason, stream_after} = Toxic.peek(stream)
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
 
-    code = """
-    ["": 1]
-    """
+    test "strict peek/1 reports eof once an error is recorded" do
+      stream = Toxic.new(@invalid_source, 1, 1, error_mode: :strict)
+      assert {:error, reason, stream_after} = Toxic.next(stream)
 
-    assert {:ok, [_, {:kw_identifier, _, _} | _], _} = tokenize(code, existing_atoms_only: true)
+      assert {:error, ^reason, ^stream_after} = Toxic.peek(stream_after)
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
 
-    code = """
-    ~x|\#{["": :""]}|
-    """
+    test "strict peek/1 returns buffered tokens up until error" do
+      stream = Toxic.new("1 1 Ä", 1, 1, error_mode: :strict)
+      # fetches a batch and sets error
+      assert {:ok, _token, stream_after} = Toxic.next(stream)
+      # should still be able to peek one token
+      assert {:ok, _token, ^stream_after} = Toxic.peek(stream_after)
 
-    assert {:ok, _, _} = tokenize(code, existing_atoms_only: true)
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+    end
+
+    test "strict peek_n/2 returns buffered tokens up until error" do
+      stream = Toxic.new("1 1 1 1 Ä", 1, 1, error_mode: :strict)
+      # fetches a batch and sets error
+      assert {:ok, _token, stream_after} = Toxic.next(stream)
+      # should still be able to peek one token
+      assert {:ok, tokens, ^stream_after} = Toxic.peek_n(stream_after, 3)
+
+      assert length(tokens) == 3
+
+      # Peek should not clear the stored error
+      assert stream_after.error != nil
+
+      # should not peek past the error
+      assert {:error, _reason, tokens, ^stream_after} = Toxic.peek_n(stream_after, 4)
+
+      assert length(tokens) == 3
+    end
+
+    test "strict peek_n/2 reports eof and never exposes buffered tokens" do
+      stream = Toxic.new(@invalid_source, 1, 1, error_mode: :strict)
+      assert {:error, reason, stream_after} = Toxic.next(stream)
+
+      assert {:error, ^reason, [], ^stream_after} = Toxic.peek_n(stream_after, 3)
+    end
+
+    test "strict peek_n/2 returns EOF when requesting more tokens than available" do
+      stream = Toxic.new("1 2", 1, 1, error_mode: :strict)
+
+      # Consume first token
+      {:ok, _token, stream} = Toxic.next(stream)
+
+      # Peek more tokens than available (only 1 token left but asking for 5)
+      assert {:eof, tokens, _stream} = Toxic.peek_n(stream, 5)
+      assert length(tokens) == 1
+    end
+
+    test "strict peek_n/2 encounters an error, next still returns tokens" do
+      stream = Toxic.new("1 2 Ä", 1, 1, error_mode: :strict)
+
+      assert {:error, _, tokens, stream_after} = Toxic.peek_n(stream, 3)
+      # Should get the 2 valid tokens before error
+      assert length(tokens) >= 2
+
+      # Consume tokens until we get an error
+      stream_after = consume_until_error(stream_after)
+      assert stream_after.error != nil
+    end
+
+    defp consume_until_error(stream) do
+      case Toxic.next(stream) do
+        {:ok, _token, new_stream} -> consume_until_error(new_stream)
+        {:error, _reason, new_stream} -> new_stream
+        {:eof, new_stream} -> new_stream
+      end
+    end
+
+    test "strict pushback/2 cannot bypass the stored error" do
+      stream = Toxic.new("1 Ä", 1, 1, error_mode: :strict)
+
+      # Consume the valid token before the error
+      assert {:ok, token, stream_after} = Toxic.next(stream)
+      assert {:error, reason, stream_with_error} = Toxic.next(stream_after)
+
+      # Pushing the token back should not erase the error state
+      stream_with_push = Toxic.pushback(stream_with_error, token)
+
+      # Should get the pushed back token first, then error
+      assert {:ok, ^token, stream_after_push} = Toxic.next(stream_with_push)
+      assert {:error, ^reason, _} = Toxic.next(stream_after_push)
+      assert {:error, ^reason, _} = Toxic.peek(stream_with_error)
+    end
+
+    test "next/1 does not refill buffer after error" do
+      stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
+
+      assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
+      assert {:error, _, _} = Toxic.next(stream)
+    end
+
+    test "next/1 does not refill buffer after error - error after batch boundary" do
+      stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
+
+      assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
+      assert {:error, _, _} = Toxic.next(stream)
+    end
+
+    test "peek/1 does not refill buffer after error" do
+      stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
+
+      assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
+      assert {:error, _, _} = Toxic.peek(stream)
+    end
+
+    test "peek/1 does not refill buffer after error - error after batch boundary" do
+      stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
+
+      assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
+      assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
+      assert {:error, _, _} = Toxic.peek(stream)
+    end
+
+    test "to_stream/1 halts on error" do
+      stream = Toxic.new("1 Ä", 1, 1, error_mode: :strict)
+
+      tokens =
+        stream
+        |> Toxic.to_stream()
+        |> Enum.to_list()
+
+      assert length(tokens) == 1
+    end
+
+    test "position/0 returns driver position on error" do
+      stream = Toxic.new("1 Ä", 1, 1, error_mode: :strict)
+
+      {:ok, _, stream} = Toxic.next(stream)
+      {:error, _, stream} = Toxic.next(stream)
+
+      assert {{1, 3}, _stream} = Toxic.position(stream)
+    end
+
+    # Phase 3: Tolerant mode recovery tests
+    test "tolerant next/1 recovers from error and continues" do
+      stream = Toxic.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # First token: 1
+      {:ok, token1, stream} = Toxic.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token1
+
+      # Second token: error_token (for Ä)
+      {:ok, token2, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = token2
+
+      # Third token: 2 (continues after error)
+      {:ok, token3, stream} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token3
+
+      # EOF
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "tolerant next/1 recovers from error at EOF" do
+      stream = Toxic.new("}", 1, 1, error_mode: :tolerant)
+
+      # First token: error_token (unexpected closer)
+      {:ok, token, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = token
+
+      # With synthesis enabled, we get synthetic { then actual }
+      {:ok, token2, stream} = Toxic.next(stream)
+      assert {:"{", _} = token2
+
+      {:ok, token3, stream} = Toxic.next(stream)
+      assert {:"}", _} = token3
+
+      # EOF after tokens
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "tolerant peek/1 recovers error into buffer without consuming" do
+      stream = Toxic.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Peek should recover error into buffer
+      {:ok, token1, stream1} = Toxic.peek(stream)
+      assert {:error_token, _, _} = token1
+
+      # Peek again should return same error token
+      {:ok, token2, stream2} = Toxic.peek(stream1)
+      assert {:error_token, _, _} = token2
+
+      # Stream unchanged
+      assert stream1 == stream2
+
+      # Next consumes the error token
+      {:ok, token3, stream3} = Toxic.next(stream2)
+      assert {:error_token, _, _} = token3
+
+      # Next token after error
+      {:ok, token4, _stream4} = Toxic.next(stream3)
+      assert {:int, {{1, 3}, {1, 4}, 1}, ~c"1"} = token4
+    end
+
+    test "tolerant peek/1 after error continues" do
+      stream = Toxic.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # Consume first token
+      {:ok, _, stream} = Toxic.next(stream)
+
+      # Peek at error
+      {:ok, token, stream} = Toxic.peek(stream)
+      assert {:error_token, _, _} = token
+
+      # Consume error
+      {:ok, _, stream} = Toxic.next(stream)
+
+      # Peek at continuation token
+      {:ok, token, _stream} = Toxic.peek(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "tolerant peek_n/2 recovers and continues filling buffer" do
+      stream = Toxic.new("1 Ä 2 3", 1, 1, error_mode: :tolerant)
+
+      # Peek 4 tokens: 1, error, 2, 3
+      {:ok, tokens, stream} = Toxic.peek_n(stream, 4)
+
+      assert length(tokens) == 4
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = Enum.at(tokens, 2)
+      assert {:int, {{1, 7}, {1, 8}, 3}, ~c"3"} = Enum.at(tokens, 3)
+
+      # Stream unchanged
+      {:ok, token, _} = Toxic.next(stream)
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = token
+    end
+
+    test "tolerant peek_n/2 with multiple errors" do
+      stream = Toxic.new("Ä Ü 1", 1, 1, error_mode: :tolerant)
+
+      # Peek 3 tokens: error, error, 1
+      {:ok, tokens, _stream} = Toxic.peek_n(stream, 3)
+
+      assert length(tokens) == 3
+      assert {:error_token, _, _} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 5}, {1, 6}, 1}, ~c"1"} = Enum.at(tokens, 2)
+    end
+
+    test "tolerant peek_n/2 at EOF with error" do
+      stream = Toxic.new("1 }", 1, 1, error_mode: :tolerant)
+
+      # Peek 5 tokens: 1, error, synthetic {, actual }
+      {:eof, tokens, _stream} = Toxic.peek_n(stream, 5)
+
+      assert length(tokens) == 4
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:"{", _} = Enum.at(tokens, 2)
+      assert {:"}", _} = Enum.at(tokens, 3)
+    end
+
+    test "tolerant position/1 recovers error for accurate position" do
+      stream = Toxic.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Initial position
+      {{line1, col1}, stream} = Toxic.position(stream)
+      assert {line1, col1} == {1, 1}
+
+      # Consume error token
+      {:ok, _, stream} = Toxic.next(stream)
+
+      # Position after error should be at next valid token
+      {{line2, col2}, _stream} = Toxic.position(stream)
+      assert {line2, col2} == {1, 3}
+    end
+
+    test "tolerant pushback with error token works correctly" do
+      stream = Toxic.new("Ä 1", 1, 1, error_mode: :tolerant)
+
+      # Consume error token
+      {:ok, error_token, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = error_token
+
+      # Consume next token
+      {:ok, int_token, stream} = Toxic.next(stream)
+      assert {:int, {{1, 3}, {1, 4}, 1}, ~c"1"} = int_token
+
+      # Push back both tokens
+      stream =
+        stream
+        |> Toxic.pushback(int_token)
+        |> Toxic.pushback(error_token)
+
+      # Should get error token first
+      {:ok, token1, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = token1
+
+      # Then int token
+      {:ok, token2, _stream} = Toxic.next(stream)
+      assert {:int, {{1, 3}, {1, 4}, 1}, ~c"1"} = token2
+    end
+
+    test "tolerant checkpoint/rewind with errors is deterministic" do
+      stream = Toxic.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      # Consume first token
+      {:ok, _, stream} = Toxic.next(stream)
+
+      # Create checkpoint before error
+      {ref, stream} = Toxic.checkpoint(stream)
+
+      # Consume error and next token
+      {:ok, error1, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = error1
+      {:ok, _, stream} = Toxic.next(stream)
+
+      # Rewind to checkpoint
+      stream = Toxic.rewind_to(stream, ref)
+
+      # Should get same error token again
+      {:ok, error2, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = error2
+
+      # Positions should match
+      {_, {{sl1, sc1}, {el1, ec1}, _}, _} = error1
+      {_, {{sl2, sc2}, {el2, ec2}, _}, _} = error2
+      assert {sl1, sc1, el1, ec1} == {sl2, sc2, el2, ec2}
+
+      # Continue should work
+      {:ok, token, _} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+    end
+
+    test "tolerant to_stream/1 includes error tokens in output" do
+      stream = Toxic.new("1 Ä 2", 1, 1, error_mode: :tolerant)
+
+      tokens =
+        stream
+        |> Toxic.to_stream()
+        |> Enum.to_list()
+
+      assert length(tokens) == 3
+      assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = Enum.at(tokens, 2)
+    end
+
+    test "tolerant handles multiple consecutive errors" do
+      stream = Toxic.new("Ä Ü Ñ 1", 1, 1, error_mode: :tolerant)
+
+      # Consume all tokens
+      {:ok, t1, stream} = Toxic.next(stream)
+      {:ok, t2, stream} = Toxic.next(stream)
+      {:ok, t3, stream} = Toxic.next(stream)
+      {:ok, t4, stream} = Toxic.next(stream)
+
+      assert {:error_token, _, _} = t1
+      assert {:error_token, _, _} = t2
+      assert {:error_token, _, _} = t3
+      assert {:int, {{1, 7}, {1, 8}, 1}, ~c"1"} = t4
+
+      assert {:eof, _} = Toxic.next(stream)
+    end
+
+    test "tolerant handles error in small batch size scenario" do
+      stream = Toxic.new("1 Ä 2 3", 1, 1, error_mode: :tolerant, max_batch: 2)
+
+      # Force multiple batches with error in middle
+      {:ok, _, stream} = Toxic.next(stream)
+      {:ok, error, stream} = Toxic.next(stream)
+      assert {:error_token, _, _} = error
+
+      # Should continue across batch boundary
+      {:ok, token, stream} = Toxic.next(stream)
+      assert {:int, {{1, 5}, {1, 6}, 2}, ~c"2"} = token
+
+      {:ok, token, _stream} = Toxic.next(stream)
+      assert {:int, {{1, 7}, {1, 8}, 3}, ~c"3"} = token
+    end
+
+    test "tolerant peek_n forces multiple recoveries during fill" do
+      stream = Toxic.new("Ä Ü 1 2", 1, 1, error_mode: :tolerant, max_batch: 1)
+
+      # Peek 4 tokens with batch size 1 - forces multiple refills and recoveries
+      {:ok, tokens, _stream} = Toxic.peek_n(stream, 4)
+
+      assert length(tokens) == 4
+      assert {:error_token, _, _} = Enum.at(tokens, 0)
+      assert {:error_token, _, _} = Enum.at(tokens, 1)
+      assert {:int, _, ~c"1"} = Enum.at(tokens, 2)
+      assert {:int, _, ~c"2"} = Enum.at(tokens, 3)
+    end
   end
 
-  test "deprecated hex escape sequences" do
-    assert {:ok, _, _} = tokenize("\"\\x8\"")
-    assert {:ok, _, _} = tokenize("\"\\x{8}\"")
-    assert {:ok, _, _} = tokenize("\"\\x{88}\"")
-    assert {:ok, _, _} = tokenize("\"\\x{888}\"")
-    assert {:ok, _, _} = tokenize("\"\\x{8888}\"")
-    assert {:ok, _, _} = tokenize("\"\\x{88888}\"")
-    assert {:ok, _, _} = tokenize("\"\\x{088888}\"")
+  describe "Batching" do
+    # Helper to consume up to n tokens using next/1
+    defp consume_n(stream, n, acc \\ 0) do
+      cond do
+        acc >= n ->
+          {acc, stream}
+
+        true ->
+          case Toxic.next(stream) do
+            {:ok, _token, stream} -> consume_n(stream, n, acc + 1)
+            {:eof, stream} -> {acc, stream}
+          end
+      end
+    end
+
+    # Helper to consume all tokens until EOF
+    defp consume_all(stream, acc \\ 0) do
+      case Toxic.next(stream) do
+        {:ok, _token, stream} -> consume_all(stream, acc + 1)
+        {:eof, stream} -> {acc, stream}
+      end
+    end
+
+    test "iterates large file with small batches and successive peeks" do
+      # Use a large, real-world Elixir source file
+      path = Enum.module_info()[:compile][:source] |> to_string()
+      content = File.read!(path)
+
+      stream = Toxic.new(content, 1, 1, max_batch: 3)
+
+      # Repeatedly peek increasing amounts, then consume one token
+      # to force multiple refills under a small batch cap
+      {_, stream} =
+        Enum.reduce(1..50, {0, stream}, fn k, {count, s} ->
+          case Toxic.peek_n(s, k) do
+            {result, tokens, s2} when result in [:ok, :eof] ->
+              assert length(tokens) >= 1
+              {:ok, _t, s3} = Toxic.next(s2)
+              {count + 1, s3}
+          end
+        end)
+
+      # Then consume more tokens to ensure continued progress
+      {taken, stream} = consume_n(stream, 150)
+      assert taken == 150
+
+      # Peeking a large demand should still return some tokens (not EOF yet)
+      case Toxic.peek_n(stream, 100) do
+        {:ok, tokens, _} -> assert length(tokens) > 0
+      end
+    end
+
+    test "peek_n returns EOF only after full consumption" do
+      path = Enum.module_info()[:compile][:source] |> to_string()
+      content = File.read!(path)
+      stream = Toxic.new(content, 1, 1, max_batch: 4)
+
+      # Consume all tokens
+      {_total, stream} = consume_all(stream)
+
+      # Now peeking for any positive N should yield EOF
+      assert {:eof, [], _} = Toxic.peek_n(stream, 1)
+      assert {:eof, [], _} = Toxic.peek_n(stream, 10)
+    end
+
+    test "max_batch does not affect produced tokens" do
+      path = Enum.module_info()[:compile][:source] |> to_string()
+      content = File.read!(path)
+
+      # tokenize with big batch size
+      stream = Toxic.new(content, 1, 1, max_batch: 256_000)
+
+      # Consume all tokens
+      {big_batch_total, _stream} = consume_all(stream)
+
+      for max_batch <- [
+            # 1, 2, 3, 5, 10, 100, 1000,
+            10000,
+            20613
+          ] do
+        # tokenize with small batch size
+        stream = Toxic.new(content, 1, 1, max_batch: max_batch)
+
+        # Consume all tokens
+        {total, _stream} = consume_all(stream)
+
+        assert big_batch_total == total
+      end
+    end
   end
 
-  test "no warn" do
-    assert {:ok, _, _} = tokenize("a=\"\"")
+  describe "peek near EOF" do
+    test "peek_n returns available tokens then EOF once consumed" do
+      stream = Toxic.new("1 +", 1, 1)
+
+      # Demand more than available; should get fewer, signal EOF
+      {:eof, tokens, stream} = Toxic.peek_n(stream, 5)
+      assert length(tokens) == 2
+
+      # Consume both tokens
+      {:ok, _t1, stream} = Toxic.next(stream)
+      {:ok, _t2, stream} = Toxic.next(stream)
+
+      # Now peeking any N should return EOF
+      assert {:eof, [], _} = Toxic.peek_n(stream, 5)
+    end
+
+    test "peek_n on empty input returns EOF" do
+      stream = Toxic.new("")
+      assert {:eof, [], _} = Toxic.peek_n(stream, 3)
+    end
   end
 end

@@ -206,7 +206,7 @@ Notes:
   - Expand message snapshot and error-code tests to cover all codes (40+).
   - Add dialyzer specs for `Toxic.Error` APIs and builder functions; enable CI check (`mix dialyzer --halt-exit-status`).
   - Centralize documentation: make `Toxic.Error` the authority; update `ERRORS.md` to reference/generated-from it.
-  - Utilities: add `TokenStream.errors/1` to collect all error tokens for editor UIs.
+  - Utilities: add `Toxic.errors/1` to collect all error tokens for editor UIs.
 
 - **Phase 6 – Optional: unify warnings**
   - Represent warnings with `%Toxic.Error{severity: :warning, code: ...}` and emit `{:warning_token, meta, error}`. Add stream options to preserve/filter warnings.

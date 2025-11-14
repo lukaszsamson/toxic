@@ -102,16 +102,16 @@ Toxic.Driver.new([
 ])
 ```
 
-### TokenStream Integration
+### Toxic Integration
 
 ```elixir
 # Tolerant mode - continues with error tokens
 stream = Toxic.new(bad_code, opts: [error_mode: :tolerant])
-{:ok, {:error_token, meta, %Toxic.Error{}}, stream} = TokenStream.next(stream)
+{:ok, {:error_token, meta, %Toxic.Error{}}, stream} = Toxic.next(stream)
 
 # Strict mode - halts
 stream = Toxic.new(bad_code, opts: [error_mode: :strict])
-{:error, reason, stream} = TokenStream.next(stream)
+{:error, reason, stream} = Toxic.next(stream)
 ```
 
 ---
@@ -145,7 +145,7 @@ stream = Toxic.new(bad_code, opts: [error_mode: :strict])
 ## Architecture Overview
 
 ```
-TokenStream (Elixir API)
+Toxic (Elixir API)
     ↓ delegates to
 Driver (State Machine)
     ├─ next/2 → emit single token
@@ -215,12 +215,12 @@ Parser/compiler halts with error
 
 ### Key APIs for Parser
 
-1. **`TokenStream.next/1`** - Consume token
-2. **`TokenStream.peek/1`** - Lookahead 1 token
-3. **`TokenStream.peek_n/2`** - Lookahead N tokens
-4. **`TokenStream.pushback/2`** - Unget token
-5. **`TokenStream.current_terminators/1`** - Check open delimiters
-6. **`TokenStream.checkpoint/1` + `rewind_to/2`** - Backtracking
+1. **`Toxic.next/1`** - Consume token
+2. **`Toxic.peek/1`** - Lookahead 1 token
+3. **`Toxic.peek_n/2`** - Lookahead N tokens
+4. **`Toxic.pushback/2`** - Unget token
+5. **`Toxic.current_terminators/1`** - Check open delimiters
+6. **`Toxic.checkpoint/1` + `rewind_to/2`** - Backtracking
 
 ---
 

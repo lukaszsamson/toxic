@@ -1,4 +1,4 @@
-defmodule ToxicTolerantModeTest do
+defmodule Toxic.TolerantModeTest do
   use ExUnit.Case
 
   # Helper to tokenize in tolerant mode

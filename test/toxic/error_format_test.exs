@@ -1,4 +1,4 @@
-defmodule ToxicErrorFormatTest do
+defmodule Toxic.ErrorFormatTest do
   @elixir_version System.version()
 
   @moduledoc """

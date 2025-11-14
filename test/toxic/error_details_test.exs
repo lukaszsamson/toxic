@@ -1,4 +1,4 @@
-defmodule ToxicErrorDetailsTest do
+defmodule Toxic.ErrorDetailsTest do
   @moduledoc """
   Deep verification tests for error details content, position fields, and synthesis behavior.
   Tests ensure that error_token payloads contain accurate and complete details.

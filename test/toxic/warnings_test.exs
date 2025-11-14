@@ -1,4 +1,4 @@
-defmodule ToxicWarningsTest do
+defmodule Toxic.WarningsTest do
   use ExUnit.Case
 
   defp tokenize_and_compare_warning(string, opts \\ []) do

@@ -1,4 +1,4 @@
-defmodule ToxicErrorsTest do
+defmodule Toxic.ErrorsTest do
   use ExUnit.Case
 
   defp tokenize_and_compare_error(string, opts \\ []) do

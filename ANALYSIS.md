@@ -22,7 +22,7 @@ Toxic is a mature, streaming tokenizer for Elixir designed to support Pratt pars
 - Strict error handling: **FULLY IMPLEMENTED**
 - Incremental lexing hooks: **STUBBED** (planned but not critical)
 - Driver API: **FULLY IMPLEMENTED**
-- TokenStream API: **FULLY IMPLEMENTED**
+- Toxic API: **FULLY IMPLEMENTED**
 
 ---
 
@@ -155,11 +155,11 @@ Comprehensive error struct with detailed information:
 
 **Status:** Complete with 20,794 lines of error handling code
 
-### 1.4 TokenStream Integration - FULLY IMPLEMENTED ✅
+### 1.4 Toxic Integration - FULLY IMPLEMENTED ✅
 
 **Location:** `lib/toxic/token_stream.ex` lines 174-286
 
-The TokenStream properly handles errors in both modes:
+The Toxic properly handles errors in both modes:
 
 1. **Tolerant Mode Behavior:**
    - Never returns `{:error, ...}` tuple
@@ -174,7 +174,7 @@ The TokenStream properly handles errors in both modes:
    - Tests: `test/toxic_errors_test.exs` (100+ tests)
 
 3. **Error Collection Helper:**
-   - Function: `TokenStream.errors/1`
+   - Function: `Toxic.errors/1`
    - Collects all error tokens from a stream
    - Returns `{[{meta, %Error{}}], stream}`
    - **Status:** Implemented
@@ -255,7 +255,7 @@ Handles nested interpolation with context stack:
 }
 ```
 
-### 2.2 TokenStream Layer (`lib/toxic/token_stream.ex`)
+### 2.2 Toxic Layer (`lib/toxic/token_stream.ex`)
 
 **Lines:** 1-700 | **Coverage:** 100%
 
@@ -479,7 +479,7 @@ Handles:
 
 | Module | Coverage | Type |
 |--------|----------|------|
-| Toxic.TokenStream | 100.00% | API layer |
+| Toxic | 100.00% | API layer |
 | Toxic.Identifier | 100.00% | Lexical |
 | Toxic.String | 100.00% | Literal |
 | Toxic.Interpolation | 100.00% | String feature |
@@ -571,7 +571,7 @@ Key test scenarios in `test/toxic_tolerant_mode_test.exs`:
 
 ```
 ┌─────────────────────────────────────────┐
-│   TokenStream API (Elixir)              │
+│   Toxic API (Elixir)              │
 │   - next/1, peek/1, peek_n/2            │
 │   - pushback/2, checkpoint/1            │
 │   - Buffer management, source handling  │

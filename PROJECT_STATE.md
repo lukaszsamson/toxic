@@ -12,7 +12,7 @@ Toxic is a production-ready streaming tokenizer for Elixir designed to support P
    - Handles deferrals for delayed token emission
    - Tracks terminators for error recovery
 
-2. **Stream Layer** (`Toxic.TokenStream`)
+2. **Stream Layer** (`Toxic`)
    - High-level Elixir API
    - Buffering and lookahead support
    - Pushback capability
@@ -45,7 +45,7 @@ Toxic is a production-ready streaming tokenizer for Elixir designed to support P
 
 ### ✅ Fully Complete (Production-Ready)
 - **Streaming Driver**: Core single-token driver with state management (97.72% coverage)
-- **Elixir Integration**: TokenStream wrapper with buffering (100% coverage)
+- **Elixir Integration**: Toxic wrapper with buffering (100% coverage)
 - **Position Tracking**: Accurate line/column tracking through error recovery
 - **Terminator Stack**: Live exposure via `current_terminators/1` and `closing_for/1`
 - **Test Coverage**: 821 tests passing, 0 failures, 94.71% overall coverage
@@ -172,7 +172,7 @@ Toxic is a production-ready streaming tokenizer for Elixir designed to support P
 - 94.71% code coverage
 - 10,962 lines of test code
 - 97.72% coverage on driver (core error handling)
-- 100% coverage on TokenStream API layer
+- 100% coverage on Toxic API layer
 - 30+ error codes with detailed information
 
 **See ANALYSIS.md and IMPLEMENTATION_STATUS.md for comprehensive details.**

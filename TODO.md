@@ -120,10 +120,10 @@ This document tracks the implementation status of the Toxic tokenizer redesign f
   - Handle nested interpolations via mode stack
   - Maintain precise position tracking across fragments and interpolations
 
-### Phase 4: Elixir TokenStream Refactor ✅ COMPLETED
+### Phase 4: Elixir Toxic Refactor ✅ COMPLETED
 
-### 4.1 Update TokenStream Data Structure ✅ COMPLETED  
-- [x] Modify `%Toxic.TokenStream{}` struct:
+### 4.1 Update Toxic Data Structure ✅ COMPLETED  
+- [x] Modify `%Toxic{}` struct:
   - Replace `source`, `line`, `column`, `state` fields with `driver` field ✅
   - Keep `buffer`, `push`, `opts`, `eof`, `error` fields ✅
   - Update type specs accordingly ✅
@@ -170,7 +170,7 @@ This document tracks the implementation status of the Toxic tokenizer redesign f
 - [x] 100+ strict error tests
 - [x] 200+ warning tests
 
-### 6.2 Update TokenStream Tests ✅ COMPLETED
+### 6.2 Update Toxic Tests ✅ COMPLETED
 - [x] Fix failing tests in `test/toxic/token_stream_test.exs`
 - [x] All tests passing with driver-based implementation
 
@@ -219,7 +219,7 @@ This document tracks the implementation status of the Toxic tokenizer redesign f
 ### Phase 7: Documentation and Polish - PARTIAL ⚠️
 
 ### 7.1 Update Documentation - PARTIAL ✅⚠️
-- [x] Update module documentation for `Toxic.TokenStream` ✅
+- [x] Update module documentation for `Toxic` ✅
 - [x] Add documentation for driver API functions ✅
 - [x] Document error handling and recovery strategies ✅
 - [x] Update PLAN.md, PROJECT_STATE.md, CLAUDE.md (2025-10-30) ✅

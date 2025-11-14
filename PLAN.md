@@ -76,7 +76,7 @@ Next Steps (Updated 2025-10-30)
 ✅ COMPLETED:
 	1.	Token Span Extension: Ranged metadata {{sl,sc}, {el,ec}, extra} fully implemented
 	2.	Error-Tolerant Mode: Complete with error token emission and 5+ sync points
-	3.	Stream API: TokenStream with peek/next/pushback/checkpoint fully working
+	3.	Stream API: Toxic with peek/next/pushback/checkpoint fully working
 	4.	Flat Token Stream: Linearized with explicit interpolation markers
 	5.	Operator Metadata: Precedence and op-kinds handled in tokenizer/operator modules
 

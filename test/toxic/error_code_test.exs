@@ -1,4 +1,4 @@
-defmodule ToxicErrorCodeTest do
+defmodule Toxic.ErrorCodeTest do
   @moduledoc """
   Tests that verify tolerant mode emits the correct error codes for various error scenarios.
   Each test verifies that the error_token contains a Toxic.Error struct with the expected code.
