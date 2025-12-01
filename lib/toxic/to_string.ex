@@ -20,13 +20,15 @@ defmodule Toxic.ToString do
 
     {[acc, gap, token_str], {end_line, end_col}, new_context}
   end
-  
+
   defp advance_position({line, col}, str) do
     lines = String.split(str, "\n")
+
     case lines do
-      [single] -> 
+      [single] ->
         {line, col + String.length(single)}
-      [first | rest] ->
+
+      [_first | rest] ->
         new_line = line + length(rest)
         last = List.last(rest)
         new_col = 1 + String.length(last)
@@ -59,118 +61,231 @@ defmodule Toxic.ToString do
   defp token_to_string(token, context) do
     case token do
       # Literals
-      {:int, _meta, chars} -> {List.to_string(chars), context}
-      {:flt, _meta, chars} -> {List.to_string(chars), context}
-      {:char, meta, _codepoint} -> {get_extra_or_atom(meta, nil), context}
+      {:int, _meta, chars} ->
+        {List.to_string(chars), context}
+
+      {:flt, _meta, chars} ->
+        {List.to_string(chars), context}
+
+      {:char, meta, _codepoint} ->
+        {get_extra_or_atom(meta, nil), context}
 
       # Atoms, Keywords
-      {:atom, meta, atom} -> 
+      {:atom, meta, atom} ->
         name = get_extra_or_atom(meta, atom)
         {":" <> name, context}
-        
-      {:kw_identifier, meta, atom} -> 
+
+      {:kw_identifier, meta, atom} ->
         name = get_extra_or_atom(meta, atom)
         {name <> ":", context}
 
-      {true, _meta} -> {"true", context}
-      {false, _meta} -> {"false", context}
-      {nil, _meta} -> {"nil", context}
+      {true, _meta} ->
+        {"true", context}
 
-      {:do, _meta} -> {"do", context}
-      {:end, _meta} -> {"end", context}
-      {:fn, _meta} -> {"fn", context}
+      {false, _meta} ->
+        {"false", context}
 
-      {:block_identifier, _meta, atom} -> {Atom.to_string(atom), context}
+      {nil, _meta} ->
+        {"nil", context}
+
+      {:do, _meta} ->
+        {"do", context}
+
+      {:end, _meta} ->
+        {"end", context}
+
+      {:fn, _meta} ->
+        {"fn", context}
+
+      {:block_identifier, _meta, atom} ->
+        {Atom.to_string(atom), context}
 
       # Identifiers
-      {:identifier, meta, atom} -> {get_extra_or_atom(meta, atom), context}
-      {:paren_identifier, meta, atom} -> {get_extra_or_atom(meta, atom), context}
-      {:bracket_identifier, meta, atom} -> {get_extra_or_atom(meta, atom), context}
-      {:do_identifier, meta, atom} -> {get_extra_or_atom(meta, atom), context}
-      {:op_identifier, meta, atom} -> {get_extra_or_atom(meta, atom), context}
-      {:alias, meta, atom} -> {get_extra_or_atom(meta, atom), context}
+      {:identifier, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
+
+      {:paren_identifier, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
+
+      {:bracket_identifier, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
+
+      {:do_identifier, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
+
+      {:op_identifier, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
+
+      {:alias, meta, atom} ->
+        {get_extra_or_atom(meta, atom), context}
 
       # Operators
-      {:unary_op, _meta, op} -> {Atom.to_string(op), context}
-      {:dual_op, _meta, op} -> {Atom.to_string(op), context}
-      {:mult_op, _meta, op} -> {Atom.to_string(op), context}
-      {:rel_op, _meta, op} -> {Atom.to_string(op), context}
-      {:comp_op, _meta, op} -> {Atom.to_string(op), context}
-      {:and_op, _meta, op} -> {Atom.to_string(op), context}
-      {:or_op, _meta, op} -> {Atom.to_string(op), context}
-      {:xor_op, _meta, op} -> {Atom.to_string(op), context}
-      {:concat_op, _meta, op} -> {Atom.to_string(op), context}
-      {:arrow_op, _meta, op} -> {Atom.to_string(op), context}
-      {:power_op, _meta, op} -> {Atom.to_string(op), context}
-      {:range_op, _meta, op} -> {Atom.to_string(op), context}
-      {:in_match_op, _meta, op} -> {Atom.to_string(op), context}
-      {:type_op, _meta, op} -> {Atom.to_string(op), context}
-      {:stab_op, _meta, op} -> {Atom.to_string(op), context}
-      {:match_op, _meta, op} -> {Atom.to_string(op), context}
-      {:pipe_op, _meta, op} -> {Atom.to_string(op), context}
-      {:ellipsis_op, _meta, op} -> {Atom.to_string(op), context}
-      {:ternary_op, _meta, op} -> {Atom.to_string(op), context}
-      {:assoc_op, _meta, _} -> {"=>", context}
-      {:at_op, _meta, _} -> {"@", context}
-      {:capture_op, _meta, _} -> {"&", context}
-      {:capture_int, _meta, _} -> {"&", context}
+      {:unary_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:dual_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:mult_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:rel_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:comp_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:and_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:or_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:xor_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:concat_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:arrow_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:power_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:range_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:in_match_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:type_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:stab_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:match_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:pipe_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:ellipsis_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:ternary_op, _meta, op} ->
+        {Atom.to_string(op), context}
+
+      {:assoc_op, _meta, _} ->
+        {"=>", context}
+
+      {:at_op, _meta, _} ->
+        {"@", context}
+
+      {:capture_op, _meta, _} ->
+        {"&", context}
+
+      {:capture_int, _meta, _} ->
+        {"&", context}
 
       # Keyword Operators
-      {:when_op, _meta, _} -> {"when", context}
-      {:in_op, _meta, :in} -> {"in", context}
-      {:in_op, meta, :"not in", in_meta} -> 
+      {:when_op, _meta, _} ->
+        {"when", context}
+
+      {:in_op, _meta, :in} ->
+        {"in", context}
+
+      {:in_op, meta, :"not in", in_meta} ->
         {{start_line, start_col}, _, _} = meta
         {{in_line, in_col}, _, _} = in_meta
-        
+
         gap = generate_gap(start_line, start_col + 3, in_line, in_col)
         str = IO.iodata_to_binary(["not", gap, "in"])
         {str, context}
 
       # Punctuation
-      {:., _meta} -> {".", context}
-      {:dot_call_op, _meta, _} -> {".", context}
-      {:",", _meta} -> {",", context}
-      {:";", _meta} -> {";", context}
-      {:"<<", _meta} -> {"<<", context}
-      {:">>", _meta} -> {">>", context}
-      {:"(", _meta} -> {"(", context}
-      {:")", _meta} -> {")", context}
-      {:"[", _meta} -> {"[", context}
-      {:"]", _meta} -> {"]", context}
-      {:"{", _meta} -> {"{", context}
-      {:"}", _meta} -> {"}", context}
-      {:%, _meta} -> {"%", context}
-      {:%{}, _meta} -> {"%", context}
+      {:., _meta} ->
+        {".", context}
+
+      {:dot_call_op, _meta, _} ->
+        {".", context}
+
+      {:",", _meta} ->
+        {",", context}
+
+      {:";", _meta} ->
+        {";", context}
+
+      {:"<<", _meta} ->
+        {"<<", context}
+
+      {:">>", _meta} ->
+        {">>", context}
+
+      {:"(", _meta} ->
+        {"(", context}
+
+      {:")", _meta} ->
+        {")", context}
+
+      {:"[", _meta} ->
+        {"[", context}
+
+      {:"]", _meta} ->
+        {"]", context}
+
+      {:"{", _meta} ->
+        {"{", context}
+
+      {:"}", _meta} ->
+        {"}", context}
+
+      {:%, _meta} ->
+        {"%", context}
+
+      {:%{}, _meta} ->
+        {"%", context}
 
       # Strings
-      {:bin_string_start, _meta, delim} -> 
+      {:bin_string_start, _meta, delim} ->
         str = delim_to_string(delim)
         {str, [delim | context]}
-        
-      {:bin_string_end, _meta, delim} -> 
-        str = delim_to_string(delim)
-        {str, tl(context)}
-        
-      {:list_string_start, _meta, delim} -> 
-        str = delim_to_string(delim)
-        {str, [delim | context]}
-        
-      {:list_string_end, _meta, delim} -> 
+
+      {:bin_string_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
 
-      {:string_fragment, _meta, binary} -> 
+      {:list_string_start, _meta, delim} ->
+        str = delim_to_string(delim)
+        {str, [delim | context]}
+
+      {:list_string_end, _meta, delim} ->
+        str = delim_to_string(delim)
+        {str, tl(context)}
+
+      {:string_fragment, _meta, binary} ->
         escaped = escape_fragment(binary, List.first(context))
         {escaped, context}
 
-      {:begin_interpolation, _meta, _kind} -> {"\#{", context}
-      {:end_interpolation, _meta, _kind} -> {"}", context}
+      {:begin_interpolation, _meta, _kind} ->
+        {"\#{", context}
+
+      {:end_interpolation, _meta, _kind} ->
+        {"}", context}
 
       # Heredocs
-      {:bin_heredoc_start, _meta, _} -> {"\"\"\"", [:heredoc | context]}
-      {:list_heredoc_start, _meta, _} -> {"'''", [:heredoc | context]}
-      {:bin_heredoc_end, _meta, _, _} -> {"\"\"\"", tl(context)}
-      {:list_heredoc_end, _meta, _, _} -> {"'''", tl(context)}
+      {:bin_heredoc_start, _meta, _} ->
+        {"\"\"\"", [:heredoc | context]}
+
+      {:list_heredoc_start, _meta, _} ->
+        {"'''", [:heredoc | context]}
+
+      {:bin_heredoc_end, _meta, _, _} ->
+        {"\"\"\"", tl(context)}
+
+      {:list_heredoc_end, _meta, _, _} ->
+        {"'''", tl(context)}
 
       # Sigils
       {:sigil_start, _meta, sigil_atom, delim} ->
@@ -178,59 +293,60 @@ defmodule Toxic.ToString do
         str = "~" <> char <> delim_to_string(delim)
         {str, [delim | context]}
 
-      {:sigil_end, _meta, delim, _indent} -> 
+      {:sigil_end, _meta, delim, _indent} ->
         str = delim_to_string(delim)
         {str, tl(context)}
-        
-      {:sigil_modifiers, _meta, modifiers} -> {List.to_string(modifiers), context}
+
+      {:sigil_modifiers, _meta, modifiers} ->
+        {List.to_string(modifiers), context}
 
       # Quoted Atoms/Keywords
-      {:atom_safe_start, _meta, delim} -> 
+      {:atom_safe_start, _meta, delim} ->
         str = ":" <> delim_to_string(delim)
         {str, [delim | context]}
-        
-      {:atom_unsafe_start, _meta, delim} -> 
+
+      {:atom_unsafe_start, _meta, delim} ->
         str = ":" <> delim_to_string(delim)
         {str, [delim | context]}
-        
-      {:atom_safe_end, _meta, delim} -> 
-        str = delim_to_string(delim)
-        {str, tl(context)}
-        
-      {:atom_unsafe_end, _meta, delim} -> 
+
+      {:atom_safe_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
 
-      {:kw_identifier_safe_end, _meta, delim} -> 
+      {:atom_unsafe_end, _meta, delim} ->
+        str = delim_to_string(delim)
+        {str, tl(context)}
+
+      {:kw_identifier_safe_end, _meta, delim} ->
         str = delim_to_string(delim) <> ":"
         {str, tl(context)}
-        
-      {:kw_identifier_unsafe_end, _meta, delim} -> 
+
+      {:kw_identifier_unsafe_end, _meta, delim} ->
         str = delim_to_string(delim) <> ":"
         {str, tl(context)}
 
       # Quoted Identifiers
-      {:quoted_identifier_start, _meta, delim} -> 
+      {:quoted_identifier_start, _meta, delim} ->
         str = delim_to_string(delim)
         {str, [delim | context]}
-        
-      {:quoted_identifier_end, _meta, delim} -> 
+
+      {:quoted_identifier_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
-        
-      {:quoted_paren_identifier_end, _meta, delim} -> 
+
+      {:quoted_paren_identifier_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
-        
-      {:quoted_bracket_identifier_end, _meta, delim} -> 
+
+      {:quoted_bracket_identifier_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
-        
-      {:quoted_do_identifier_end, _meta, delim} -> 
+
+      {:quoted_do_identifier_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
-        
-      {:quoted_op_identifier_end, _meta, delim} -> 
+
+      {:quoted_op_identifier_end, _meta, delim} ->
         str = delim_to_string(delim)
         {str, tl(context)}
 
@@ -240,9 +356,11 @@ defmodule Toxic.ToString do
         {String.duplicate("\n", count), context}
 
       # Error
-      {:error_token, _meta, _err} -> {"", context}
+      {:error_token, _meta, _err} ->
+        {"", context}
 
-      _ -> raise "Unknown token: #{inspect(token)}"
+      _ ->
+        raise "Unknown token: #{inspect(token)}"
     end
   end
 
@@ -254,9 +372,11 @@ defmodule Toxic.ToString do
   defp delim_to_string(delim) when is_integer(delim), do: <<delim>>
   defp delim_to_string(delim) when is_binary(delim), do: delim
   defp delim_to_string(delim) when is_list(delim), do: List.to_string(delim)
-  
+
   defp escape_fragment(binary, nil), do: binary
-  defp escape_fragment(binary, :heredoc), do: binary # Heredocs don't need escaping of quotes usually, unless triple?
+  # Heredocs don't need escaping of quotes usually, unless triple?
+  defp escape_fragment(binary, :heredoc), do: binary
+
   defp escape_fragment(binary, delim) do
     # Escape delimiter
     delim_str = delim_to_string(delim)

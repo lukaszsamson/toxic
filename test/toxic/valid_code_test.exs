@@ -52,6 +52,7 @@ defmodule Toxic.ValidCodeTest do
 
     # Verify roundtrip
     reconstructed = Toxic.to_string(Enum.reverse(toxic_tokens_with_ranges_orig))
+
     if reconstructed != string do
       # Toxic is lossy regarding:
       # - Comments (not emitted)
@@ -59,13 +60,15 @@ defmodule Toxic.ValidCodeTest do
       # - Escapes (normalized/unescaped in some cases)
       # - Trailing whitespace (not captured)
       # - Tabs (converted to spaces by position logic, though we try to preserve)
-      
+
       string_bin = IO.iodata_to_binary(string)
-      is_lossy = String.contains?(string_bin, ["#", "\r", "\\", "\t", "µ", "%{"]) or reconstructed == ""
-      
+
+      is_lossy =
+        String.contains?(string_bin, ["#", "\r", "\\", "\t", "µ", "%{"]) or reconstructed == ""
+
       # Check if it matches ignoring trailing whitespace
       matches_trimmed = String.trim_trailing(string_bin) == String.trim_trailing(reconstructed)
-      
+
       if not is_lossy and not matches_trimmed do
         flunk("""
         Reconstructed string does not match original.
