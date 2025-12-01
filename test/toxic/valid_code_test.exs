@@ -61,7 +61,7 @@ defmodule Toxic.ValidCodeTest do
       # - Tabs (converted to spaces by position logic, though we try to preserve)
       
       string_bin = IO.iodata_to_binary(string)
-      is_lossy = String.contains?(string_bin, ["#", "\r", "\\", "\t", "µ", "%{", "not  in"]) or reconstructed == ""
+      is_lossy = String.contains?(string_bin, ["#", "\r", "\\", "\t", "µ", "%{"]) or reconstructed == ""
       
       # Check if it matches ignoring trailing whitespace
       matches_trimmed = String.trim_trailing(string_bin) == String.trim_trailing(reconstructed)

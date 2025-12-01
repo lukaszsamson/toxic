@@ -118,7 +118,13 @@ defmodule Toxic.ToString do
       # Keyword Operators
       {:when_op, _meta, _} -> {"when", context}
       {:in_op, _meta, :in} -> {"in", context}
-      {:in_op, _meta, :"not in", _} -> {"not in", context}
+      {:in_op, meta, :"not in", in_meta} -> 
+        {{start_line, start_col}, _, _} = meta
+        {{in_line, in_col}, _, _} = in_meta
+        
+        gap = generate_gap(start_line, start_col + 3, in_line, in_col)
+        str = IO.iodata_to_binary(["not", gap, "in"])
+        {str, context}
 
       # Punctuation
       {:., _meta} -> {".", context}
