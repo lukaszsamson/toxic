@@ -566,6 +566,11 @@ defmodule Toxic do
     {errs, stream}
   end
 
+  @doc """
+  Converts a list of Toxic tokens back to a string.
+  """
+  defdelegate to_string(tokens), to: Toxic.ToString
+
   # Compute terms at the logical current position (before next token)
   defp terms_at_current_position(%__MODULE__{push: [{_tok, pre_terms, _} | _]})
        when is_list(pre_terms) do
