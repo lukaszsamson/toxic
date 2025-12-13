@@ -54,7 +54,8 @@ defmodule Toxic.Driver.Recovery do
   # --------------------------
   # Always advances at least one codepoint if recovery didn't move forward, preventing infinite loops.
   #
-  def emit_error_and_advance(%Error{} = error, rest, state) do
+  def emit_error_and_advance(reason, rest, state) do
+    error = Error.ensure_struct(reason)
     {def_rest, def_line, def_col} = Position.scan_to_sync(rest, state)
 
     # Phase 4: Context-specific minimal recovery (override default scan)
@@ -79,8 +80,18 @@ defmodule Toxic.Driver.Recovery do
         {new_rest, new_line, new_column}
       end
 
-    error_meta = meta(state.line, state.column, new_line, new_column, nil)
-    error_token = {:error_token, error_meta, error}
+    error_meta =
+      case error.position do
+        {{sl, sc}, {el, ec}}
+        when is_integer(sl) and is_integer(sc) and is_integer(el) and
+               is_integer(ec) ->
+          meta(sl, sc, el, ec, nil)
+
+        _ ->
+          meta(state.line, state.column, new_line, new_column, nil)
+      end
+
+    error_token = {:error_token, error_meta, error_payload(error, state)}
 
     # Optionally synthesize structural tokens for delimiter errors.
     # Always compute proposal, but only keep it if appropriate:
@@ -217,6 +228,22 @@ defmodule Toxic.Driver.Recovery do
     Driver.next(new_rest, new_state)
   end
 
+  defp error_payload(%Error{} = error, %Driver{error_token_payload: mode}) do
+    case mode do
+      :struct ->
+        error
+
+      :tuple ->
+        Error.to_reason_tuple(error)
+
+      :both ->
+        {error, Error.to_reason_tuple(error)}
+
+      _ ->
+        error
+    end
+  end
+
   # Phase 4: adjust scan target and optionally insert context-specific tokens
   # Code-based recovery only; no message parsing
   defp adjust_recovery(
@@ -336,7 +363,9 @@ defmodule Toxic.Driver.Recovery do
       {:identifier, _code} ->
         if state.insert_identifier_sanitization do
           span_chars = take_prefix_until(rest, def_rest)
-          id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column, state.scope)
+
+          id_token =
+            sanitize_identifier_from_chars(span_chars, state.line, state.column, state.scope)
 
           {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
         else

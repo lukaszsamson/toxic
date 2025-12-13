@@ -314,6 +314,73 @@ defmodule Toxic.Error do
   end
 
   @doc """
+  Migration/compatibility bridge.
+
+  Ensures tolerant mode can work with legacy Elixir-style reason tuples
+  (for example `{meta_kv, message_iodata, token_chars}`) without crashing.
+  """
+  @spec ensure_struct(t() | {term(), term(), term()} | term()) :: t()
+  def ensure_struct(%__MODULE__{} = err), do: err
+
+  # Legacy strict reason tuple: `{meta_kv, message, token_chars}`
+  def ensure_struct({meta_kv, message, token_chars}) when is_list(meta_kv) do
+    meta_map = Map.new(meta_kv)
+
+    line = Map.get(meta_map, :line, 1)
+    column = Map.get(meta_map, :column, 1)
+    end_line = Map.get(meta_map, :end_line)
+    end_column = Map.get(meta_map, :end_column)
+
+    position =
+      if is_integer(end_line) and is_integer(end_column) do
+        {{line, column}, {end_line, end_column}}
+      else
+        nil
+      end
+
+    # Prefer non-message-based classification using meta keys when present.
+    {code, domain, details} =
+      cond do
+        meta_map[:error_type] == :mismatched_delimiter ->
+          {
+            :terminator_mismatched_closer,
+            :terminator,
+            %{
+              opening_delimiter: meta_map[:opening_delimiter],
+              closing_delimiter: meta_map[:closing_delimiter],
+              expected_delimiter: meta_map[:expected_delimiter]
+            }
+          }
+
+        true ->
+          # Fallback: preserve location + legacy message for display/debugging.
+          {
+            :syntax_error,
+            :general,
+            %{line: line, column: column, legacy_message: message, legacy_meta: meta_kv}
+          }
+      end
+
+    %__MODULE__{
+      code: code,
+      domain: domain,
+      position: position,
+      token_display: List.wrap(token_chars),
+      details: details
+    }
+  end
+
+  # Any other legacy shape: wrap as a generic syntax error.
+  def ensure_struct(other) do
+    %__MODULE__{
+      code: :syntax_error,
+      domain: :general,
+      token_display: [],
+      details: %{legacy: other}
+    }
+  end
+
+  @doc """
   Convert a structured error to a legacy reason tuple `{meta_kv, message_iodata, token_chars}`
   used by strict mode and strict-mode tests.
   """

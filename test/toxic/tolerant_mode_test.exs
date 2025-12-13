@@ -100,6 +100,28 @@ defmodule Toxic.TolerantModeTest do
       assert length(new_rest) < length(rest)
       assert new_driver.error_mode == :tolerant
     end
+
+    test "recover/3 accepts legacy reason tuples" do
+      driver = Toxic.Driver.new(error_mode: :tolerant)
+      rest = ~c"+ 1"
+
+      legacy_reason = {[line: 1, column: 1], ~c"unexpected token: ", ~c"+"}
+
+      {:ok, {:error_token, _meta, %Toxic.Error{code: :syntax_error}}, _new_rest, _new_driver} =
+        Toxic.Driver.recover(rest, driver, legacy_reason)
+    end
+  end
+
+  describe "Error meta accuracy" do
+    test "error_token meta aligns with error.position when present" do
+      tokens = tokenize_tolerant("([)")
+
+      {:error_token, {{sl, sc}, {el, ec}, _}, %Toxic.Error{position: {{psl, psc}, {pel, pec}}}} =
+        Enum.find(tokens, fn t -> match?({:error_token, _, _}, t) end)
+
+      assert {sl, sc} == {psl, psc}
+      assert {el, ec} == {pel, pec}
+    end
   end
 
   # Helper to extract just token types for readability

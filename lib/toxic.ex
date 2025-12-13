@@ -44,6 +44,7 @@ defmodule Toxic do
           | {:error_max_skip, non_neg_integer()}
           | {:insert_structural_closers, boolean()}
           | {:insert_identifier_sanitization, boolean()}
+          | {:error_token_payload, :struct | :tuple | :both}
           | {:preserve_comments, false | (integer(), integer(), list(), list(), list() -> any())}
           | {:existing_atoms_only, boolean()}
         ]
@@ -119,6 +120,7 @@ defmodule Toxic do
     error_max_skip: 4096,
     insert_structural_closers: true,
     insert_identifier_sanitization: true,
+    error_token_payload: :struct,
     elixir_compatibility: false,
     preserve_comments: false,
     existing_atoms_only: false

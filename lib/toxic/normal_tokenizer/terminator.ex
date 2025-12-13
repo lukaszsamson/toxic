@@ -84,13 +84,13 @@ defmodule Toxic.NormalTokenizer.Terminator do
 
       expected_end ->
         {{start_line, start_column}, _, _} = start_meta
-        {{end_line, end_column}, _, _} = end_meta
+        {{_end_line, _end_start_column}, {end_line_end, end_column_end}, _} = end_meta
 
         err = %Toxic.Error{
           code: :terminator_mismatched_closer,
           domain: :terminator,
           token_display: String.to_charlist("#{end_token}"),
-          position: {{start_line, start_column}, {end_line, end_column}},
+          position: {{start_line, start_column}, {end_line_end, end_column_end}},
           details: %{
             opening_delimiter: start_token,
             closing_delimiter: end_token,

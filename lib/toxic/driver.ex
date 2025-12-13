@@ -52,6 +52,7 @@ defmodule Toxic.Driver do
             error_max_skip: 4096,
             insert_structural_closers: true,
             insert_identifier_sanitization: true,
+            error_token_payload: :struct,
             deferrals: [],
             output: [],
             recent_token: nil
@@ -134,6 +135,7 @@ defmodule Toxic.Driver do
           error_max_skip: non_neg_integer(),
           insert_structural_closers: boolean(),
           insert_identifier_sanitization: boolean(),
+          error_token_payload: :struct | :tuple | :both,
           deferrals: [token()],
           output: [token()],
           recent_token: token() | nil,
@@ -152,6 +154,7 @@ defmodule Toxic.Driver do
     error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
     insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
     insert_identifier_sanitization = Keyword.get(opts, :insert_identifier_sanitization, true)
+    error_token_payload = Keyword.get(opts, :error_token_payload, :struct)
 
     %__MODULE__{
       line: line,
@@ -161,6 +164,7 @@ defmodule Toxic.Driver do
       error_max_skip: error_max_skip,
       insert_structural_closers: insert_structural_closers,
       insert_identifier_sanitization: insert_identifier_sanitization,
+      error_token_payload: error_token_payload,
       scope:
         scope(
           elixir_compatibility: elixir_compatibility,
@@ -1006,7 +1010,7 @@ defmodule Toxic.Driver do
        ) do
     reason = Contexts.missing_interpolation_reason(interp_context, state)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_payload(reason, state)}
 
     inserted =
       if state.insert_structural_closers, do: [{:end_interpolation, meta0, kind}], else: []
@@ -1029,7 +1033,7 @@ defmodule Toxic.Driver do
        ) do
     reason = Contexts.missing_terminator_reason(interp_context, state)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_payload(reason, state)}
 
     inserted =
       if state.insert_structural_closers,
@@ -1059,7 +1063,7 @@ defmodule Toxic.Driver do
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
     reason = Contexts.missing_scope_terminator_reason(entry, state)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    error_token = {:error_token, meta0, reason}
+    error_token = {:error_token, meta0, error_payload(reason, state)}
 
     scope(terminators: terms) = state.scope
 
@@ -1076,5 +1080,18 @@ defmodule Toxic.Driver do
       [],
       %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}
     }
+  end
+
+  defp error_payload(%Toxic.Error{} = error, %__MODULE__{error_token_payload: mode}) do
+    case mode do
+      :struct ->
+        error
+
+      :tuple ->
+        Toxic.Error.to_reason_tuple(error)
+
+      :both ->
+        {error, Toxic.Error.to_reason_tuple(error)}
+    end
   end
 end
