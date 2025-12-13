@@ -522,6 +522,35 @@ defmodule ToxicTest do
     end
   end
 
+  describe ":static_atoms_encoder" do
+    test "invokes encoder for identifiers and uses returned term" do
+      encoder = fn value, loc ->
+        send(self(), {:encoder_args, value, loc})
+        {:ok, {:encoded_static_atom, value}}
+      end
+
+      stream = Toxic.new("foo", 1, 1, static_atoms_encoder: encoder)
+      {:ok, token, _stream} = Toxic.next(stream)
+
+      assert {:identifier, _meta, {:encoded_static_atom, "foo"}} = token
+      assert_received {:encoder_args, "foo", [line: 1, column: 1]}
+    end
+
+    test "returns structured error when encoder rejects value" do
+      encoder = fn _value, _loc ->
+        {:error, "nope"}
+      end
+
+      stream = Toxic.new(":foo", 1, 1, error_mode: :strict, static_atoms_encoder: encoder)
+      {:error, {meta_kv, message, token_chars} = reason, _stream} = Toxic.next(stream)
+
+      assert meta_kv[:line] == 1
+      assert meta_kv[:column] == 1
+      assert IO.iodata_to_binary(message) == "nope: "
+      assert IO.iodata_to_binary(token_chars) == "foo"
+    end
+  end
+
   describe "current_terminators/1" do
     test "returns terminator stack" do
       stream = Toxic.new("(")

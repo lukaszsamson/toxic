@@ -44,7 +44,8 @@ defmodule Toxic.Scope do
             unescape: boolean(),
             cursor_completion: boolean(),
             existing_atoms_only: boolean(),
-            static_atoms_encoder: nil | function(),
+            static_atoms_encoder:
+              nil | (binary(), keyword() -> {:ok, term()} | {:error, binary()}),
             preserve_comments: nil | false | preserve_comments_fun(),
             ascii_identifiers_only: boolean(),
             indentation: non_neg_integer(),

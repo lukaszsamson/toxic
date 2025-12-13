@@ -58,6 +58,7 @@ defmodule Toxic.Error do
           | :identifier_invalid_char
           | :identifier_atom_length_limit
           | :identifier_nonexistent_atom_when_existing_only
+          | :identifier_static_atoms_encoder_error
           | :alias_invalid_character
           | :alias_unexpected_paren
           | :reserved_token_used
@@ -314,6 +315,16 @@ defmodule Toxic.Error do
     ~c"atom length must be less than system limit: "
   end
 
+  def format(%__MODULE__{code: :encoding_invalid}) do
+    ~c"invalid encoding in atom: "
+  end
+
+  def format(%__MODULE__{code: :identifier_static_atoms_encoder_error, details: d})
+      when is_map(d) do
+    reason = Map.get(d, :reason, ~c"static atoms encoder error")
+    [List.wrap(reason), ~c": "]
+  end
+
   def format(%__MODULE__{code: :syntax_consecutive_semicolons}) do
     ~c"unexpected token: "
   end
@@ -473,6 +484,8 @@ defmodule Toxic.Error do
         :identifier_unexpected_token -> List.wrap(error.token_display)
         :identifier_atom_length_limit -> List.wrap(error.token_display)
         :identifier_nonexistent_atom_when_existing_only -> List.wrap(error.token_display)
+        :identifier_static_atoms_encoder_error -> List.wrap(error.token_display)
+        :encoding_invalid -> List.wrap(error.token_display)
         :alias_invalid_character -> List.wrap(error.token_display)
         :alias_unexpected_paren -> List.wrap(error.token_display)
         :reserved_token_used -> List.wrap(error.token_display)

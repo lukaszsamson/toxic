@@ -147,6 +147,7 @@ defmodule Toxic.Driver do
     elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
     preserve_comments = Keyword.get(opts, :preserve_comments, false)
     existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
+    static_atoms_encoder = Keyword.get(opts, :static_atoms_encoder, nil)
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
     error_mode = Keyword.get(opts, :error_mode, :tolerant)
@@ -179,7 +180,8 @@ defmodule Toxic.Driver do
         scope(
           elixir_compatibility: elixir_compatibility,
           preserve_comments: preserve_comments,
-          existing_atoms_only: existing_atoms_only
+          existing_atoms_only: existing_atoms_only,
+          static_atoms_encoder: static_atoms_encoder
         )
     }
   end

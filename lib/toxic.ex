@@ -47,6 +47,8 @@ defmodule Toxic do
           | {:error_token_payload, :struct | :tuple | :both}
           | {:preserve_comments, false | (integer(), integer(), list(), list(), list() -> any())}
           | {:existing_atoms_only, boolean()}
+          | {:static_atoms_encoder,
+             nil | (binary(), keyword() -> {:ok, term()} | {:error, binary()})}
         ]
 
   @typedoc """
@@ -123,7 +125,8 @@ defmodule Toxic do
     error_token_payload: :struct,
     elixir_compatibility: false,
     preserve_comments: false,
-    existing_atoms_only: false
+    existing_atoms_only: false,
+    static_atoms_encoder: nil
   ]
 
   @doc """
@@ -145,6 +148,9 @@ defmodule Toxic do
   - `:insert_identifier_sanitization` - Sanitize invalid identifiers in tolerant mode (default: `true`)
   - `:preserve_comments` - Whether to preserve comments (default: `false`)
   - `:existing_atoms_only` - Only allow existing atoms in keywords (default: `false`)
+  - `:static_atoms_encoder` - Optional callback invoked whenever the tokenizer needs to create a *static* atom.
+    Receives `(value_binary, [line: line, column: column])` and must return `{:ok, term}` or `{:error, reason_binary}` (default: `nil`).
+    When set, this overrides `:existing_atoms_only` for static atoms; `:existing_atoms_only` is still used for dynamic atoms (for example atoms created at runtime via interpolation).
 
   ## Examples
 
