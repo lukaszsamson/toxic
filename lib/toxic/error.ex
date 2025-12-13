@@ -73,7 +73,6 @@ defmodule Toxic.Error do
           | :unexpected_token
           | :syntax_error
           | :syntax_consecutive_semicolons
-          | :operator_ternary_missing_slash
 
   @typedoc "Start and end positions for a range (inclusive start, exclusive end)"
   @type position :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}}
