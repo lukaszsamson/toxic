@@ -1,6 +1,8 @@
 defmodule Toxic.TolerantModeTest do
   use ExUnit.Case
 
+  require Toxic.Scope
+
   # Helper to tokenize in tolerant mode
   defp tokenize_tolerant(string, opts \\ []) do
     stream_opts =
@@ -170,6 +172,109 @@ defmodule Toxic.TolerantModeTest do
 
       assert new_rest == ~c"\nok"
       assert {new_driver.line, new_driver.column} == {1, 12}
+    end
+
+    test "scan_to_sync honors error_sync for comma" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:comma])
+      rest = ~c"abc,def\nok"
+      err = %Toxic.Error{code: :syntax_error, domain: :general, details: %{line: 1, column: 1}}
+
+      {:ok, {:error_token, _meta, _payload}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, err)
+
+      assert new_rest == ~c",def\nok"
+      assert {new_driver.line, new_driver.column} == {1, 4}
+    end
+
+    test "scan_to_sync honors error_sync for closer" do
+      driver0 = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:closer])
+
+      driver =
+        %{driver0 | scope: Toxic.Scope.scope(driver0.scope, terminators: [{:"(", nil, 0}])}
+
+      rest = ~c"abc)def\nok"
+      err = %Toxic.Error{code: :syntax_error, domain: :general, details: %{line: 1, column: 1}}
+
+      {:ok, {:error_token, _meta, _payload}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, err)
+
+      assert new_rest == ~c")def\nok"
+      assert {new_driver.line, new_driver.column} == {1, 4}
+    end
+
+    test "scan_to_sync treats Unicode graphemes as single columns (combining + ZWJ) and stops at CRLF" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:newline])
+
+      # e + combining acute accent
+      combining = "e\u0301"
+      # multiple codepoints, single grapheme cluster
+      zwj_family = "👩‍👩‍👧‍👧"
+
+      rest = String.to_charlist("a" <> combining <> zwj_family <> "\r\nok")
+      err = %Toxic.Error{code: :syntax_error, domain: :general, details: %{line: 1, column: 1}}
+
+      {:ok, {:error_token, _meta, _payload}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, err)
+
+      assert new_rest == ~c"\r\nok"
+      # a + combining cluster + zwj cluster => 3 columns consumed
+      assert {new_driver.line, new_driver.column} == {1, 4}
+    end
+  end
+
+  describe "Error details validation" do
+    test "emitted error structs satisfy Toxic.Error.validate_details!/1 for representative codes" do
+      cases = [
+        {"(", :terminator_missing_closer},
+        {"([)", :terminator_mismatched_closer},
+        {"\"unclosed", :string_missing_terminator}
+      ]
+
+      Enum.each(cases, fn {source, code} ->
+        tokens = tokenize_tolerant(source)
+
+        {:error_token, _meta, %Toxic.Error{code: ^code} = err} =
+          Enum.find(tokens, fn
+            {:error_token, _, %Toxic.Error{code: ^code}} -> true
+            _ -> false
+          end)
+
+        assert Toxic.Error.validate_details!(err) == :ok
+      end)
+    end
+  end
+
+  describe "Option combinations (LSP-like configs)" do
+    test "tolerant stream with structural + identifier synthesis and tuple payload never crashes" do
+      opts = [
+        error_mode: :tolerant,
+        error_token_payload: :both,
+        error_sync: [:newline, :closer, :comma],
+        insert_structural_closers: true,
+        insert_identifier_sanitization: true,
+        existing_atoms_only: true,
+        elixir_compatibility: false,
+        preserve_comments: false
+      ]
+
+      stream = Toxic.new("([)\n% {}\nFoo()(", 1, 1, opts)
+
+      tokens =
+        Stream.unfold(stream, fn s ->
+          case Toxic.next(s) do
+            {:ok, token, s2} -> {token, s2}
+            {:eof, _final} -> nil
+            {:error, _reason, _final} -> flunk("Tolerant mode returned {:error, ...} tuple")
+          end
+        end)
+        |> Enum.to_list()
+
+      assert Enum.any?(tokens, fn token -> match?({:error_token, _, _}, token) end)
+
+      assert Enum.any?(tokens, fn
+               {:error_token, _, {%Toxic.Error{}, {_, _, _}}} -> true
+               _ -> false
+             end)
     end
   end
 
@@ -948,6 +1053,20 @@ defmodule Toxic.TolerantModeTest do
       assert Enum.any?(token_types(tokens), &(&1 == :error_token))
       assert Enum.any?(token_types(tokens), &(&1 == :int))
     end
+
+    test "interpolation error inside sigil recovers and still closes the sigil" do
+      # `;;` inside interpolation is a lexer-level error (covered elsewhere for strings);
+      # ensure the same recovery works when the interpolation is inside a sigil.
+      # Space after sigil end ensures the next `ok` is not parsed as sigil modifiers.
+      tokens = tokenize_tolerant(~S|~s(#{;;}) ok|)
+      types = token_types(tokens)
+
+      assert :error_token in types
+      assert :begin_interpolation in types
+      assert :end_interpolation in types
+      assert :sigil_end in types
+      assert :identifier in types
+    end
   end
 
   describe "Identifier variants" do
@@ -1527,6 +1646,19 @@ defmodule Toxic.TolerantModeTest do
 
       # Three errors (one per missing closer)
       assert length(error_tokens(tokens)) >= 3
+    end
+
+    test "deep nesting: many open parens synthesize matching closers" do
+      depth = 40
+      input = String.duplicate("(", depth) <> "1"
+
+      tokens = tokenize_with_synthesis(input)
+      types = token_types(tokens)
+
+      assert :int in types
+      assert Enum.count(types, &(&1 == :"(")) == depth
+      assert Enum.count(types, &(&1 == :")")) == depth
+      assert :error_token in types
     end
 
     test "EOF drains multiple errors with synthesis" do
