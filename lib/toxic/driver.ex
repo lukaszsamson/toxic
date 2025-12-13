@@ -1093,15 +1093,17 @@ defmodule Toxic.Driver do
   end
 
   defp error_payload(%Toxic.Error{} = error, %__MODULE__{error_token_payload: mode}) do
+    error = Toxic.Error.safe_validate(error)
+
     case mode do
       :struct ->
         error
 
       :tuple ->
-        Toxic.Error.to_reason_tuple(error)
+        Toxic.Error.safe_to_reason_tuple(error)
 
       :both ->
-        {error, Toxic.Error.to_reason_tuple(error)}
+        {error, Toxic.Error.safe_to_reason_tuple(error)}
     end
   end
 end

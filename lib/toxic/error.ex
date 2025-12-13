@@ -123,6 +123,11 @@ defmodule Toxic.Error do
     ~c"unexpected token: "
   end
 
+  def format(%__MODULE__{code: :syntax_error, details: d}) when is_map(d) do
+    # Best-effort: preserve legacy message when available; otherwise use a generic message.
+    Map.get(d, :legacy_message, ~c"syntax error")
+  end
+
   def format(%__MODULE__{code: :terminator_missing_closer, details: details}) do
     expected = Map.fetch!(details, :expected_delimiter)
     chars = terminator_chars(expected)
@@ -381,6 +386,53 @@ defmodule Toxic.Error do
   end
 
   @doc """
+  Safe details validation for tolerant mode.
+
+  Returns the original error when valid; otherwise returns a `:syntax_error` wrapper
+  describing the validation failure. This guarantees tolerant mode never crashes
+  due to malformed error structs.
+  """
+  @spec safe_validate(t()) :: t()
+  def safe_validate(%__MODULE__{} = error) do
+    try do
+      validate_details!(error)
+      error
+    rescue
+      e in ArgumentError ->
+        {line, column} = primary_line_column(error)
+
+        %__MODULE__{
+          code: :syntax_error,
+          domain: :general,
+          token_display: [],
+          details: %{
+            line: line,
+            column: column,
+            validation_error: Exception.message(e),
+            original_code: error.code,
+            original_domain: error.domain
+          }
+        }
+    end
+  end
+
+  @doc """
+  Safe variant of `to_reason_tuple/1`.
+
+  Needed for tolerant mode when `error_token_payload` is `:tuple` or `:both`.
+  """
+  @spec safe_to_reason_tuple(t()) :: {keyword(), iodata(), iodata() | []}
+  def safe_to_reason_tuple(%__MODULE__{} = error) do
+    try do
+      to_reason_tuple(error)
+    rescue
+      e in ArgumentError ->
+        {line, column} = primary_line_column(error)
+        {[line: line, column: column], [~c"invalid error details: ", Exception.message(e)], []}
+    end
+  end
+
+  @doc """
   Convert a structured error to a legacy reason tuple `{meta_kv, message_iodata, token_chars}`
   used by strict mode and strict-mode tests.
   """
@@ -433,16 +485,37 @@ defmodule Toxic.Error do
     {meta_kv, message, token_chars}
   end
 
+  defp primary_line_column(%__MODULE__{position: {{sl, sc}, _}})
+       when is_integer(sl) and is_integer(sc),
+       do: {sl, sc}
+
+  defp primary_line_column(%__MODULE__{details: d}) when is_map(d),
+    do: {Map.get(d, :line, 1), Map.get(d, :column, 1)}
+
   # -- Internal helpers -------------------------------------------------------
 
   @spec meta_from(t()) :: keyword()
   defp meta_from(%__MODULE__{position: {{sl, sc}, {el, ec}}} = error) when is_integer(sl) do
-    base = [line: sl, column: sc, end_line: el, end_column: ec]
+    details = error.details
+
+    base =
+      case error.code do
+        :terminator_mismatched_closer ->
+          # Elixir's legacy reason tuples place the span from the opener to the
+          # start of the mismatched closer.
+          [
+            line: Map.get(details, :line, sl),
+            column: Map.get(details, :column, sc),
+            end_line: Map.get(details, :end_line, el),
+            end_column: Map.get(details, :end_column, ec)
+          ]
+
+        _ ->
+          [line: sl, column: sc, end_line: el, end_column: ec]
+      end
 
     case error.code do
       :terminator_mismatched_closer ->
-        details = error.details
-
         base ++
           [
             error_type: :mismatched_delimiter,
@@ -450,6 +523,9 @@ defmodule Toxic.Error do
             closing_delimiter: Map.get(details, :closing_delimiter),
             expected_delimiter: Map.get(details, :expected_delimiter)
           ]
+
+      _ ->
+        base
     end
   end
 

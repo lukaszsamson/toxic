@@ -84,17 +84,23 @@ defmodule Toxic.NormalTokenizer.Terminator do
 
       expected_end ->
         {{start_line, start_column}, _, _} = start_meta
-        {{_end_line, _end_start_column}, {end_line_end, end_column_end}, _} = end_meta
+        {{end_line_start, end_column_start}, {end_line_end, end_column_end}, _} = end_meta
 
         err = %Toxic.Error{
           code: :terminator_mismatched_closer,
           domain: :terminator,
           token_display: String.to_charlist("#{end_token}"),
-          position: {{start_line, start_column}, {end_line_end, end_column_end}},
+          # Position is the immediate error trigger span (the mismatched closer).
+          position: {{end_line_start, end_column_start}, {end_line_end, end_column_end}},
           details: %{
             opening_delimiter: start_token,
             closing_delimiter: end_token,
-            expected_delimiter: expected_end
+            expected_delimiter: expected_end,
+            # Preserve opener and closer-start coordinates for legacy reason tuples.
+            line: start_line,
+            column: start_column,
+            end_line: end_line_start,
+            end_column: end_column_start
           }
         }
 

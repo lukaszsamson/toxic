@@ -229,15 +229,17 @@ defmodule Toxic.Driver.Recovery do
   end
 
   defp error_payload(%Error{} = error, %Driver{error_token_payload: mode}) do
+    error = Error.safe_validate(error)
+
     case mode do
       :struct ->
         error
 
       :tuple ->
-        Error.to_reason_tuple(error)
+        Error.safe_to_reason_tuple(error)
 
       :both ->
-        {error, Error.to_reason_tuple(error)}
+        {error, Error.safe_to_reason_tuple(error)}
 
       _ ->
         error

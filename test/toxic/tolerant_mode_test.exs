@@ -111,6 +111,43 @@ defmodule Toxic.TolerantModeTest do
         Toxic.Driver.recover(rest, driver, legacy_reason)
     end
 
+    test "recover/3 with error_token_payload: :tuple does not crash on malformed error details" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_token_payload: :tuple)
+      rest = ~c"+ 1"
+
+      malformed = %Toxic.Error{
+        code: :terminator_missing_closer,
+        domain: :terminator,
+        details: %{}
+      }
+
+      {:ok, {:error_token, _meta, payload}, _new_rest, _new_driver} =
+        Toxic.Driver.recover(rest, driver, malformed)
+
+      assert {meta_kv, message, token_chars} = payload
+      assert is_list(meta_kv)
+      assert is_list(message) or is_binary(message)
+      assert is_list(token_chars)
+    end
+
+    test "recover/3 with error_token_payload: :both returns {struct, tuple} and validates safely" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_token_payload: :both)
+      rest = ~c"+ 1"
+
+      malformed = %Toxic.Error{
+        code: :terminator_missing_closer,
+        domain: :terminator,
+        details: %{}
+      }
+
+      {:ok, {:error_token, _meta, {struct, tuple}}, _new_rest, _new_driver} =
+        Toxic.Driver.recover(rest, driver, malformed)
+
+      assert %Toxic.Error{code: :syntax_error} = struct
+      assert {meta_kv, _message, _token_chars} = tuple
+      assert is_list(meta_kv)
+    end
+
     test "scan_to_sync honors error_sync for whitespace" do
       driver = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:newline])
       rest = ~c"abc def\nok"
