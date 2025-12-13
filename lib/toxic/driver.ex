@@ -48,7 +48,7 @@ defmodule Toxic.Driver do
             scope: nil,
             contexts: [:normal],
             error_mode: :tolerant,
-            error_sync: [:semicolon, :newline, :closer, :comma],
+            error_sync: [:semicolon, :newline, :closer, :comma, :comment, :whitespace],
             error_max_skip: 4096,
             insert_structural_closers: true,
             insert_identifier_sanitization: true,
@@ -131,7 +131,7 @@ defmodule Toxic.Driver do
           column: pos_integer(),
           contexts: [context()],
           error_mode: :tolerant | :strict,
-          error_sync: [:semicolon | :newline | :closer | :comma],
+          error_sync: [:semicolon | :newline | :closer | :comma | :comment | :whitespace],
           error_max_skip: non_neg_integer(),
           insert_structural_closers: boolean(),
           insert_identifier_sanitization: boolean(),
@@ -150,7 +150,17 @@ defmodule Toxic.Driver do
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
     error_mode = Keyword.get(opts, :error_mode, :tolerant)
-    error_sync = Keyword.get(opts, :error_sync, [:semicolon, :newline, :closer, :comma])
+
+    error_sync =
+      Keyword.get(opts, :error_sync, [
+        :semicolon,
+        :newline,
+        :closer,
+        :comma,
+        :comment,
+        :whitespace
+      ])
+
     error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
     insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
     insert_identifier_sanitization = Keyword.get(opts, :insert_identifier_sanitization, true)

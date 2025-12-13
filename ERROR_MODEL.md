@@ -150,7 +150,7 @@ Documenting recovery removes ambiguity and lets tests assert behavior directly.
 | interpolation_not_allowed_in_quoted_identifier | Emit error; consume interpolation sequence minimally; continue quoted identifier. |
 | string_missing_terminator | Emit error; if enabled, synthesize `{:_end, ...}` (bin/list/sigil/quoted identifier end) AFTER error. |
 | heredoc_invalid_header | Emit error; if enabled, synthesize appropriate heredoc end AFTER error. |
-| map_unexpected_space_after_percent | Emit `%` token BEFORE error; error spans the offending `{}` header; resume normally. |
+| map_unexpected_space_after_percent | `%` is emitted as a normal token; error is raised at `{` when `%` was previously emitted; resume normally (no special recovery insertion required). |
 | map_invalid_open_delimiter | Emit `%` token BEFORE error; error consumes the invalid `(` or `[`; subsequent `(` or `[` tokenizes normally. |
 | identifier errors in map context | When identifier error follows `%{}` or `{` token: pre-insert synthetic `%` token before error to preserve map structure for downstream tools. |
 | keyword_missing_space_after_colon | Emit error at `:`; consume only `:` so following identifier remains. |

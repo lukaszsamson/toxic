@@ -40,7 +40,7 @@ defmodule Toxic do
           {:unescape, boolean()}
           | {:max_batch, non_neg_integer()}
           | {:error_mode, :tolerant | :strict}
-          | {:error_sync, [:semicolon | :newline | :closer | :comma]}
+          | {:error_sync, [:semicolon | :newline | :closer | :comma | :comment | :whitespace]}
           | {:error_max_skip, non_neg_integer()}
           | {:insert_structural_closers, boolean()}
           | {:insert_identifier_sanitization, boolean()}
@@ -116,7 +116,7 @@ defmodule Toxic do
     unescape: true,
     max_batch: 256,
     error_mode: :tolerant,
-    error_sync: [:semicolon, :newline, :closer, :comma],
+    error_sync: [:semicolon, :newline, :closer, :comma, :comment, :whitespace],
     error_max_skip: 4096,
     insert_structural_closers: true,
     insert_identifier_sanitization: true,

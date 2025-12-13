@@ -42,10 +42,10 @@ defmodule Toxic.Driver.Position do
   defp do_scan_to_sync(list = [h | _t], state, scanned) do
     stop? =
       stop_at_semicolon?(h, state) or
-        stop_at_newline?(list) or
+        stop_at_newline?(list, state) or
         stop_at_comma?(h, state) or
-        stop_at_comment?(h) or
-        stop_at_whitespace?(h) or
+        stop_at_comment?(h, state) or
+        stop_at_whitespace?(h, state) or
         stop_at_closer?(list, state)
 
     if stop? do
@@ -85,13 +85,14 @@ defmodule Toxic.Driver.Position do
     :comma in sync and ch == ?,
   end
 
-  defp stop_at_comment?(ch), do: ch == ?#
+  defp stop_at_comment?(ch, %Driver{error_sync: sync}), do: :comment in sync and ch == ?#
 
-  defp stop_at_whitespace?(h), do: is_horizontal_space(h)
+  defp stop_at_whitespace?(h, %Driver{error_sync: sync}),
+    do: :whitespace in sync and is_horizontal_space(h)
 
-  defp stop_at_newline?([?\n | _]), do: true
-  defp stop_at_newline?([?\r, ?\n | _]), do: true
-  defp stop_at_newline?(_), do: false
+  defp stop_at_newline?([?\n | _], %Driver{error_sync: sync}), do: :newline in sync
+  defp stop_at_newline?([?\r, ?\n | _], %Driver{error_sync: sync}), do: :newline in sync
+  defp stop_at_newline?(_, _state), do: false
 
   defp stop_at_closer?(rest, %Driver{error_sync: sync} = state) do
     if :closer in sync do

@@ -110,6 +110,30 @@ defmodule Toxic.TolerantModeTest do
       {:ok, {:error_token, _meta, %Toxic.Error{code: :syntax_error}}, _new_rest, _new_driver} =
         Toxic.Driver.recover(rest, driver, legacy_reason)
     end
+
+    test "scan_to_sync honors error_sync for whitespace" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:newline])
+      rest = ~c"abc def\nok"
+      err = %Toxic.Error{code: :syntax_error, domain: :general, details: %{line: 1, column: 1}}
+
+      {:ok, {:error_token, _meta, _payload}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, err)
+
+      assert new_rest == ~c"\nok"
+      assert {new_driver.line, new_driver.column} == {1, 8}
+    end
+
+    test "scan_to_sync honors error_sync for comment" do
+      driver = Toxic.Driver.new(error_mode: :tolerant, error_sync: [:newline])
+      rest = ~c"abc#comment\nok"
+      err = %Toxic.Error{code: :syntax_error, domain: :general, details: %{line: 1, column: 1}}
+
+      {:ok, {:error_token, _meta, _payload}, new_rest, new_driver} =
+        Toxic.Driver.recover(rest, driver, err)
+
+      assert new_rest == ~c"\nok"
+      assert {new_driver.line, new_driver.column} == {1, 12}
+    end
   end
 
   describe "Error meta accuracy" do
@@ -743,7 +767,7 @@ defmodule Toxic.TolerantModeTest do
 
       assert Enum.any?(tokens, fn token -> match?({:%, _}, token) end)
 
-      {:error_token, {{2, 1}, {2, 6}, _}, %Toxic.Error{code: :map_unexpected_space_after_percent}} =
+      {:error_token, {{2, 1}, {2, 2}, _}, %Toxic.Error{code: :map_unexpected_space_after_percent}} =
         Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
     end
 

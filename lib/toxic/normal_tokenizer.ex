@@ -297,6 +297,7 @@ defmodule Toxic.NormalTokenizer do
       code: :map_unexpected_space_after_percent,
       domain: :map,
       token_display: [?{],
+      position: {{line, column}, {line, column + 1}},
       details: %{line: line, column: column}
     }
 
