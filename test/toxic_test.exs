@@ -864,6 +864,43 @@ defmodule ToxicTest do
       assert {:ok, {:int, _, ~c"1"}, _} = Toxic.next(stream_after_error)
     end
 
+    test "errors/1 collects error tokens when error_token_payload is :tuple" do
+      stream =
+        Toxic.new("Ä 1", 1, 1,
+          error_mode: :tolerant,
+          error_token_payload: :tuple
+        )
+
+      {errors, stream_after} = Toxic.errors(stream)
+
+      assert [{_meta, %Toxic.Error{}}] = errors
+      assert stream_after == stream
+
+      assert {:ok, {:error_token, _, {_meta_kv, _message, _token_chars}}, stream_after_error} =
+               Toxic.next(stream_after)
+
+      assert {:ok, {:int, _, ~c"1"}, _} = Toxic.next(stream_after_error)
+    end
+
+    test "errors/1 collects error tokens when error_token_payload is :both" do
+      stream =
+        Toxic.new("Ä 1", 1, 1,
+          error_mode: :tolerant,
+          error_token_payload: :both
+        )
+
+      {errors, stream_after} = Toxic.errors(stream)
+
+      assert [{_meta, %Toxic.Error{}}] = errors
+      assert stream_after == stream
+
+      assert {:ok, {:error_token, _, {%Toxic.Error{}, {_meta_kv, _message, _token_chars}}},
+              stream_after_error} =
+               Toxic.next(stream_after)
+
+      assert {:ok, {:int, _, ~c"1"}, _} = Toxic.next(stream_after_error)
+    end
+
     test "strict next/1 returns error tuple and preserves reason" do
       stream = Toxic.new(@invalid_source, 1, 1, error_mode: :strict)
 

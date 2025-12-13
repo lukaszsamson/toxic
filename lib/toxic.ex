@@ -551,9 +551,12 @@ defmodule Toxic do
   end
 
   @doc """
-  Collect all error tokens emitted so far (for editor integrations).
+  Collect error tokens without consuming the stream (for editor integrations).
 
-  Returns a list of `{meta, %Toxic.Error{}}` entries.
+  This scans the remaining tokens in the stream and returns a list of
+  `{meta, %Toxic.Error{}}` entries while leaving the original stream unchanged.
+
+  Supports all `:error_token` payload modes (`:struct`, `:tuple`, `:both`).
   """
   @type error_entry :: {{pos_integer(), pos_integer()}, {pos_integer(), pos_integer()}, any()}
   @spec errors(t()) :: {[{error_entry(), Toxic.Error.t()}], t()}
@@ -564,6 +567,8 @@ defmodule Toxic do
       tokens
       |> Enum.flat_map(fn
         {:error_token, meta, %Toxic.Error{} = err} -> [{meta, err}]
+        {:error_token, meta, {%Toxic.Error{} = err, _tuple}} -> [{meta, err}]
+        {:error_token, meta, payload} -> [{meta, Toxic.Error.ensure_struct(payload)}]
         _ -> []
       end)
 
