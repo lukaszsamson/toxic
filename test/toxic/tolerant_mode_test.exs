@@ -1130,6 +1130,34 @@ defmodule Toxic.TolerantModeTest do
       assert Enum.any?(token_types(tokens), &(&1 == :error_token))
       assert Enum.any?(token_types(tokens), &(&1 == :int))
     end
+
+    test "identifier sanitization does not create new atoms" do
+      # This input triggers an identifier-domain error and, with sanitization enabled,
+      # inserts a recovered :identifier token. Under existing_atoms_only, that token
+      # must not require creating a new atom.
+      input = "foo" <> <<0x03B1::utf8>> <> "bar + 1"
+
+      tokens =
+        tokenize_tolerant(input,
+          existing_atoms_only: true,
+          insert_identifier_sanitization: true
+        )
+
+      assert Enum.any?(tokens, fn t -> match?({:error_token, _, _}, t) end)
+
+      identifiers =
+        Enum.filter(tokens, fn
+          {:identifier, _, _} -> true
+          _ -> false
+        end)
+
+      assert length(identifiers) >= 1
+
+      Enum.each(identifiers, fn {:identifier, _, atom} ->
+        # If this raises, the atom is not an existing atom (and would imply creation).
+        assert List.to_existing_atom(Atom.to_charlist(atom)) == atom
+      end)
+    end
   end
 
   describe "Indentation hint errors" do

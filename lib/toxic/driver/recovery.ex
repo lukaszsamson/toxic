@@ -290,7 +290,7 @@ defmodule Toxic.Driver.Recovery do
           Enum.split_while(rest, fn ch -> ch != ?: end)
 
         id_chars = [first | rest_chars]
-        id_token = sanitize_identifier_from_chars(id_chars, state.line, state.column)
+        id_token = sanitize_identifier_from_chars(id_chars, state.line, state.column, state.scope)
         consumed_len = length(id_chars) + 1
         {tail, state.line, state.column + consumed_len, [id_token], state.scope}
 
@@ -336,7 +336,7 @@ defmodule Toxic.Driver.Recovery do
       {:identifier, _code} ->
         if state.insert_identifier_sanitization do
           span_chars = take_prefix_until(rest, def_rest)
-          id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column)
+          id_token = sanitize_identifier_from_chars(span_chars, state.line, state.column, state.scope)
 
           {def_rest, def_line, def_col, [{:post_error, id_token}], state.scope}
         else
@@ -355,7 +355,7 @@ defmodule Toxic.Driver.Recovery do
     end
   end
 
-  defp sanitize_identifier_from_chars(chars, line, col) do
+  defp sanitize_identifier_from_chars(chars, line, col, scope) do
     # Normalize original erroneous identifier and build ASCII-friendly skeleton
     bin = Util.characters_to_binary(chars)
 
@@ -376,8 +376,24 @@ defmodule Toxic.Driver.Recovery do
       |> Enum.take(255)
       |> ensure_ident_start()
 
-    meta_id = meta(line, col, line, col + length(filtered), filtered)
-    id_atom = List.to_atom(filtered)
+    # Respect existing_atoms_only: never create a new atom in tolerant recovery.
+    # If the sanitized identifier doesn't already exist, fall back to a safe existing atom.
+    {id_atom, token_chars} =
+      case scope do
+        scope(existing_atoms_only: true) ->
+          try do
+            {List.to_existing_atom(filtered), filtered}
+          rescue
+            ArgumentError ->
+              # Guaranteed-existing atom literal; keeps parsing moving without atom creation.
+              {:_, ~c"_"}
+          end
+
+        _ ->
+          {List.to_atom(filtered), filtered}
+      end
+
+    meta_id = meta(line, col, line, col + length(token_chars), token_chars)
     {:identifier, meta_id, id_atom}
   end
 
