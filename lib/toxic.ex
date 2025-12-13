@@ -350,7 +350,7 @@ defmodule Toxic do
     Process.put(
       {__MODULE__, :checkpoint, ref},
       {stream.push, stream.buffer, stream.driver, stream.error, stream.eof,
-       stream.last_emitted_entry}
+       stream.last_emitted_entry, stream.source, stream.driver_source}
     )
 
     {ref, stream}
@@ -377,7 +377,7 @@ defmodule Toxic do
   @spec rewind_to(t(), reference(), boolean()) :: t()
   def rewind_to(%__MODULE__{} = stream, ref, delete_checkpoint? \\ true) do
     case Process.get({__MODULE__, :checkpoint, ref}) do
-      {push, buffer, driver, error, eof, last_emitted_entry} ->
+      {push, buffer, driver, error, eof, last_emitted_entry, source, driver_source} ->
         if delete_checkpoint? do
           Process.delete({__MODULE__, :checkpoint, ref})
         end
@@ -387,6 +387,8 @@ defmodule Toxic do
           | push: push,
             buffer: buffer,
             driver: driver,
+            source: source,
+            driver_source: driver_source,
             error: error,
             eof: eof,
             last_emitted_entry: last_emitted_entry
