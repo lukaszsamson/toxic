@@ -140,7 +140,7 @@ defmodule Toxic do
 
   ## Options
   - `:unescape` - Whether to unescape string contents (default: `true`)
-  - `:max_batch` - Maximum tokens to fetch in one batch (default: `256`)
+  - `:max_batch` - Maximum tokens to fetch in one batch (default: `16`)
   - `:error_mode` - Error handling: `:tolerant` or `:strict` (default: `:tolerant`)
   - `:error_sync` - Sync points for error recovery (default: `[:semicolon, :newline, :closer, :comma]`)
   - `:error_max_skip` - Maximum characters to skip during error recovery (default: `4096`)
@@ -652,7 +652,7 @@ defmodule Toxic do
   end
 
   defp refill_buffer(%__MODULE__{opts: opts, eof: false} = stream) do
-    max_batch = Keyword.get(opts, :max_batch, 256)
+    max_batch = Keyword.get(opts, :max_batch, 16)
 
     {tokens, source, new_driver, eof, error} = fetch_tokens_from_driver(stream, max_batch, opts)
 
