@@ -116,7 +116,7 @@ defmodule Toxic do
   # Default options
   @default_opts [
     unescape: true,
-    max_batch: 256,
+    max_batch: 16,
     error_mode: :tolerant,
     error_sync: [:semicolon, :newline, :closer, :comma, :comment, :whitespace],
     error_max_skip: 4096,
