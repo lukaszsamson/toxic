@@ -408,6 +408,26 @@ defmodule Toxic do
   end
 
   @doc """
+  Drop a checkpoint without rewinding.
+
+  Frees the checkpoint storage without restoring the stream state.
+  Use this when you no longer need to backtrack to the checkpoint.
+
+  ## Parameters
+  - `ref` - Reference returned from `checkpoint/1`
+
+  ## Raises
+  `ArgumentError` if the reference is invalid or not found.
+  """
+  @spec drop_checkpoint(reference()) :: :ok
+  def drop_checkpoint(ref) do
+    case Process.delete({__MODULE__, :checkpoint, ref}) do
+      nil -> raise ArgumentError, "Invalid checkpoint reference"
+      _saved -> :ok
+    end
+  end
+
+  @doc """
   Convert the stream to an Elixir Stream for enumeration.
   """
   @spec to_stream(t()) :: Enumerable.t()
