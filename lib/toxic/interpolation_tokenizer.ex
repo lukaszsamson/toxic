@@ -77,11 +77,11 @@ defmodule Toxic.InterpolationTokenizer do
         column,
         _start_line,
         _start_column,
-        scope,
+        scope = scope(column: base_column),
         _interpol,
         [last, last, last]
       ) do
-    {:done, meta(line, column, 3, nil), column - 1, rest, line, column + 3, scope}
+    {:done, meta(line, column, 3, nil), column - base_column, rest, line, column + 3, scope}
   end
 
   # Going through the string
@@ -358,10 +358,19 @@ defmodule Toxic.InterpolationTokenizer do
     end
   end
 
-  defp extract_nl(rest, buffer, line, start_line, start_column, scope, interpol, [h, h, h] = last) do
-    case strip_horizontal_space(rest, buffer, 1) do
+  defp extract_nl(
+         rest,
+         buffer,
+         line,
+         start_line,
+         start_column,
+         scope = scope(column: base_column),
+         interpol,
+         [h, h, h] = last
+       ) do
+    case strip_horizontal_space(rest, buffer, base_column) do
       {[^h, ^h, ^h | new_rest], _new_buffer, column} ->
-        {:fragment, meta(start_line, start_column, line + 1, 1, nil),
+        {:fragment, meta(start_line, start_column, line + 1, column, nil),
          Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [h, h, h | new_rest], line + 1,
          column, scope}
 
@@ -390,7 +399,6 @@ defmodule Toxic.InterpolationTokenizer do
          interpol,
          last
        ) do
-    # TODO: all newlines should use scope column instead of hardcoded 1
     next(
       rest,
       buffer,

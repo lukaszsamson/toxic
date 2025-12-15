@@ -266,10 +266,12 @@ defmodule Toxic.Driver.Recovery do
         # The error_token's position already captures the "end" location for diagnostics.
         case rest do
           [?e, ?n, ?d, ?\n | tail] ->
-            {tail, state.line + 1, 1, [], state.scope}
+            scope(column: base_column) = state.scope
+            {tail, state.line + 1, base_column, [], state.scope}
 
           [?e, ?n, ?d, ?\r, ?\n | tail] ->
-            {tail, state.line + 1, 1, [], state.scope}
+            scope(column: base_column) = state.scope
+            {tail, state.line + 1, base_column, [], state.scope}
 
           [?e, ?n, ?d | tail] ->
             {tail, state.line, state.column + 3, [], state.scope}
@@ -292,7 +294,8 @@ defmodule Toxic.Driver.Recovery do
         # scan_to_sync may have stopped at whitespace, so we need to scan forward to find the newline.
         case Position.consume_until_newline(def_rest) do
           {new_rest, consumed_newline?} when consumed_newline? ->
-            {new_rest, state.line + 1, 1, [], state.scope}
+            scope(column: base_column) = state.scope
+            {new_rest, state.line + 1, base_column, [], state.scope}
 
           _ ->
             # No newline found (EOF on same line), use def_rest as-is
@@ -340,9 +343,16 @@ defmodule Toxic.Driver.Recovery do
       {_, :string_missing_terminator} ->
         if Map.get(details, :escape_at_eof?, false) do
           case def_rest do
-            [?\n | new_rest] -> {new_rest, def_line + 1, 1, [], state.scope}
-            [?\r, ?\n | new_rest] -> {new_rest, def_line + 1, 1, [], state.scope}
-            _ -> {def_rest, def_line, def_col, [], state.scope}
+            [?\n | new_rest] ->
+              scope(column: base_column) = state.scope
+              {new_rest, def_line + 1, base_column, [], state.scope}
+
+            [?\r, ?\n | new_rest] ->
+              scope(column: base_column) = state.scope
+              {new_rest, def_line + 1, base_column, [], state.scope}
+
+            _ ->
+              {def_rest, def_line, def_col, [], state.scope}
           end
         else
           # defensive, this should should not happen

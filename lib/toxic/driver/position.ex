@@ -2,6 +2,7 @@ defmodule Toxic.Driver.Position do
   @moduledoc false
 
   import Toxic.CharacterClassifier
+  import Toxic.Scope
 
   alias Toxic.Driver
 
@@ -15,13 +16,15 @@ defmodule Toxic.Driver.Position do
   end
 
   def consume_one(rest, state) do
+    scope(column: base_column) = state.scope
+
     case :unicode_util.gc(rest) do
       [cluster | new_rest] when is_list(cluster) ->
-        {line, col} = advance_pos_cluster(cluster, state.line, state.column)
+        {line, col} = advance_pos_cluster(cluster, state.line, state.column, base_column)
         {new_rest, line, col}
 
       [codepoint | new_rest] when is_integer(codepoint) ->
-        {line, col} = advance_pos(codepoint, state.line, state.column)
+        {line, col} = advance_pos(codepoint, state.line, state.column, base_column)
         {new_rest, line, col}
 
       [] ->
@@ -53,11 +56,16 @@ defmodule Toxic.Driver.Position do
     else
       case :unicode_util.gc(list) do
         [cluster | rest2] when is_list(cluster) ->
-          {next_line, next_col} = advance_pos_cluster(cluster, state.line, state.column)
+          scope(column: base_column) = state.scope
+
+          {next_line, next_col} =
+            advance_pos_cluster(cluster, state.line, state.column, base_column)
+
           do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
 
         [codepoint | rest2] when is_integer(codepoint) ->
-          {next_line, next_col} = advance_pos(codepoint, state.line, state.column)
+          scope(column: base_column) = state.scope
+          {next_line, next_col} = advance_pos(codepoint, state.line, state.column, base_column)
           do_scan_to_sync(rest2, %{state | line: next_line, column: next_col}, scanned + 1)
 
         [] ->
@@ -66,12 +74,12 @@ defmodule Toxic.Driver.Position do
     end
   end
 
-  defp advance_pos(?\n, line, _col), do: {line + 1, 1}
-  defp advance_pos(_ch, line, col), do: {line, col + 1}
+  defp advance_pos(?\n, line, _col, base_column), do: {line + 1, base_column}
+  defp advance_pos(_ch, line, col, _base_column), do: {line, col + 1}
 
-  defp advance_pos_cluster(cluster, line, col) do
+  defp advance_pos_cluster(cluster, line, col, base_column) do
     if Enum.any?(cluster, &(&1 == ?\n)) do
-      {line + 1, 1}
+      {line + 1, base_column}
     else
       {line, col + 1}
     end

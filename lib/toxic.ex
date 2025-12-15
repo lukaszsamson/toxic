@@ -469,7 +469,6 @@ defmodule Toxic do
   A new stream starting at the specified position.
 
   ## Notes
-  - Currently uses `binary_part/3` which doesn't handle Unicode graphemes
   - Future versions may use `String.slice/3` for proper Unicode support
 
   """

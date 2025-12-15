@@ -105,11 +105,14 @@ defmodule Toxic.NormalTokenizer do
       end
 
     # Check if we have a literal newline after the escape
+    scope(column: base_column) = scope
+
     {token, rest, new_line, new_column} =
       case {h, t} do
         {?\n, _} ->
           # ?\\\n - escaped newline, consume the actual newline
-          {char(meta(line, column, line + 1, 1, [??, ?\\, ?\n]), char), t, line + 1, 1}
+          {char(meta(line, column, line + 1, base_column, [??, ?\\, ?\n]), char), t, line + 1,
+           base_column}
 
         _ ->
           # Regular escaped char
@@ -131,11 +134,14 @@ defmodule Toxic.NormalTokenizer do
       end
 
     # Check if the char is a newline
+    scope(column: base_column) = scope
+
     {token, rest, new_line, new_column} =
       case char do
         ?\n ->
           # ?\n - raw newline character, consume it and move to next line
-          {char(meta(line, column, line + 1, 1, [??, ?\n]), char), t, line + 1, 1}
+          {char(meta(line, column, line + 1, base_column, [??, ?\n]), char), t, line + 1,
+           base_column}
 
         _ ->
           # Regular char
@@ -586,11 +592,11 @@ defmodule Toxic.NormalTokenizer do
   end
 
   def next([?\n | rest], line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, tokens))
+    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
   end
 
   def next([?\r, ?\n | rest], line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, tokens))
+    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
   end
 
   # Others
@@ -823,27 +829,28 @@ defmodule Toxic.NormalTokenizer do
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
 
-  defp eol(_line, _column, [{token, _meta} | _tokens]) when token in ~w(, ; eol)a do
+  defp eol(_line, _column, _scope, [{token, _meta} | _tokens]) when token in ~w(, ; eol)a do
     :increase_eol
   end
 
-  defp eol(line, column, _tokens) do
-    {:eol, meta(line, column, line + 1, 1, 1)}
+  defp eol(line, column, scope, _tokens) do
+    scope(column: base_column) = scope
+    {:eol, meta(line, column, line + 1, base_column, 1)}
   end
 
-  defp tokenize_eol(rest, line, scope = scope(column: column), eol) do
-    {_stripped_rest, column} = strip_horizontal_space(rest, column)
+  defp tokenize_eol(rest, line, scope = scope(column: base_column), eol) do
+    {stripped_rest, column} = strip_horizontal_space(rest, base_column)
     indented_scope = scope(scope, indentation: column - 1)
 
     case eol do
       nil ->
-        no_token(rest, line + 1, 1, indented_scope)
+        no_token(stripped_rest, line + 1, column, indented_scope)
 
       :increase_eol ->
-        increase_eol(rest, line + 1, 1, indented_scope)
+        increase_eol(stripped_rest, line + 1, column, indented_scope)
 
       eol_token ->
-        emit(eol_token, rest, line + 1, 1, indented_scope)
+        emit(eol_token, stripped_rest, line + 1, column, indented_scope)
     end
   end
 

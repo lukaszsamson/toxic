@@ -542,7 +542,7 @@ defmodule ToxicTest do
       end
 
       stream = Toxic.new(":foo", 1, 1, error_mode: :strict, static_atoms_encoder: encoder)
-      {:error, {meta_kv, message, token_chars} = reason, _stream} = Toxic.next(stream)
+      {:error, {meta_kv, message, token_chars}, _stream} = Toxic.next(stream)
 
       assert meta_kv[:line] == 1
       assert meta_kv[:column] == 1

@@ -2,6 +2,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
   @moduledoc false
   import Toxic.CharacterClassifier
   import Toxic.Token
+  import Toxic.Scope
   alias Toxic.NormalTokenizer
 
   def tokenize_sigil([?~ | t], line, column, scope, tokens) do
@@ -102,8 +103,10 @@ defmodule Toxic.NormalTokenizer.Sigil do
         start_token =
           {:sigil_start, meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
 
+        scope(column: base_column) = scope
+
         {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, [?\n | headerless],
-         line + 1, 1, scope}
+         line + 1, base_column, scope}
 
       :error ->
         error_column = column + 3

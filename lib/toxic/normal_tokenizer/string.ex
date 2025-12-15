@@ -2,6 +2,7 @@ defmodule Toxic.NormalTokenizer.String do
   @moduledoc false
   import Toxic.Token
   import Toxic.CharacterClassifier
+  import Toxic.Scope
 
   def handle_heredocs(t, line, column, h, scope, _tokens) do
     # First check if the heredoc header is valid (only whitespace + newline after opening)
@@ -15,8 +16,10 @@ defmodule Toxic.NormalTokenizer.String do
 
         start_token = {start_type, meta(line, column, line, column + 3, nil), [h, h, h]}
 
-        {{:switch_to_interp, start_token, kind, true, [h, h, h]}, [?\n | headerless], line + 1, 1,
-         scope}
+        scope(column: base_column) = scope
+
+        {{:switch_to_interp, start_token, kind, true, [h, h, h]}, [?\n | headerless], line + 1,
+         base_column, scope}
 
       :error ->
         err = %Toxic.Error{

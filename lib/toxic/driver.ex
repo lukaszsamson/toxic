@@ -181,7 +181,8 @@ defmodule Toxic.Driver do
           elixir_compatibility: elixir_compatibility,
           preserve_comments: preserve_comments,
           existing_atoms_only: existing_atoms_only,
-          static_atoms_encoder: static_atoms_encoder
+          static_atoms_encoder: static_atoms_encoder,
+          column: column
         )
     }
   end
