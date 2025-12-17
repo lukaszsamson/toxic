@@ -97,16 +97,22 @@ defmodule Toxic.NormalTokenizer.Sigil do
       when is_quote(h) do
     case NormalTokenizer.String.extract_heredoc_header(t) do
       {:ok, headerless} ->
-        sigil_atom = List.to_atom(~c"sigil_" ++ sigil_name)
         start_column = column - length(sigil_name) - 1
 
-        start_token =
-          {:sigil_start, meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
+        case Toxic.Util.unsafe_to_atom(~c"sigil_" ++ sigil_name, line, start_column, scope) do
+          {:ok, sigil_atom} ->
+            start_token =
+              {:sigil_start,
+               meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
 
-        scope(column: base_column) = scope
+            scope(column: base_column) = scope
 
-        {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]}, [?\n | headerless],
-         line + 1, base_column, scope}
+            {{:switch_to_interp, start_token, :sigil, is_downcase(s), [h, h, h]},
+             [?\n | headerless], line + 1, base_column, scope}
+
+          {:error, err} ->
+            {:error, err}
+        end
 
       :error ->
         error_column = column + 3
@@ -136,14 +142,19 @@ defmodule Toxic.NormalTokenizer.Sigil do
         _tokens
       )
       when is_sigil(h) do
-    sigil_atom = List.to_atom(~c"sigil_" ++ sigil_name)
     start_column = column - length(sigil_name) - 1
 
-    start_token =
-      {:sigil_start, meta(line, start_column, line, column + 1, nil), sigil_atom, <<h>>}
+    case Toxic.Util.unsafe_to_atom(~c"sigil_" ++ sigil_name, line, start_column, scope) do
+      {:ok, sigil_atom} ->
+        start_token =
+          {:sigil_start, meta(line, start_column, line, column + 1, nil), sigil_atom, <<h>>}
 
-    {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, t, line,
-     column + 1, scope}
+        {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, t, line,
+         column + 1, scope}
+
+      {:error, err} ->
+        {:error, err}
+    end
   end
 
   def tokenize_sigil_contents([h | _] = _original, sigil_name, line, column, _scope, _tokens) do

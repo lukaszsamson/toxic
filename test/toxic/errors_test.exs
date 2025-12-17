@@ -256,6 +256,11 @@ defmodule Toxic.ErrorsTest do
     tokenize_and_compare_error("~s!foo!")
   end
 
+  test "sigil name uses unsafe_to_atom under existing_atoms_only" do
+    name = "XYZ" <> Integer.to_string(System.unique_integer([:positive]))
+    tokenize_and_compare_error("~#{name}/abc/", existing_atoms_only: true)
+  end
+
   # Alias errors
   test "invalid character in alias" do
     tokenize_and_compare_error("Foo.Bär")

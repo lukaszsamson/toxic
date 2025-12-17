@@ -1333,6 +1333,19 @@ defmodule Toxic.TolerantModeTest do
       assert Enum.any?(token_types(tokens), &(&1 == :int))
     end
 
+    test "sigil name does not create atoms" do
+      name = "XYZ" <> Integer.to_string(System.unique_integer([:positive]))
+      tokens = tokenize_tolerant("~#{name}/abc/", existing_atoms_only: true)
+
+      assert Enum.any?(tokens, fn
+               {:error_token, _, %Toxic.Error{code: :identifier_nonexistent_atom_when_existing_only}} ->
+                 true
+
+               _ ->
+                 false
+             end)
+    end
+
     test "identifier sanitization does not create new atoms" do
       # This input triggers an identifier-domain error and, with sanitization enabled,
       # inserts a recovered :identifier token. Under existing_atoms_only, that token
