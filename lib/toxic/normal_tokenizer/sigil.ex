@@ -102,8 +102,8 @@ defmodule Toxic.NormalTokenizer.Sigil do
         case Toxic.Util.unsafe_to_atom(~c"sigil_" ++ sigil_name, line, start_column, scope) do
           {:ok, sigil_atom} ->
             start_token =
-              {:sigil_start,
-               meta(line, start_column, line, column + 3, nil), sigil_atom, <<h, h, h>>}
+              {:sigil_start, meta(line, start_column, line, column + 3, nil), sigil_atom,
+               <<h, h, h>>}
 
             scope(column: base_column) = scope
 

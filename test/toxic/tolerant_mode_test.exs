@@ -1338,7 +1338,8 @@ defmodule Toxic.TolerantModeTest do
       tokens = tokenize_tolerant("~#{name}/abc/", existing_atoms_only: true)
 
       assert Enum.any?(tokens, fn
-               {:error_token, _, %Toxic.Error{code: :identifier_nonexistent_atom_when_existing_only}} ->
+               {:error_token, _,
+                %Toxic.Error{code: :identifier_nonexistent_atom_when_existing_only}} ->
                  true
 
                _ ->

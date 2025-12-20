@@ -1904,6 +1904,45 @@ defmodule Toxic.ValidCodeTest do
                {:ok, [{:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\"\"\"bar\n"]}], ""}
     end
 
+    test "terminator sequence mid-line is content (regression)" do
+      assert tokenize("\"\"\"\nfoo\#{}\"\"\"}\n\"\"\"") ==
+               {:ok,
+                [
+                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0,
+                   ["foo", {{2, 4, nil}, {2, 6, nil}, []}, "\"\"\"}\n"]}
+                ], ""}
+
+      assert tokenize("\"\"\"\r\nfoo\#{}\"\"\"}\r\n\"\"\"") ==
+               {:ok,
+                [
+                  {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0,
+                   ["foo", {{2, 4, nil}, {2, 6, nil}, []}, "\"\"\"}\r\n"]}
+                ], ""}
+
+      assert tokenize("~x\"\"\"\nfoo\#{}\"\"\"}\n\"\"\"") ==
+               {
+                 :ok,
+                 [
+                   {
+                     :sigil,
+                     {{1, 1}, {3, 4}, nil},
+                     :sigil_x,
+                     ["foo", {{2, 4, nil}, {2, 6, nil}, []}, "\"\"\"}\n"],
+                     [],
+                     0,
+                     "\"\"\""
+                   }
+                 ],
+                 ""
+               }
+
+      assert tokenize("~X\"\"\"\nfoo\#{}\"\"\"}\n\"\"\"") ==
+               {:ok,
+                [
+                  {:sigil, {{1, 1}, {3, 4}, nil}, :sigil_X, ["foo\#{}\"\"\"}\n"], [], 0, "\"\"\""}
+                ], ""}
+    end
+
     test "line with less indentation" do
       assert tokenize("\"\"\"\n \n  \n  \"\"\"") ==
                {:ok, [{:bin_heredoc, {{1, 1}, {4, 6}, nil}, 2, ["\n\n"]}], ""}

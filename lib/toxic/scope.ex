@@ -28,6 +28,7 @@ defmodule Toxic.Scope do
     ascii_identifiers_only: true,
     indentation: 0,
     column: 1,
+    allow_triple_terminator: false,
     mismatch_hints: [],
     warnings: [],
     elixir_compatibility: false

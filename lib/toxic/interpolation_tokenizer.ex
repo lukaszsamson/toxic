@@ -77,10 +77,11 @@ defmodule Toxic.InterpolationTokenizer do
         column,
         _start_line,
         _start_column,
-        scope = scope(column: base_column),
+        scope = scope(column: base_column, allow_triple_terminator: true),
         _interpol,
         [last, last, last]
       ) do
+    scope = scope(scope, allow_triple_terminator: false)
     {:done, meta(line, column, 3, nil), column - base_column, rest, line, column + 3, scope}
   end
 
@@ -370,6 +371,8 @@ defmodule Toxic.InterpolationTokenizer do
        ) do
     case strip_horizontal_space(rest, buffer, base_column) do
       {[^h, ^h, ^h | new_rest], _new_buffer, column} ->
+        scope = scope(scope, allow_triple_terminator: true)
+
         {:fragment, meta(start_line, start_column, line + 1, column, nil),
          Toxic.Util.characters_to_binary(Enum.reverse(buffer)), [h, h, h | new_rest], line + 1,
          column, scope}
