@@ -44,7 +44,7 @@ defmodule Toxic.ScopeColumnTest do
 
     assert [
              {:int, {{10, 5}, {10, 6}, 1}, _},
-             {:eol, {{10, 6}, {11, 5}, 1}},
+             {:eol, {{10, 6}, {11, 5}, 1}, nil},
              {:int, {{11, 5}, {11, 6}, 2}, _}
            ] = toks
   end

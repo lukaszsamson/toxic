@@ -68,7 +68,7 @@ defmodule Toxic.NormalTokenizer do
         Comment.preserve_comments(line, column, tokens, comment, rest, scope)
 
         case tokens do
-          [{:eol, _meta} | _] -> reset_eol(rest, line, column, scope)
+          [{:eol, _meta, _} | _] -> reset_eol(rest, line, column, scope)
           _ -> no_token(rest, line, column, scope)
         end
     end
@@ -284,21 +284,21 @@ defmodule Toxic.NormalTokenizer do
 
   # Containers + punctuation tokens
   def next([?, | rest], line, column, scope, _tokens) do
-    token = {:",", meta(line, column, 1, 0)}
+    token = comma(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
   def next([?<, ?< | rest], line, column, scope, tokens) do
-    token = {:"<<", meta(line, column, 2, nil)}
+    token = open_bitstring(meta(line, column, 2, nil))
     Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
   def next([?>, ?> | rest], line, column, scope, tokens) do
-    token = {:">>", meta(line, column, 2, previous_was_eol(tokens))}
+    token = close_bitstring(meta(line, column, 2, previous_was_eol(tokens)))
     Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
   end
 
-  def next([?{ | _rest], line, column, _scope, [{:%, _} | _] = _tokens) do
+  def next([?{ | _rest], line, column, _scope, [{:%, _, _} | _] = _tokens) do
     err = %Toxic.Error{
       code: :map_unexpected_space_after_percent,
       domain: :map,
@@ -311,12 +311,12 @@ defmodule Toxic.NormalTokenizer do
   end
 
   def next([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
-    token = {List.to_atom([t]), meta(line, column, 1, nil)}
+    token = token(List.to_atom([t]), meta(line, column, 1, nil), nil)
     Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
   end
 
   def next([t | rest], line, column, scope, tokens) when t in [?), ?}, ?]] do
-    token = {List.to_atom([t]), meta(line, column, 1, previous_was_eol(tokens))}
+    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(tokens)), nil)
     Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
   end
 
@@ -543,13 +543,13 @@ defmodule Toxic.NormalTokenizer do
   end
 
   def next([?; | rest], line, column, scope, []) do
-    token = {:";", meta(line, column, 1, 0)}
+    token = semicolon(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
   def next([?; | rest], line, column, scope, [top | _] = _tokens)
       when elem(top, 0) != :";" do
-    token = {:";", meta(line, column, 1, 0)}
+    token = semicolon(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
@@ -633,19 +633,26 @@ defmodule Toxic.NormalTokenizer do
     # this is a bug in elixir parser but the fix was not accepted
     # https://github.com/elixir-lang/elixir/pull/14741
     # we need a workaround
-    token = {:"{", meta(line, if(elixir_compatibility, do: column, else: column + 1), 1, nil)}
+    token =
+      token(
+        :"{",
+        meta(line, if(elixir_compatibility, do: column, else: column + 1), 1, nil),
+        nil
+      )
 
     {_, rest, line, column, scope} =
       Terminator.handle_terminator(t, line, column + 2, scope, token, [
-        {:%{}, meta(line, column, 2, nil)} | tokens
+        token(:%{}, meta(line, column, 2, nil), nil) | tokens
       ])
 
-    {[{:token, {:%{}, meta(line, column - 2, 1, nil)}}, {:token, token}], rest, line, column,
-     scope}
+    {[
+       {:token, token(:%{}, meta(line, column - 2, 1, nil), nil)},
+       {:token, token}
+     ], rest, line, column, scope}
   end
 
   def next([?% | t], line, column, scope, _tokens) do
-    token = {:%, meta(line, column, 1, nil)}
+    token = token(:%, meta(line, column, 1, nil), nil)
     emit(token, t, line, column + 1, scope)
   end
 
@@ -829,13 +836,14 @@ defmodule Toxic.NormalTokenizer do
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
 
-  defp eol(_line, _column, _scope, [{token, _meta} | _tokens]) when token in ~w(, ; eol)a do
+  defp eol(_line, _column, _scope, [{token, _meta, _} | _tokens])
+       when token in ~w(, ; eol)a do
     :increase_eol
   end
 
   defp eol(line, column, scope, _tokens) do
     scope(column: base_column) = scope
-    {:eol, meta(line, column, line + 1, base_column, 1)}
+    {:eol, meta(line, column, line + 1, base_column, 1), nil}
   end
 
   defp tokenize_eol(rest, line, scope = scope(column: base_column), eol) do

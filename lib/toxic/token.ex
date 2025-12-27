@@ -2,10 +2,11 @@ defmodule Toxic.Token do
   @moduledoc """
   Macros for working with raw Toxic tokens.
 
-  Tokens are tuples with the following shapes:
-  - 2-tuple: `{kind, meta}` - simple tokens (punctuation, keywords)
-  - 3-tuple: `{kind, meta, value}` - tokens with values (literals, operators, identifiers)
-  - 4-tuple: `{kind, meta, v1, v2}` - special tokens like `not in`
+  Tokens are tuples with the following shape:
+  - 3-tuple: `{kind, meta, extra}` - all tokens (punctuation, keywords, literals)
+    - `extra` is `nil` for simple tokens
+    - `extra` is a value for tokens with payloads (literals, operators, identifiers)
+    - `extra` is a tuple for tokens with multiple payloads (e.g. `not in`, sigils)
 
   Meta has the format: `{{start_line, start_col}, {end_line, end_col}, extra}`
   """
@@ -34,7 +35,7 @@ defmodule Toxic.Token do
   # ============================================================================
 
   @doc """
-  Match a 2-tuple token `{kind, meta}` and bind kind and meta.
+  Match a 3-tuple token `{kind, meta, _extra}` and bind kind and meta.
   Used for punctuation and simple keywords like `do`, `end`, `fn`, `true`, `false`, `nil`.
 
   ## Example
@@ -42,12 +43,12 @@ defmodule Toxic.Token do
   """
   defmacro token(kind, meta) do
     quote do
-      {unquote(kind), unquote(meta)}
+      {unquote(kind), unquote(meta), _extra}
     end
   end
 
   @doc """
-  Match a 3-tuple token `{kind, meta, value}` and bind all components.
+  Match a 3-tuple token `{kind, meta, extra}` and bind all components.
   Used for literals, operators, identifiers, etc.
 
   ## Example
@@ -60,15 +61,15 @@ defmodule Toxic.Token do
   end
 
   @doc """
-  Match a 4-tuple token `{kind, meta, v1, v2}` and bind all components.
-  Used for special tokens like `not in`.
+  Match a 3-tuple token `{kind, meta, {v1, v2}}` and bind all components.
+  Used for special tokens like `not in` and sigil/heredoc metadata.
 
   ## Example
       defp handle(token(kind, meta, v1, v2)) when kind == :in_op, do: ...
   """
   defmacro token(kind, meta, v1, v2) do
     quote do
-      {unquote(kind), unquote(meta), unquote(v1), unquote(v2)}
+      {unquote(kind), unquote(meta), {unquote(v1), unquote(v2)}}
     end
   end
 
@@ -90,16 +91,14 @@ defmodule Toxic.Token do
   # ============================================================================
 
   @doc """
-  Extract the kind from a raw token (works for 2/3/4-tuples).
+  Extract the kind from a raw token.
 
   ## Example
       iex> Toxic.Token.kind({:identifier, meta, :foo})
       :identifier
   """
   @spec kind(tuple()) :: atom()
-  def kind({kind, _meta}), do: kind
-  def kind({kind, _meta, _value}), do: kind
-  def kind({kind, _meta, _v1, _v2}), do: kind
+  def kind({kind, _meta, _extra}), do: kind
 
   @doc """
   Guard-safe check if token has the given kind.
@@ -125,9 +124,7 @@ defmodule Toxic.Token do
       {{1, 1}, {1, 4}, nil}
   """
   @spec meta(tuple()) :: tuple()
-  def meta({_kind, meta}), do: meta
-  def meta({_kind, meta, _value}), do: meta
-  def meta({_kind, meta, _v1, _v2}), do: meta
+  def meta({_kind, meta, _extra}), do: meta
 
   @doc "Extract start line from meta"
   @spec start_line(tuple()) :: pos_integer()
@@ -163,18 +160,16 @@ defmodule Toxic.Token do
 
   @doc """
   Extract the value from a raw token.
-  Returns nil for 2-tuple tokens that have no value.
+  Returns the token extra payload.
 
   ## Example
       iex> Toxic.Token.value({:identifier, meta, :foo})
       :foo
-      iex> Toxic.Token.value({:"(", meta})
+      iex> Toxic.Token.value({:"(", meta, nil})
       nil
   """
   @spec value(tuple()) :: term()
-  def value({_kind, _meta}), do: nil
   def value({_kind, _meta, value}), do: value
-  def value({_kind, _meta, v1, _v2}), do: v1
 
   @doc """
   Extract parsed value from numeric tokens (stored in meta.extra).
@@ -199,21 +194,19 @@ defmodule Toxic.Token do
   Returns 0 for tokens without newline info.
 
   ## Example
-      iex> Toxic.Token.newlines({:eol, {{1, 10}, {2, 1}, 1}})
+      iex> Toxic.Token.newlines({:eol, {{1, 10}, {2, 1}, 1}, nil})
       1
   """
   @spec newlines(tuple()) :: non_neg_integer()
-  def newlines({kind, {_, _, count}}) when kind in [:eol, :";", :","] and is_integer(count),
-    do: count
+  def newlines({kind, {_, _, count}, _extra})
+      when kind in [:eol, :";", :","] and is_integer(count),
+      do: count
 
   # Literals encode parsed values in extra, not newline counts
   def newlines({kind, _meta, _value}) when kind in [:int, :flt, :char], do: 0
 
-  # 3-tuple tokens with newline count in extra
+  # 3-tuple tokens with newline count in meta extra
   def newlines({_kind, {_, _, count}, _value}) when is_integer(count), do: count
-
-  # 4-tuple tokens with newline count in extra
-  def newlines({_kind, {_, _, count}, _v1, _v2}) when is_integer(count), do: count
 
   def newlines(_), do: 0
 
@@ -241,7 +234,7 @@ defmodule Toxic.Token do
 
   defmacro dot_token(meta) do
     quote do
-      {:., unquote(meta)}
+      {:., unquote(meta), nil}
     end
   end
 
@@ -287,21 +280,21 @@ defmodule Toxic.Token do
   @doc "Match/construct an eol token"
   defmacro eol(meta) do
     quote do
-      {:eol, unquote(meta)}
+      {:eol, unquote(meta), nil}
     end
   end
 
   @doc "Match/construct a semicolon token"
   defmacro semicolon(meta) do
     quote do
-      {:";", unquote(meta)}
+      {:";", unquote(meta), nil}
     end
   end
 
   @doc "Match/construct a comma token"
   defmacro comma(meta) do
     quote do
-      {:",", unquote(meta)}
+      {:",", unquote(meta), nil}
     end
   end
 
@@ -343,7 +336,7 @@ defmodule Toxic.Token do
       k = unquote(kind)
 
       quote do
-        {unquote(k), unquote(meta)}
+        {unquote(k), unquote(meta), nil}
       end
     end
   end
@@ -352,21 +345,21 @@ defmodule Toxic.Token do
   @doc "Match/construct a :do token"
   defmacro do_kw(meta) do
     quote do
-      {:do, unquote(meta)}
+      {:do, unquote(meta), nil}
     end
   end
 
   @doc "Match/construct an :end token"
   defmacro end_kw(meta) do
     quote do
-      {:end, unquote(meta)}
+      {:end, unquote(meta), nil}
     end
   end
 
   @doc "Match/construct a :fn token"
   defmacro fn_kw(meta) do
     quote do
-      {:fn, unquote(meta)}
+      {:fn, unquote(meta), nil}
     end
   end
 
@@ -381,7 +374,13 @@ defmodule Toxic.Token do
   # Token kind guards
   # ============================================================================
 
-  @identifier_kinds [:identifier, :paren_identifier, :bracket_identifier, :do_identifier, :op_identifier]
+  @identifier_kinds [
+    :identifier,
+    :paren_identifier,
+    :bracket_identifier,
+    :do_identifier,
+    :op_identifier
+  ]
 
   @doc "Guard: is this an identifier-like token kind?"
   defmacro is_identifier_kind(kind) do

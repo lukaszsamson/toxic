@@ -16,9 +16,10 @@ All token descriptions below are verified against the current implementation
   - `meta :: {{start_line, start_col}, {end_line, end_col}, extra}`
   - Line/column are 1-based; end position is exclusive.
 - Unless stated otherwise:
-  - Simple tokens: `{type, meta}`
-  - Tokens with a value: `{type, meta, value}`
-  - Some container/legacy forms add more fields.
+  - All tokens are 3-tuples: `{type, meta, extra}`
+  - `extra` is `nil` for simple tokens
+  - `extra` is a value for tokens with payloads (identifiers, literals, operators)
+  - `extra` is a tuple for multi-part payloads (e.g. `not in`, sigils, heredoc ends)
 - `meta.extra` is token-specific:
   - Numbers: parsed numeric value (`integer` or `float`)
   - Many identifiers/atoms: original charlist (`~c"..."`) or `nil`
@@ -65,10 +66,10 @@ These are the tokens you see from the streaming API:
   - `atom` – keyword name as atom (e.g. `:foo` for `foo:`).
   - `meta.extra` – original charlist for the key (or `nil` for operator keys).
 
-- `{true, meta}`, `{false, meta}`, `{nil, meta}`
+- `{true, meta, nil}`, `{false, meta, nil}`, `{nil, meta, nil}`
   - Reserved literals `true`, `false`, `nil`.
 
-- `{:do, meta}`, `{:end, meta}`, `{:fn, meta}`
+- `{:do, meta, nil}`, `{:end, meta, nil}`, `{:fn, meta, nil}`
   - Block delimiters and anonymous function keyword.
 
 - `{:block_identifier, meta, atom}`
@@ -188,44 +189,44 @@ All operator tokens share the general shape:
 - `{:in_op, meta, :in}`
   - `in` operator for guards/comprehensions.
 
-- `{:in_op, meta_span, :"not in", in_meta}`
+- `{:in_op, meta_span, {:"not in", in_meta}}`
   - Combined `not in` operator.
   - `meta_span` – covers the full `not in` span.
   - `in_meta` – meta for the `in` keyword position within the combined operator.
 
 ### Punctuation & Delimiters
 
-- `{:., meta}`
+- `{:., meta, nil}`
   - Dot operator used for field access / remote calls (`foo.bar`).
 
 - `{:dot_call_op, meta, :.}`
   - Dot-call operator for anonymous function invocation (`foo.(args)`).
   - Emitted when `.` is immediately followed by `(`.
 
-- `{:",", meta}`
+- `{:",", meta, nil}`
   - Comma separator.
   - `meta.extra` – coalesced EOL count when the comma also serves as an EOL marker (e.g. `",\n"`).
 
-- `{:";", meta}`
+- `{:";", meta, nil}`
   - Semicolon separator.
   - `meta.extra` – coalesced EOL count when the semicolon also serves as an EOL marker (`";\n"`).
 
-- `{:"<<", meta}`, `{:">>", meta}`
+- `{:"<<", meta, nil}`, `{:">>", meta, nil}`
   - Bitstring open/close (`<<` / `>>`).
 
-- `{:"(", meta}`, `{:")", meta}`
+- `{:"(", meta, nil}`, `{:")", meta, nil}`
   - Parentheses.
 
-- `{:"[", meta}`, `{:"]", meta}`
+- `{:"[", meta, nil}`, `{:"]", meta, nil}`
   - Square brackets.
 
-- `{:"{", meta}`, `{:"}", meta}`
+- `{:"{", meta, nil}`, `{:"}", meta, nil}`
   - Braces (tuples/maps).
 
-- `{:%, meta}`
+- `{:%, meta, nil}`
   - Percent for maps/structs (`%`).
 
-- `{:%{}, meta}`
+- `{:%{}, meta, nil}`
   - `%{` map opener token, emitted together with a `{:"{", ...}` token to match Elixir behavior.
 
 ### Strings, Charlists & Interpolation (Linear)
@@ -273,24 +274,24 @@ These tokens represent the **linearized** form of string-like constructs.
 - `{:list_heredoc_start, meta, [?', ?', ?']}`
   - Start of list (charlist) heredoc (`'''...'''`).
 
-- `{:bin_heredoc_end, meta, [?", ?", ?"], indent}`
+- `{:bin_heredoc_end, meta, {[?", ?", ?"], indent}}`
   - End of binary heredoc.
   - `indent` – computed indentation level.
 
-- `{:list_heredoc_end, meta, [?', ?', ?'], indent}`
+- `{:list_heredoc_end, meta, {[?', ?', ?'], indent}}`
   - End of list heredoc.
   - `indent` – computed indentation level.
 
 ### Sigils (Linear)
 
-- `{:sigil_start, meta, sigil_atom, delim}`
+- `{:sigil_start, meta, {sigil_atom, delim}}`
   - Start of sigil (`~r/.../`, `~S"""..."""`, etc.).
   - `sigil_atom` – e.g. `:sigil_r`, `:sigil_s`, `:sigil_S`, `:sigil_M`.
   - `delim` – closing delimiter:
     - For regular sigils: a one-byte binary `<<"/">>`, `<<"[">>`, `<<"\"">>`, etc.
     - For heredoc sigils: `<<"\"\"\"">>` or `"'''"`.
 
-- `{:sigil_end, meta, delim, indent}`
+- `{:sigil_end, meta, {delim, indent}}`
   - End of a sigil.
   - `delim` – closing delimiter:
     - For regular sigils: integer codepoint (e.g. `34` for `?"`, `47` for `?/`).
@@ -348,7 +349,7 @@ These appear while the tokenizer is in the interpolated string mode for atoms/ke
 
 ### Structural & Error Tokens
 
-- `{:eol, meta}`
+- `{:eol, meta, nil}`
   - End-of-line marker for coalesced newlines.
   - `meta.start` – position of the first newline.
   - `meta.end` – position at the start of the line after the last newline.
@@ -472,7 +473,7 @@ Where:
 
 Token shapes remain the same except for metas. One notable case:
 
-- `{:in_op, meta_span, :"not in", info_meta}` becomes
+- `{:in_op, meta_span, {:"not in", info_meta}}` becomes
   `{:in_op, legacy_meta(meta_span), :"not in", legacy_meta(info_meta)}`.
 
 ---

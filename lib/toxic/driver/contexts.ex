@@ -214,7 +214,7 @@ defmodule Toxic.Driver.Contexts do
   def drop_first_normal_before_interp([head | tail]),
     do: [head | drop_first_normal_before_interp(tail)]
 
-  def context_suffix(:sigil, delim, %{line: line, token: {:sigil_start, _meta, sigil_atom, _}}) do
+  def context_suffix(:sigil, delim, %{line: line, token: {:sigil_start, _meta, {sigil_atom, _}}}) do
     sigil_name =
       sigil_atom
       |> Atom.to_string()

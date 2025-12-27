@@ -212,7 +212,7 @@ defmodule Toxic.ErrorDetailsTest do
 
       # Find the synthesized opener (should be :( with zero-length meta)
       synthesized = Enum.at(tokens, 1)
-      assert {:"(", syn_meta} = synthesized
+      assert {:"(", syn_meta, _} = synthesized
       assert {{line, col}, {end_line, end_col}, _} = syn_meta
       # Zero-length: start and end positions are the same
       assert line == end_line
@@ -228,7 +228,7 @@ defmodule Toxic.ErrorDetailsTest do
 
       # After error_token, should have synthesized ] with zero-length meta
       synthesized = Enum.at(tokens, error_idx + 1)
-      assert {:"]", syn_meta} = synthesized
+      assert {:"]", syn_meta, _} = synthesized
       assert {{line, col}, {end_line, end_col}, _} = syn_meta
       assert line == end_line
       assert col == end_col
@@ -244,7 +244,7 @@ defmodule Toxic.ErrorDetailsTest do
       assert error_idx != nil
 
       synthesized = Enum.at(tokens, error_idx + 1)
-      assert {:")", syn_meta} = synthesized
+      assert {:")", syn_meta, _} = synthesized
       assert {{line, col}, {end_line, end_col}, _} = syn_meta
       assert line == end_line
       assert col == end_col
@@ -257,13 +257,13 @@ defmodule Toxic.ErrorDetailsTest do
       # Find the string end token (synthesized)
       string_end =
         Enum.find(tokens, fn t ->
-          match?({:bin_string, _meta, _content}, t) or match?({:bin_string_end, _meta}, t)
+          match?({:bin_string, _meta, _content}, t) or match?({:bin_string_end, _meta, _}, t)
         end)
 
       # The bin_string_end should have been synthesized with zero-length meta
       if string_end != nil do
         case string_end do
-          {:bin_string_end, meta} ->
+          {:bin_string_end, meta, _} ->
             assert {{line, col}, {end_line, end_col}, _} = meta
             assert line == end_line
             assert col == end_col

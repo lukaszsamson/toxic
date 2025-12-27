@@ -3,7 +3,7 @@ defmodule Toxic.NormalTokenizer.Terminator do
   import Toxic.Scope
   import Toxic.Util
 
-  def handle_terminator(_rest, _, _, _scope, {:"(", meta}, [{:alias, _, alias} | _tokens])
+  def handle_terminator(_rest, _, _, _scope, {:"(", meta, _}, [{:alias, _, alias} | _tokens])
       when is_atom(alias) do
     {{line, column}, _, _} = meta
 
@@ -33,13 +33,13 @@ defmodule Toxic.NormalTokenizer.Terminator do
     end
   end
 
-  def check_terminator({start, meta}, terminators, scope)
+  def check_terminator({start, meta, _}, terminators, scope)
       when start in ~w|( [ { <<|a do
     scope(indentation: indentation) = scope
     {:ok, scope(scope, terminators: [{start, meta, indentation} | terminators])}
   end
 
-  def check_terminator({start, meta}, terminators, scope) when start in [:fn, :do] do
+  def check_terminator({start, meta, _}, terminators, scope) when start in [:fn, :do] do
     scope(indentation: indentation, mismatch_hints: mismatch_hints) = scope
 
     # If the do/fn is indented equally or less than the previous do/fn, it may be a missing end error!
@@ -56,7 +56,7 @@ defmodule Toxic.NormalTokenizer.Terminator do
     {:ok, scope(new_scope, terminators: [{start, meta, indentation} | terminators])}
   end
 
-  def check_terminator({:end, end_meta}, [{:do, _, do_indentation} | terminators], scope) do
+  def check_terminator({:end, end_meta, _}, [{:do, _, do_indentation} | terminators], scope) do
     scope(indentation: current_indentation, mismatch_hints: mismatch_hints) = scope
     {{end_line, _end_column}, _, _} = end_meta
 
@@ -73,7 +73,7 @@ defmodule Toxic.NormalTokenizer.Terminator do
   end
 
   def check_terminator(
-        {end_token, end_meta},
+        {end_token, end_meta, _},
         [{start_token, start_meta, _} | terminators],
         scope
       )
@@ -108,7 +108,7 @@ defmodule Toxic.NormalTokenizer.Terminator do
     end
   end
 
-  def check_terminator({:end, meta}, [], scope) do
+  def check_terminator({:end, meta, _}, [], scope) do
     {{line, column}, _, _} = meta
     scope(mismatch_hints: mismatch_hints) = scope
 
@@ -135,7 +135,7 @@ defmodule Toxic.NormalTokenizer.Terminator do
      }}
   end
 
-  def check_terminator({end_token, meta}, [], _scope)
+  def check_terminator({end_token, meta, _}, [], _scope)
       when end_token in ~w|) ] } >>|a do
     {{line, column}, _, _} = meta
 

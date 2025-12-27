@@ -178,7 +178,7 @@ defmodule Toxic.Driver.Recovery do
 
             [{opener, _, _} | _] ->
               if Driver.closing_for(opener) == closer_atom do
-                [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+                [{closer_atom, meta(new_line, new_column, new_line, new_column, nil), nil}]
               else
                 # Doesn't match, will be handled at EOF or next iteration
                 []
@@ -186,7 +186,7 @@ defmodule Toxic.Driver.Recovery do
           end
 
         {_, closer_atom} ->
-          [{closer_atom, meta(new_line, new_column, new_line, new_column, nil)}]
+          [{closer_atom, meta(new_line, new_column, new_line, new_column, nil), nil}]
       end
 
     # If the error span crossed a newline, drop any deferred :eol to avoid
@@ -283,7 +283,7 @@ defmodule Toxic.Driver.Recovery do
       {:alias, :alias_unexpected_paren} ->
         [?( | tail] = rest
         meta_paren = meta(state.line, state.column, state.line, state.column + 1, nil)
-        paren_token = {:"(", meta_paren}
+        paren_token = {:"(", meta_paren, nil}
 
         {:ok, _tok, new_scope} = Synthesis.synthesize_opening(:"(", state)
 
@@ -329,7 +329,7 @@ defmodule Toxic.Driver.Recovery do
       {_, :map_invalid_open_delimiter} ->
         [?% | _] = rest
         meta_percent = meta(state.line, state.column, state.line, state.column + 1, nil)
-        percent_token = {:%, meta_percent}
+        percent_token = {:%, meta_percent, nil}
         rest_after_percent = tl(rest)
 
         {rest_no_ws, l_after, c_after} = {rest_after_percent, state.line, state.column + 1}
@@ -365,8 +365,8 @@ defmodule Toxic.Driver.Recovery do
         # Infer end token from delimiter in token_display (already set)
         end_token =
           case List.wrap(err.token_display) do
-            [?', ?', ?'] = delim -> {:list_heredoc_end, meta_end, delim, 0}
-            [?", ?", ?"] = delim -> {:bin_heredoc_end, meta_end, delim, 0}
+            [?', ?', ?'] = delim -> token(:list_heredoc_end, meta_end, delim, 0)
+            [?", ?", ?"] = delim -> token(:bin_heredoc_end, meta_end, delim, 0)
           end
 
         inserts = [{:post_error, end_token}]

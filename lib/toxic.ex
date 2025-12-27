@@ -22,18 +22,13 @@ defmodule Toxic do
   @typedoc """
   Token with ranged meta.
 
-  All tokens follow one of these shapes:
-  - `{atom(), meta()}` - Simple tokens like delimiters
-  - `{atom(), meta(), term()}` - Tokens with a value (identifiers, literals, etc.)
-  - `{atom(), meta(), term(), term()}` - Special tokens like sigils with multiple attributes
+  All tokens follow this shape:
+  - `{atom(), meta(), term()}` - `term()` is either `nil`, a value, or a tuple for multi-part payloads
 
   Where `meta()` is `{{start_line, start_column}, {end_line, end_column}, extra}`
   with 1-based line/column positions and exclusive end positions.
   """
-  @type token ::
-          {atom(), meta()}
-          | {atom(), meta(), term()}
-          | {atom(), meta(), term(), term()}
+  @type token :: {atom(), meta(), term()}
 
   @typedoc "Lexer/process options"
   @type options :: [
@@ -622,9 +617,7 @@ defmodule Toxic do
   end
 
   # Extract start position from a ranged meta token
-  defp start_pos({_, {{sl, sc}, _end_meta, _extra}, _rest1, _rest2}), do: {sl, sc}
   defp start_pos({_, {{sl, sc}, _end_meta, _extra}, _rest}), do: {sl, sc}
-  defp start_pos({_, {{sl, sc}, _end_meta, _extra}}), do: {sl, sc}
 
   # Private functions
 

@@ -135,13 +135,16 @@ defmodule Toxic.ValidCodeTest do
 
     test "hex followed by other characters" do
       assert tokenize("0x123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}, nil}],
+                ""}
 
       assert tokenize("0x123 ;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 7}, {1, 8}, 0}, nil}],
+                ""}
 
       assert tokenize("0x123  ;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 8}, {1, 9}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 8}, {1, 9}, 0}, nil}],
+                ""}
     end
   end
 
@@ -156,7 +159,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "binary followed by other characters" do
       assert tokenize("0b1010;") ==
-               {:ok, [{:int, {{1, 1}, {1, 7}, 10}, ~c"0b1010"}, {:";", {{1, 7}, {1, 8}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 7}, 10}, ~c"0b1010"}, {:";", {{1, 7}, {1, 8}, 0}, nil}],
+                ""}
     end
   end
 
@@ -172,7 +176,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "octal followed by other characters" do
       assert tokenize("0o765;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 501}, ~c"0o765"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 501}, ~c"0o765"}, {:";", {{1, 6}, {1, 7}, 0}, nil}],
+                ""}
     end
   end
 
@@ -210,7 +215,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "floats followed by other characters" do
       assert tokenize("1.23;") ==
-               {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
+               {:ok, [{:flt, {{1, 1}, {1, 5}, 1.23}, ~c"1.23"}, {:";", {{1, 5}, {1, 6}, 0}, nil}],
+                ""}
     end
   end
 
@@ -229,7 +235,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "integers followed by other characters" do
       assert tokenize("123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 4}, 123}, ~c"123"}, {:";", {{1, 4}, {1, 5}, 0}, nil}],
+                ""}
     end
   end
 
@@ -256,7 +263,7 @@ defmodule Toxic.ValidCodeTest do
 
     test "atoms followed by other characters" do
       assert tokenize(":%{};") ==
-               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :%{}}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
+               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :%{}}, {:";", {{1, 5}, {1, 6}, 0}, nil}], ""}
     end
   end
 
@@ -348,13 +355,15 @@ defmodule Toxic.ValidCodeTest do
 
     test "followed by other characters" do
       assert tokenize(":~~~;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}, {:";", {{1, 5}, {1, 6}, 0}}], ""}
+               {:ok, [{:atom, {{1, 1}, {1, 5}, nil}, :"~~~"}, {:";", {{1, 5}, {1, 6}, 0}, nil}],
+                ""}
 
       assert tokenize(":::;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}, {:";", {{1, 4}, {1, 5}, 0}}], ""}
+               {:ok, [{:atom, {{1, 1}, {1, 4}, nil}, :"::"}, {:";", {{1, 4}, {1, 5}, 0}, nil}],
+                ""}
 
       assert tokenize(":.;") ==
-               {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}, {:";", {{1, 3}, {1, 4}, 0}}], ""}
+               {:ok, [{:atom, {{1, 1}, {1, 3}, nil}, :.}, {:";", {{1, 3}, {1, 4}, 0}, nil}], ""}
     end
   end
 
@@ -372,7 +381,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(";=>") == {
                :ok,
                [
-                 {:";", {{1, 1}, {1, 2}, 0}},
+                 {:";", {{1, 1}, {1, 2}, 0}, nil},
                  {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
                ],
                ""
@@ -381,7 +390,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(";\n=>") == {
                :ok,
                [
-                 {:";", {{1, 1}, {2, 1}, 1}},
+                 {:";", {{1, 1}, {2, 1}, 1}, nil},
                  {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
                ],
                ""
@@ -392,7 +401,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(",=>") == {
                :ok,
                [
-                 {:",", {{1, 1}, {1, 2}, 0}},
+                 {:",", {{1, 1}, {1, 2}, 0}, nil},
                  {:assoc_op, {{1, 2}, {1, 4}, nil}, :"=>"}
                ],
                ""
@@ -401,7 +410,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(",\n=>") == {
                :ok,
                [
-                 {:",", {{1, 1}, {2, 1}, 1}},
+                 {:",", {{1, 1}, {2, 1}, 1}, nil},
                  {:assoc_op, {{2, 1}, {2, 3}, 1}, :"=>"}
                ],
                ""
@@ -494,66 +503,67 @@ defmodule Toxic.ValidCodeTest do
     end
 
     test "," do
-      assert tokenize(",") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}}], ""}
+      assert tokenize(",") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}, nil}], ""}
     end
 
     test "<<>>" do
       assert tokenize("<<>>") ==
-               {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}}, {:">>", {{1, 3}, {1, 5}, nil}}], ""}
+               {:ok, [{:"<<", {{1, 1}, {1, 3}, nil}, nil}, {:">>", {{1, 3}, {1, 5}, nil}, nil}],
+                ""}
     end
 
     test ">> after eol" do
       assert tokenize("<<\n>>") ==
                {:ok,
                 [
-                  {:"<<", {{1, 1}, {1, 3}, nil}},
-                  {:eol, {{1, 3}, {2, 1}, 1}},
-                  {:">>", {{2, 1}, {2, 3}, 1}}
+                  {:"<<", {{1, 1}, {1, 3}, nil}, nil},
+                  {:eol, {{1, 3}, {2, 1}, 1}, nil},
+                  {:">>", {{2, 1}, {2, 3}, 1}, nil}
                 ], ""}
     end
 
     test "[]" do
       assert tokenize("[]") ==
-               {:ok, [{:"[", {{1, 1}, {1, 2}, nil}}, {:"]", {{1, 2}, {1, 3}, nil}}], ""}
+               {:ok, [{:"[", {{1, 1}, {1, 2}, nil}, nil}, {:"]", {{1, 2}, {1, 3}, nil}, nil}], ""}
     end
 
     test "] after eol" do
       assert tokenize("[\n]") ==
                {:ok,
                 [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:"]", {{2, 1}, {2, 2}, 1}}
+                  {:"[", {{1, 1}, {1, 2}, nil}, nil},
+                  {:eol, {{1, 2}, {2, 1}, 1}, nil},
+                  {:"]", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
     end
 
     test "{}" do
       assert tokenize("{}") ==
-               {:ok, [{:"{", {{1, 1}, {1, 2}, nil}}, {:"}", {{1, 2}, {1, 3}, nil}}], ""}
+               {:ok, [{:"{", {{1, 1}, {1, 2}, nil}, nil}, {:"}", {{1, 2}, {1, 3}, nil}, nil}], ""}
     end
 
     test "} after eol" do
       assert tokenize("{\n}") ==
                {:ok,
                 [
-                  {:"{", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:"}", {{2, 1}, {2, 2}, 1}}
+                  {:"{", {{1, 1}, {1, 2}, nil}, nil},
+                  {:eol, {{1, 2}, {2, 1}, 1}, nil},
+                  {:"}", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
     end
 
     test "()" do
       assert tokenize("()") ==
-               {:ok, [{:"(", {{1, 1}, {1, 2}, nil}}, {:")", {{1, 2}, {1, 3}, nil}}], ""}
+               {:ok, [{:"(", {{1, 1}, {1, 2}, nil}, nil}, {:")", {{1, 2}, {1, 3}, nil}, nil}], ""}
     end
 
     test ") after eol" do
       assert tokenize("(\n)") ==
                {:ok,
                 [
-                  {:"(", {{1, 1}, {1, 2}, nil}},
-                  {:eol, {{1, 2}, {2, 1}, 1}},
-                  {:")", {{2, 1}, {2, 2}, 1}}
+                  {:"(", {{1, 1}, {1, 2}, nil}, nil},
+                  {:eol, {{1, 2}, {2, 1}, 1}, nil},
+                  {:")", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
     end
 
@@ -979,7 +989,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\n-1") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 1}, {2, 2}, nil}, :-},
                   {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                 ], ""}
@@ -988,7 +998,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\n+1") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
                   {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                 ], ""}
@@ -999,7 +1009,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\n  -1") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 3}, {2, 4}, nil}, :-},
                   {:int, {{2, 4}, {2, 5}, 1}, ~c"1"}
                 ], ""}
@@ -1008,7 +1018,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\n\t+1") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 2}, {2, 3}, nil}, :+},
                   {:int, {{2, 3}, {2, 4}, 1}, ~c"1"}
                 ], ""}
@@ -1018,7 +1028,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\n@x") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:at_op, {{2, 1}, {2, 2}, nil}, :@},
                   {:identifier, {{2, 2}, {2, 3}, ~c"x"}, :x}
                 ], ""}
@@ -1045,28 +1055,30 @@ defmodule Toxic.ValidCodeTest do
 
   describe "end of line handling" do
     test "semicolons" do
-      assert tokenize(";") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}}], ""}
+      assert tokenize(";") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}, nil}], ""}
     end
 
     test "tokens after semicolons" do
       assert tokenize(";0x123") ==
-               {:ok, [{:";", {{1, 1}, {1, 2}, 0}}, {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}], ""}
+               {:ok, [{:";", {{1, 1}, {1, 2}, 0}, nil}, {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}],
+                ""}
     end
 
     test "semicolons after tokens" do
       assert tokenize("0x123;") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:";", {{1, 6}, {1, 7}, 0}, nil}],
+                ""}
     end
 
     test "commas" do
-      assert tokenize(",") == {:ok, [",": {{1, 1}, {1, 2}, 0}], ""}
+      assert tokenize(",") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}, nil}], ""}
     end
 
     test "tokens after commas" do
       assert tokenize(",0x123") == {
                :ok,
                [
-                 {:",", {{1, 1}, {1, 2}, 0}},
+                 {:",", {{1, 1}, {1, 2}, 0}, nil},
                  {:int, {{1, 2}, {1, 7}, 291}, ~c"0x123"}
                ],
                ""
@@ -1078,43 +1090,44 @@ defmodule Toxic.ValidCodeTest do
                :ok,
                [
                  {:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"},
-                 {:",", {{1, 6}, {1, 7}, 0}}
+                 {:",", {{1, 6}, {1, 7}, 0}, nil}
                ],
                ""
              }
     end
 
     test "consecutive commas" do
-      assert tokenize(",,") == {:ok, [",": {{1, 1}, {1, 2}, 0}, ",": {{1, 2}, {1, 3}, 0}], ""}
+      assert tokenize(",,") ==
+               {:ok, [{:",", {{1, 1}, {1, 2}, 0}, nil}, {:",", {{1, 2}, {1, 3}, 0}, nil}], ""}
     end
 
     test "newlines" do
-      assert tokenize("\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
+      assert tokenize("\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "consecutive newlines" do
-      assert tokenize("\n\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
+      assert tokenize("\n\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}, nil}], ""}
     end
 
     test "newline after semicolon" do
-      assert tokenize(";\n") == {:ok, [";": {{1, 1}, {2, 1}, 1}], ""}
+      assert tokenize(";\n") == {:ok, [{:";", {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "newline after comma" do
-      assert tokenize(",\n") == {:ok, [",": {{1, 1}, {2, 1}, 1}], ""}
+      assert tokenize(",\n") == {:ok, [{:",", {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "carriage return + newline" do
-      assert tokenize("\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
+      assert tokenize("\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "consecutive carriage return + newline" do
-      assert tokenize("\r\n\r\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}], ""}
+      assert tokenize("\r\n\r\n") == {:ok, [{:eol, {{1, 1}, {3, 1}, 2}, nil}], ""}
     end
 
     test "newlines with horizontal spaces" do
       assert tokenize("\n  0") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 3}, {2, 4}, 0}, ~c"0"}], ""}
+               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}, {:int, {{2, 3}, {2, 4}, 0}, ~c"0"}], ""}
     end
 
     test "escaped newlines are handled" do
@@ -1128,11 +1141,11 @@ defmodule Toxic.ValidCodeTest do
     end
 
     test "newline after escaped newline" do
-      assert tokenize("\\\n\n") == {:ok, [{:eol, {{2, 1}, {3, 1}, 1}}], ""}
+      assert tokenize("\\\n\n") == {:ok, [{:eol, {{2, 1}, {3, 1}, 1}, nil}], ""}
     end
 
     test "escaped newline after newline" do
-      assert tokenize("\n\\\n ") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
+      assert tokenize("\n\\\n ") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "horizontal space after escaped newline" do
@@ -1141,22 +1154,26 @@ defmodule Toxic.ValidCodeTest do
 
     test "tokens before newlines" do
       assert tokenize("0x123\n") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {2, 1}, 1}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {2, 1}, 1}, nil}],
+                ""}
     end
 
     test "tokens after newlines" do
       assert tokenize("\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
+               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}],
+                ""}
     end
 
     test "tokens before consecutive newlines" do
       assert tokenize("0x123\n\n") ==
-               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {3, 1}, 2}}], ""}
+               {:ok, [{:int, {{1, 1}, {1, 6}, 291}, ~c"0x123"}, {:eol, {{1, 6}, {3, 1}, 2}, nil}],
+                ""}
     end
 
     test "tokens after consecutive newlines" do
       assert tokenize("\n\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {3, 1}, 2}}, {:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}], ""}
+               {:ok, [{:eol, {{1, 1}, {3, 1}, 2}, nil}, {:int, {{3, 1}, {3, 6}, 291}, ~c"0x123"}],
+                ""}
     end
   end
 
@@ -1246,7 +1263,7 @@ defmodule Toxic.ValidCodeTest do
                :ok,
                [
                  {:bin_string, {{1, 1}, {1, 6}, nil}, ["foo"]},
-                 {:eol, {{1, 6}, {2, 1}, 1}},
+                 {:eol, {{1, 6}, {2, 1}, 1}, nil},
                  {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}
                ],
                ""
@@ -1640,7 +1657,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
+                  {:eol, {{3, 4}, {4, 1}, 1}, nil},
                   {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
                 ], ""}
     end
@@ -1659,7 +1676,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foo\nbar\n"]},
-                  {:eol, {{4, 4}, {5, 1}, 1}},
+                  {:eol, {{4, 4}, {5, 1}, 1}, nil},
                   {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
                 ], ""}
     end
@@ -1669,7 +1686,7 @@ defmodule Toxic.ValidCodeTest do
                :ok,
                [
                  {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\n"]},
-                 {:eol, {{4, 4}, {5, 1}, 1}},
+                 {:eol, {{4, 4}, {5, 1}, 1}, nil},
                  {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
                ],
                ""
@@ -1681,7 +1698,7 @@ defmodule Toxic.ValidCodeTest do
                :ok,
                [
                  {:bin_heredoc, {{1, 1}, {4, 4}, nil}, 0, ["foobar\r\n"]},
-                 {:eol, {{4, 4}, {5, 1}, 1}},
+                 {:eol, {{4, 4}, {5, 1}, 1}, nil},
                  {:int, {{5, 1}, {5, 6}, 291}, ~c"0x123"}
                ],
                ""
@@ -1693,7 +1710,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\nbar\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
+                  {:eol, {{3, 4}, {4, 1}, 1}, nil},
                   {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
                 ], ""}
     end
@@ -1703,7 +1720,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo\r\nbar\r\n"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
+                  {:eol, {{3, 4}, {4, 1}, 1}, nil},
                   {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
                 ], ""}
     end
@@ -1713,7 +1730,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {3, 4}, nil}, 0, ["foo"]},
-                  {:eol, {{3, 4}, {4, 1}, 1}},
+                  {:eol, {{3, 4}, {4, 1}, 1}, nil},
                   {:int, {{4, 1}, {4, 6}, 291}, ~c"0x123"}
                 ], ""}
     end
@@ -2026,12 +2043,12 @@ defmodule Toxic.ValidCodeTest do
                          {2, 33, nil},
                          [
                            {:paren_identifier, {{2, 9}, {2, 16}, ~c"inspect"}, :inspect},
-                           {:"(", {{2, 16}, {2, 17}, nil}},
+                           {:"(", {{2, 16}, {2, 17}, nil}, nil},
                            {:paren_identifier, {{2, 17}, {2, 24}, ~c"unquote"}, :unquote},
-                           {:"(", {{2, 24}, {2, 25}, nil}},
+                           {:"(", {{2, 24}, {2, 25}, nil}, nil},
                            {:identifier, {{2, 25}, {2, 31}, ~c"module"}, :module},
-                           {:")", {{2, 31}, {2, 32}, nil}},
-                           {:")", {{2, 32}, {2, 33}, nil}}
+                           {:")", {{2, 31}, {2, 32}, nil}, nil},
+                           {:")", {{2, 32}, {2, 33}, nil}, nil}
                          ]
                        },
                        " does not implement the Access behaviour\n\nYou can use the \"struct.field\" syntax to access struct fields. You can also use Access.key!/1 to access struct fields dynamically inside get_in/put_in/update_in"
@@ -2101,7 +2118,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "raw CR LF" do
       assert tokenize("?\r\n") ==
-               {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {{1, 3}, {2, 1}, 1}}], ""}
+               {:ok, [{:char, {{1, 1}, {1, 3}, ~c"?\r"}, ?\r}, {:eol, {{1, 3}, {2, 1}, 1}, nil}],
+                ""}
     end
 
     test "escape" do
@@ -2142,7 +2160,8 @@ defmodule Toxic.ValidCodeTest do
     test "escaped CR LF" do
       # I'm not sure if the tokenizer is correct here but we keep elixir compatibility
       assert tokenize("?\\\r\n") ==
-               {:ok, [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}}], ""}
+               {:ok,
+                [{:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r}, {:eol, {{1, 4}, {2, 1}, 1}, nil}], ""}
     end
 
     test "token after escaped CR LF" do
@@ -2151,7 +2170,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:char, {{1, 1}, {1, 4}, ~c"?\\\r"}, ?\r},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
+                  {:eol, {{1, 4}, {2, 1}, 1}, nil},
                   {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
                 ], ""}
     end
@@ -2163,15 +2182,15 @@ defmodule Toxic.ValidCodeTest do
     end
 
     test "comment after newline" do
-      assert tokenize("\n#foo") == {:ok, [{:eol, {{1, 1}, {2, 1}, 0}}], ""}
+      assert tokenize("\n#foo") == {:ok, [{:eol, {{1, 1}, {2, 1}, 0}, nil}], ""}
     end
 
     test "comment after comma" do
-      assert tokenize(", #foo") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}}], ""}
+      assert tokenize(", #foo") == {:ok, [{:",", {{1, 1}, {1, 2}, 0}, nil}], ""}
     end
 
     test "comment after semicolon" do
-      assert tokenize("; #foo") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}}], ""}
+      assert tokenize("; #foo") == {:ok, [{:";", {{1, 1}, {1, 2}, 0}, nil}], ""}
     end
 
     test "comment with spaces" do
@@ -2179,11 +2198,11 @@ defmodule Toxic.ValidCodeTest do
     end
 
     test "comment with LF" do
-      assert tokenize("#foo\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
+      assert tokenize("#foo\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "comment with CRLF" do
-      assert tokenize("#foo\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}], ""}
+      assert tokenize("#foo\r\n") == {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}], ""}
     end
 
     test "code before comment" do
@@ -2192,7 +2211,8 @@ defmodule Toxic.ValidCodeTest do
 
     test "code after comment" do
       assert tokenize("# foo\n0x123") ==
-               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}], ""}
+               {:ok, [{:eol, {{1, 1}, {2, 1}, 1}, nil}, {:int, {{2, 1}, {2, 6}, 291}, ~c"0x123"}],
+                ""}
     end
 
     test "multiline comment" do
@@ -2249,7 +2269,7 @@ defmodule Toxic.ValidCodeTest do
 
       assert comment == ~c"# SPDX-FileCopyrightText: 2021 The Elixir Team"
       assert {line, column} == {2, 1}
-      assert hd(tokens) == {:eol, {{1, 1}, {2, 1}, 1}}
+      assert hd(tokens) == {:eol, {{1, 1}, {2, 1}, 1}, nil}
       assert [?\n, ?# | _] = rest
     end
 
@@ -2617,7 +2637,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo},
-                  {:., {{1, 4}, {1, 5}, nil}},
+                  {:., {{1, 4}, {1, 5}, nil}, nil},
                   {:alias, {{1, 5}, {1, 8}, ~c"Bar"}, :Bar}
                 ], ""}
     end
@@ -2627,9 +2647,9 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 4}, ~c"Foo"}, :Foo},
-                  {:., {{1, 4}, {1, 5}, nil}},
+                  {:., {{1, 4}, {1, 5}, nil}, nil},
                   {:alias, {{1, 5}, {1, 8}, ~c"Bar"}, :Bar},
-                  {:., {{1, 8}, {1, 9}, nil}},
+                  {:., {{1, 8}, {1, 9}, nil}, nil},
                   {:alias, {{1, 9}, {1, 12}, ~c"Baz"}, :Baz}
                 ], ""}
     end
@@ -2703,10 +2723,10 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("[foo: bar]") ==
                {:ok,
                 [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
+                  {:"[", {{1, 1}, {1, 2}, nil}, nil},
                   {:kw_identifier, {{1, 2}, {1, 6}, ~c"foo"}, :foo},
                   {:identifier, {{1, 7}, {1, 10}, ~c"bar"}, :bar},
-                  {:"]", {{1, 10}, {1, 11}, nil}}
+                  {:"]", {{1, 10}, {1, 11}, nil}, nil}
                 ], ""}
     end
 
@@ -2716,7 +2736,7 @@ defmodule Toxic.ValidCodeTest do
                 [
                   {:kw_identifier, {{1, 1}, {1, 5}, ~c"foo"}, :foo},
                   {:identifier, {{1, 6}, {1, 9}, ~c"bar"}, :bar},
-                  {:",", {{1, 9}, {1, 10}, 0}},
+                  {:",", {{1, 9}, {1, 10}, 0}, nil},
                   {:kw_identifier, {{1, 11}, {1, 15}, ~c"baz"}, :baz},
                   {:identifier, {{1, 16}, {1, 19}, ~c"qux"}, :qux}
                 ], ""}
@@ -2802,7 +2822,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
+                  {:eol, {{1, 7}, {2, 1}, 1}, nil},
                   {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
                 ], ""}
 
@@ -2810,7 +2830,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
+                  {:eol, {{1, 7}, {2, 1}, 1}, nil},
                   {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
                 ], ""}
     end
@@ -2830,7 +2850,7 @@ defmodule Toxic.ValidCodeTest do
                 [
                   {:kw_identifier, {{1, 1}, {1, 7}, 34}, :foo},
                   {:int, {{1, 8}, {1, 9}, 1}, ~c"1"},
-                  {:",", {{1, 9}, {1, 10}, 0}},
+                  {:",", {{1, 9}, {1, 10}, 0}, nil},
                   {:kw_identifier, {{1, 11}, {1, 17}, 39}, :bar},
                   {:int, {{1, 18}, {1, 19}, 2}, ~c"2"}
                 ], ""}
@@ -2921,16 +2941,17 @@ defmodule Toxic.ValidCodeTest do
 
   describe "dot" do
     test "standalone dot" do
-      assert tokenize(".") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
+      assert tokenize(".") == {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}], ""}
     end
 
     test "dot followed by space" do
-      assert tokenize(". ") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
+      assert tokenize(". ") == {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}], ""}
     end
 
     test "dot followed by identifier" do
       assert tokenize(".id") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id}],
                 ""}
     end
 
@@ -2938,19 +2959,19 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".id()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:paren_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
+                  {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                  {:")", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
 
       assert tokenize(".id ()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"(", {{1, 5}, {1, 6}, nil}},
-                  {:")", {{1, 6}, {1, 7}, nil}}
+                  {:"(", {{1, 5}, {1, 6}, nil}, nil},
+                  {:")", {{1, 6}, {1, 7}, nil}, nil}
                 ], ""}
     end
 
@@ -2958,54 +2979,60 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".id[]") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:bracket_identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
+                  {:"[", {{1, 4}, {1, 5}, nil}, nil},
+                  {:"]", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
 
       assert tokenize(".id []") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {1, 4}, ~c"id"}, :id},
-                  {:"[", {{1, 5}, {1, 6}, nil}},
-                  {:"]", {{1, 6}, {1, 7}, nil}}
+                  {:"[", {{1, 5}, {1, 6}, nil}, nil},
+                  {:"]", {{1, 6}, {1, 7}, nil}, nil}
                 ], ""}
     end
 
     test "dot followed by horizontal space" do
       assert tokenize(". \tid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 4}, {1, 6}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 4}, {1, 6}, ~c"id"}, :id}],
                 ""}
     end
 
     test "dot followed by newline" do
       assert tokenize(".\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
                 ""}
 
       assert tokenize(".\r\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
                 ""}
     end
 
     test "dot followed by escaped newline" do
       assert tokenize(".\\\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
                 ""}
 
       assert tokenize(".\\\r\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
                 ""}
     end
 
     test "dot followed by comment" do
-      assert tokenize(".#comment") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
-      assert tokenize(".#comment\n") == {:ok, [{:., {{1, 1}, {1, 2}, nil}}], ""}
+      assert tokenize(".#comment") == {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}], ""}
+      assert tokenize(".#comment\n") == {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}], ""}
 
       assert tokenize(".#comment\nid") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{2, 1}, {2, 3}, ~c"id"}, :id}],
                 ""}
     end
 
@@ -3013,201 +3040,271 @@ defmodule Toxic.ValidCodeTest do
       # unary_op3
       assert tokenize(".~~~") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~~~"}, :"~~~"}],
-                ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"~~~"}, :"~~~"}
+                ], ""}
 
       # comp_op3
       assert tokenize(".===") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"==="}, :===}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"==="}, :===}
+                ], ""}
 
       assert tokenize(".!==") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"!=="}, :!==}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"!=="}, :!==}
+                ], ""}
 
       # and_op3
       assert tokenize(".&&&") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"&&&"}, :&&&}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"&&&"}, :&&&}
+                ], ""}
 
       # or_op3
       assert tokenize(".|||") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"|||"}, :|||}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"|||"}, :|||}
+                ], ""}
 
       # arrow_op3
       assert tokenize(".<<<") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<<"}, :<<<}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"<<<"}, :<<<}
+                ], ""}
 
       assert tokenize(".>>>") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c">>>"}, :>>>}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c">>>"}, :>>>}
+                ], ""}
 
       assert tokenize(".~>>") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"~>>"}, :~>>}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"~>>"}, :~>>}
+                ], ""}
 
       assert tokenize(".<<~") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<<~"}, :<<~}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"<<~"}, :<<~}
+                ], ""}
 
       assert tokenize(".<~>") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<~>"}, :<~>}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"<~>"}, :<~>}
+                ], ""}
 
       assert tokenize(".<|>") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"<|>"}, :"<|>"}],
-                ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"<|>"}, :"<|>"}
+                ], ""}
 
       # xor_op3
       assert tokenize(".^^^") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"^^^"}, :"^^^"}],
-                ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"^^^"}, :"^^^"}
+                ], ""}
 
       # concat_op3
       assert tokenize(".+++") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"+++"}, :+++}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"+++"}, :+++}
+                ], ""}
 
       assert tokenize(".---") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 5}, ~c"---"}, :---}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 5}, ~c"---"}, :---}
+                ], ""}
     end
 
     test "dot two-token operators" do
       # comp_op2
       assert tokenize(".==") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=="}, :==}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"=="}, :==}],
                 ""}
 
       assert tokenize(".!=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"!="}, :!=}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"!="}, :!=}],
                 ""}
 
       assert tokenize(".=~") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"=~"}, :=~}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"=~"}, :=~}],
                 ""}
 
       # rel_op2
       assert tokenize(".>=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c">="}, :>=}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c">="}, :>=}],
                 ""}
 
       assert tokenize(".<=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<="}, :<=}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"<="}, :<=}],
                 ""}
 
       # and_op
       assert tokenize(".&&") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"&&"}, :&&}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"&&"}, :&&}],
                 ""}
 
       # or_op
       assert tokenize(".||") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"||"}, :||}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"||"}, :||}],
                 ""}
 
       # arrow_op
       assert tokenize(".|>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"|>"}, :|>}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"|>"}, :|>}],
                 ""}
 
       assert tokenize(".~>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"~>"}, :~>}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"~>"}, :~>}],
                 ""}
 
       assert tokenize(".<~") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<~"}, :<~}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"<~"}, :<~}],
                 ""}
 
       # in_match_op
       assert tokenize(".<-") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"<-"}, :<-}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"<-"}, :<-}],
                 ""}
 
       assert tokenize(".\\\\") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"\\\\"}, :"\\\\"}],
-                ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 4}, ~c"\\\\"}, :"\\\\"}
+                ], ""}
 
       # concat_op
       assert tokenize(".++") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"++"}, :++}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"++"}, :++}],
                 ""}
 
       assert tokenize(".--") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"--"}, :--}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"--"}, :--}],
                 ""}
 
       # power_op
       assert tokenize(".**") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"**"}, :**}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, ~c"**"}, :**}],
                 ""}
 
       # type_op
       assert tokenize(".::") ==
                {:ok,
-                [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, ~c"::"}, :"::"}], ""}
+                [
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
+                  {:identifier, {{1, 2}, {1, 4}, ~c"::"}, :"::"}
+                ], ""}
     end
 
     test "dot single-token operators" do
       # at_op
       assert tokenize(".@") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"@"}, :@}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"@"}, :@}],
                 ""}
 
       # unary_op
       assert tokenize(".!") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"!"}, :!}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"!"}, :!}],
                 ""}
 
       assert tokenize(".^") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"^"}, :^}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"^"}, :^}],
                 ""}
 
       # capture_op
       assert tokenize(".&") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"&"}, :&}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"&"}, :&}],
                 ""}
 
       # dual_op
       assert tokenize(".+") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"+"}, :+}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"+"}, :+}],
                 ""}
 
       assert tokenize(".-") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"-"}, :-}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"-"}, :-}],
                 ""}
 
       # mult_op
       assert tokenize(".*") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"*"}, :*}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"*"}, :*}],
                 ""}
 
       assert tokenize("./") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"/"}, :/}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"/"}, :/}],
                 ""}
 
       # rel_op
       assert tokenize(".<") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"<"}, :<}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"<"}, :<}],
                 ""}
 
       assert tokenize(".>") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c">"}, :>}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c">"}, :>}],
                 ""}
 
       # match_op
       assert tokenize(".=") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"="}, :=}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"="}, :=}],
                 ""}
 
       # pipe_op
       assert tokenize(".|") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 3}, ~c"|"}, :|}],
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 3}, ~c"|"}, :|}],
                 ""}
     end
 
@@ -3216,35 +3313,39 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:dot_call_op, {{1, 1}, {1, 2}, nil}, :.},
-                  {:"(", {{1, 2}, {1, 3}, nil}},
+                  {:"(", {{1, 2}, {1, 3}, nil}, nil},
                   {:int, {{1, 3}, {1, 4}, 1}, ~c"1"},
-                  {:")", {{1, 4}, {1, 5}, nil}}
+                  {:")", {{1, 4}, {1, 5}, nil}, nil}
                 ], ""}
     end
 
     test "dot quote double" do
       assert tokenize(".\"foo\"") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo}], ""}
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 7}, 34}, :foo}], ""}
     end
 
     test "dot quote single" do
       assert tokenize(".'foo'") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 7}, 39}, :foo}], ""}
+               {:ok,
+                [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 7}, 39}, :foo}], ""}
     end
 
     test "dot quote empty" do
       assert tokenize(".\"\"") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 34}, :""}], ""}
+               {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, 34}, :""}],
+                ""}
 
       assert tokenize(".''") ==
-               {:ok, [{:., {{1, 1}, {1, 2}, nil}}, {:identifier, {{1, 2}, {1, 4}, 39}, :""}], ""}
+               {:ok, [{:., {{1, 1}, {1, 2}, nil}, nil}, {:identifier, {{1, 2}, {1, 4}, 39}, :""}],
+                ""}
     end
 
     test "dot quote newline" do
       assert tokenize(".\"foo\nbar\" 1") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {2, 5}, 34}, :"foo\nbar"},
                   {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}
                 ], ""}
@@ -3254,7 +3355,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"foo\\\nbar\" 1") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {2, 5}, 34}, :foobar},
                   {:int, {{2, 6}, {2, 7}, 1}, ~c"1"}
                 ], ""}
@@ -3264,7 +3365,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"foo\\nbar\" 1") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {1, 12}, 34}, :"foo\nbar"},
                   {:int, {{1, 13}, {1, 14}, 1}, ~c"1"}
                 ], ""}
@@ -3274,19 +3375,19 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"foo\"()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:paren_identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"(", {{1, 7}, {1, 8}, nil}},
-                  {:")", {{1, 8}, {1, 9}, nil}}
+                  {:"(", {{1, 7}, {1, 8}, nil}, nil},
+                  {:")", {{1, 8}, {1, 9}, nil}, nil}
                 ], ""}
 
       assert tokenize(".\"foo\" ()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"(", {{1, 8}, {1, 9}, nil}},
-                  {:")", {{1, 9}, {1, 10}, nil}}
+                  {:"(", {{1, 8}, {1, 9}, nil}, nil},
+                  {:")", {{1, 9}, {1, 10}, nil}, nil}
                 ], ""}
     end
 
@@ -3294,19 +3395,19 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"\"()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:paren_identifier, {{1, 2}, {1, 4}, 34}, :""},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
+                  {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                  {:")", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
 
       assert tokenize(".''()") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:paren_identifier, {{1, 2}, {1, 4}, 39}, :""},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
+                  {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                  {:")", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
     end
 
@@ -3314,19 +3415,19 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"foo\"[]") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:bracket_identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"[", {{1, 7}, {1, 8}, nil}},
-                  {:"]", {{1, 8}, {1, 9}, nil}}
+                  {:"[", {{1, 7}, {1, 8}, nil}, nil},
+                  {:"]", {{1, 8}, {1, 9}, nil}, nil}
                 ], ""}
 
       assert tokenize(".\"foo\" []") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:identifier, {{1, 2}, {1, 7}, 34}, :foo},
-                  {:"[", {{1, 8}, {1, 9}, nil}},
-                  {:"]", {{1, 9}, {1, 10}, nil}}
+                  {:"[", {{1, 8}, {1, 9}, nil}, nil},
+                  {:"]", {{1, 9}, {1, 10}, nil}, nil}
                 ], ""}
     end
 
@@ -3334,34 +3435,34 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize(".\"\"[]") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:bracket_identifier, {{1, 2}, {1, 4}, 34}, :""},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
+                  {:"[", {{1, 4}, {1, 5}, nil}, nil},
+                  {:"]", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
 
       assert tokenize(".''[]") ==
                {:ok,
                 [
-                  {:., {{1, 1}, {1, 2}, nil}},
+                  {:., {{1, 1}, {1, 2}, nil}, nil},
                   {:bracket_identifier, {{1, 2}, {1, 4}, 39}, :""},
-                  {:"[", {{1, 4}, {1, 5}, nil}},
-                  {:"]", {{1, 5}, {1, 6}, nil}}
+                  {:"[", {{1, 4}, {1, 5}, nil}, nil},
+                  {:"]", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
     end
   end
 
   describe "reserved words" do
     test "true" do
-      assert tokenize("true") == {:ok, [{true, {{1, 1}, {1, 5}, nil}}], ""}
+      assert tokenize("true") == {:ok, [{true, {{1, 1}, {1, 5}, nil}, nil}], ""}
     end
 
     test "false" do
-      assert tokenize("false") == {:ok, [{false, {{1, 1}, {1, 6}, nil}}], ""}
+      assert tokenize("false") == {:ok, [{false, {{1, 1}, {1, 6}, nil}, nil}], ""}
     end
 
     test "nil" do
-      assert tokenize("nil") == {:ok, [{nil, {{1, 1}, {1, 4}, nil}}], ""}
+      assert tokenize("nil") == {:ok, [{nil, {{1, 1}, {1, 4}, nil}, nil}], ""}
     end
 
     test "when" do
@@ -3382,10 +3483,10 @@ defmodule Toxic.ValidCodeTest do
 
     test "not in" do
       assert tokenize("not in") ==
-               {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, :"not in", {{1, 5}, {1, 7}, nil}}], ""}
+               {:ok, [{:in_op, {{1, 1}, {1, 7}, nil}, {:"not in", {{1, 5}, {1, 7}, nil}}}], ""}
 
       assert tokenize("not  in") ==
-               {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, :"not in", {{1, 6}, {1, 8}, nil}}], ""}
+               {:ok, [{:in_op, {{1, 1}, {1, 8}, nil}, {:"not in", {{1, 6}, {1, 8}, nil}}}], ""}
 
       assert tokenize("not\nin") == {
                :ok,
@@ -3397,7 +3498,7 @@ defmodule Toxic.ValidCodeTest do
              }
 
       assert tokenize("not\\\nin") ==
-               {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, :"not in", {{2, 1}, {2, 3}, nil}}], ""}
+               {:ok, [{:in_op, {{1, 1}, {2, 3}, nil}, {:"not in", {{2, 1}, {2, 3}, nil}}}], ""}
     end
 
     test "in" do
@@ -3431,22 +3532,22 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\ntrue") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {true, {{2, 1}, {2, 5}, nil}}
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
+                  {true, {{2, 1}, {2, 5}, nil}, nil}
                 ], ""}
 
       assert tokenize("\nfalse") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {false, {{2, 1}, {2, 6}, nil}}
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
+                  {false, {{2, 1}, {2, 6}, nil}, nil}
                 ], ""}
 
       assert tokenize("\nnil") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
-                  {nil, {{2, 1}, {2, 4}, nil}}
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
+                  {nil, {{2, 1}, {2, 4}, nil}, nil}
                 ], ""}
 
       assert tokenize("\nand") == {:ok, [{:and_op, {{2, 1}, {2, 4}, 1}, :and}], ""}
@@ -3455,40 +3556,40 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("\nnot") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:unary_op, {{2, 1}, {2, 4}, 1}, :not}
                 ], ""}
 
       assert tokenize("\nin") == {:ok, [{:in_op, {{2, 1}, {2, 3}, 1}, :in}], ""}
 
       assert tokenize("\nnot in") ==
-               {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, :"not in", {{2, 5}, {2, 7}, nil}}], ""}
+               {:ok, [{:in_op, {{2, 1}, {2, 7}, 1}, {:"not in", {{2, 5}, {2, 7}, nil}}}], ""}
 
       assert tokenize("\ncatch") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:block_identifier, {{2, 1}, {2, 6}, nil}, :catch}
                 ], ""}
 
       assert tokenize("\nrescue") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:block_identifier, {{2, 1}, {2, 7}, nil}, :rescue}
                 ], ""}
 
       assert tokenize("\nafter") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:block_identifier, {{2, 1}, {2, 6}, nil}, :after}
                 ], ""}
 
       assert tokenize("\nelse") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {2, 1}, 1}},
+                  {:eol, {{1, 1}, {2, 1}, 1}, nil},
                   {:block_identifier, {{2, 1}, {2, 5}, nil}, :else}
                 ], ""}
     end
@@ -4170,7 +4271,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
                   {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
                   {:int, {{1, 11}, {1, 12}, 1}, ~c"1"}
@@ -4180,7 +4281,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:op_identifier, {{1, 3}, {1, 9}, ?'}, :"1foo"},
                   {:dual_op, {{1, 10}, {1, 11}, nil}, :+},
                   {:identifier, {{1, 11}, {1, 12}, ~c"x"}, :x}
@@ -4192,7 +4293,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:op_identifier, {{1, 3}, {1, 5}, ?'}, :""},
                   {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
                   {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
@@ -4202,7 +4303,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:op_identifier, {{1, 3}, {1, 5}, ?"}, :""},
                   {:dual_op, {{1, 6}, {1, 7}, nil}, :+},
                   {:int, {{1, 7}, {1, 8}, 1}, ~c"1"}
@@ -4248,7 +4349,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
+                  {:eol, {{1, 4}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
                   {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                 ], ""}
@@ -4257,7 +4358,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
+                  {:eol, {{1, 4}, {2, 1}, 1}, nil},
                   {:dual_op, {{2, 1}, {2, 2}, nil}, :+},
                   {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                 ], ""}
@@ -4267,7 +4368,7 @@ defmodule Toxic.ValidCodeTest do
                 [
                   {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
                   {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
+                  {:eol, {{1, 6}, {2, 1}, 1}, nil},
                   {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
                 ], ""}
 
@@ -4276,7 +4377,7 @@ defmodule Toxic.ValidCodeTest do
                 [
                   {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
                   {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
+                  {:eol, {{1, 6}, {2, 1}, 1}, nil},
                   {:int, {{2, 1}, {2, 2}, 1}, ~c"1"}
                 ], ""}
     end
@@ -4324,11 +4425,11 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-                  {:do, {{1, 5}, {1, 7}, nil}},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
+                  {:do, {{1, 5}, {1, 7}, nil}, nil},
+                  {:eol, {{1, 7}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
+                  {:end, {{3, 1}, {3, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4337,13 +4438,13 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:do_identifier, {{1, 3}, {1, 9}, 39}, :"1foo"},
-                  {:do, {{1, 10}, {1, 12}, nil}},
-                  {:eol, {{1, 12}, {2, 1}, 1}},
+                  {:do, {{1, 10}, {1, 12}, nil}, nil},
+                  {:eol, {{1, 12}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
+                  {:end, {{3, 1}, {3, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4352,26 +4453,26 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:do_identifier, {{1, 3}, {1, 5}, 39}, :""},
-                  {:do, {{1, 6}, {1, 8}, nil}},
-                  {:eol, {{1, 8}, {2, 1}, 1}},
+                  {:do, {{1, 6}, {1, 8}, nil}, nil},
+                  {:eol, {{1, 8}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
+                  {:end, {{3, 1}, {3, 4}, nil}, nil}
                 ], ""}
 
       assert tokenize("K.\"\" do\n:ok\nend") ==
                {:ok,
                 [
                   {:alias, {{1, 1}, {1, 2}, ~c"K"}, :K},
-                  {:., {{1, 2}, {1, 3}, nil}},
+                  {:., {{1, 2}, {1, 3}, nil}, nil},
                   {:do_identifier, {{1, 3}, {1, 5}, 34}, :""},
-                  {:do, {{1, 6}, {1, 8}, nil}},
-                  {:eol, {{1, 8}, {2, 1}, 1}},
+                  {:do, {{1, 6}, {1, 8}, nil}, nil},
+                  {:eol, {{1, 8}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
+                  {:end, {{3, 1}, {3, 4}, nil}, nil}
                 ], ""}
     end
   end
@@ -4381,17 +4482,17 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("%{}") ==
                {:ok,
                 [
-                  {:%{}, {{1, 1}, {1, 2}, nil}},
-                  {:"{", {{1, 1}, {1, 2}, nil}},
-                  {:"}", {{1, 3}, {1, 4}, nil}}
+                  {:%{}, {{1, 1}, {1, 2}, nil}, nil},
+                  {:"{", {{1, 1}, {1, 2}, nil}, nil},
+                  {:"}", {{1, 3}, {1, 4}, nil}, nil}
                 ], ""}
 
       assert tokenize("%{}", must_match_elixir: false) ==
                {:ok,
                 [
-                  {:%{}, {{1, 1}, {1, 2}, nil}},
-                  {:"{", {{1, 2}, {1, 3}, nil}},
-                  {:"}", {{1, 3}, {1, 4}, nil}}
+                  {:%{}, {{1, 1}, {1, 2}, nil}, nil},
+                  {:"{", {{1, 2}, {1, 3}, nil}, nil},
+                  {:"}", {{1, 3}, {1, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4399,10 +4500,10 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("%Foo{}") ==
                {:ok,
                 [
-                  {:%, {{1, 1}, {1, 2}, nil}},
+                  {:%, {{1, 1}, {1, 2}, nil}, nil},
                   {:alias, {{1, 2}, {1, 5}, ~c"Foo"}, :Foo},
-                  {:"{", {{1, 5}, {1, 6}, nil}},
-                  {:"}", {{1, 6}, {1, 7}, nil}}
+                  {:"{", {{1, 5}, {1, 6}, nil}, nil},
+                  {:"}", {{1, 6}, {1, 7}, nil}, nil}
                 ], ""}
     end
   end
@@ -4414,9 +4515,9 @@ defmodule Toxic.ValidCodeTest do
                 [
                   {:identifier, {{1, 1}, {1, 10}, ~c"defmodule"}, :defmodule},
                   {:alias, {{1, 11}, {1, 14}, ~c"Foo"}, :Foo},
-                  {:do, {{1, 15}, {1, 17}, nil}},
-                  {:eol, {{1, 17}, {2, 1}, 1}},
-                  {:end, {{2, 1}, {2, 4}, nil}}
+                  {:do, {{1, 15}, {1, 17}, nil}, nil},
+                  {:eol, {{1, 17}, {2, 1}, 1}, nil},
+                  {:end, {{2, 1}, {2, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4425,23 +4526,23 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:do_identifier, {{1, 1}, {1, 4}, ~c"try"}, :try},
-                  {:do, {{1, 5}, {1, 7}, nil}},
-                  {:eol, {{1, 7}, {2, 1}, 1}},
+                  {:do, {{1, 5}, {1, 7}, nil}, nil},
+                  {:eol, {{1, 7}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
                   {:block_identifier, {{3, 1}, {3, 7}, nil}, :rescue},
-                  {:eol, {{3, 7}, {4, 1}, 1}},
+                  {:eol, {{3, 7}, {4, 1}, 1}, nil},
                   {:atom, {{4, 1}, {4, 7}, ~c"error"}, :error},
-                  {:eol, {{4, 7}, {5, 1}, 1}},
+                  {:eol, {{4, 7}, {5, 1}, 1}, nil},
                   {:block_identifier, {{5, 1}, {5, 6}, nil}, :after},
-                  {:eol, {{5, 6}, {6, 1}, 1}},
+                  {:eol, {{5, 6}, {6, 1}, 1}, nil},
                   {:atom, {{6, 1}, {6, 4}, ~c"ok"}, :ok},
-                  {:eol, {{6, 4}, {7, 1}, 1}},
+                  {:eol, {{6, 4}, {7, 1}, 1}, nil},
                   {:block_identifier, {{7, 1}, {7, 5}, nil}, :else},
-                  {:eol, {{7, 5}, {8, 1}, 1}},
+                  {:eol, {{7, 5}, {8, 1}, 1}, nil},
                   {:atom, {{8, 1}, {8, 4}, ~c"ok"}, :ok},
-                  {:eol, {{8, 4}, {9, 1}, 1}},
-                  {:end, {{9, 1}, {9, 4}, nil}}
+                  {:eol, {{8, 4}, {9, 1}, 1}, nil},
+                  {:end, {{9, 1}, {9, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4449,12 +4550,12 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("fn ->\n:ok\nend") ==
                {:ok,
                 [
-                  {:fn, {{1, 1}, {1, 3}, nil}},
+                  {:fn, {{1, 1}, {1, 3}, nil}, nil},
                   {:stab_op, {{1, 4}, {1, 6}, nil}, :->},
-                  {:eol, {{1, 6}, {2, 1}, 1}},
+                  {:eol, {{1, 6}, {2, 1}, 1}, nil},
                   {:atom, {{2, 1}, {2, 4}, ~c"ok"}, :ok},
-                  {:eol, {{2, 4}, {3, 1}, 1}},
-                  {:end, {{3, 1}, {3, 4}, nil}}
+                  {:eol, {{2, 4}, {3, 1}, 1}, nil},
+                  {:end, {{3, 1}, {3, 4}, nil}, nil}
                 ], ""}
     end
 
@@ -4952,7 +5053,7 @@ defmodule Toxic.ValidCodeTest do
       assert tokenize("true::3") ==
                {:ok,
                 [
-                  {true, {{1, 1}, {1, 5}, nil}},
+                  {true, {{1, 1}, {1, 5}, nil}, nil},
                   {:type_op, {{1, 5}, {1, 7}, nil}, :"::"},
                   {:int, {{1, 7}, {1, 8}, 3}, ~c"3"}
                 ], ""}
@@ -4962,11 +5063,11 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 5}, _}, :name},
-                 {:., {{1, 5}, {1, 6}, nil}},
+                 {:., {{1, 5}, {1, 6}, nil}, nil},
                  {:paren_identifier, {{1, 6}, {1, 8}, _}, :"::"},
-                 {:"(", {{1, 8}, {1, 9}, nil}},
+                 {:"(", {{1, 8}, {1, 9}, nil}, nil},
                  {:int, {{1, 9}, {1, 10}, 3}, ~c"3"},
-                 {:")", {{1, 10}, {1, 11}, nil}}
+                 {:")", {{1, 10}, {1, 11}, nil}, nil}
                ],
                tokens
              )
@@ -5241,13 +5342,13 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:int, {{1, 1}, {1, 4}, 123}, ~c"123"},
-                  {:";", {{1, 4}, {1, 5}, 0}}
+                  {:";", {{1, 4}, {1, 5}, 0}, nil}
                 ], ""}
 
       assert tokenize("\n\n123") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {3, 1}, 2}},
+                  {:eol, {{1, 1}, {3, 1}, 2}, nil},
                   {:int, {{3, 1}, {3, 4}, 123}, ~c"123"}
                 ], ""}
 
@@ -5282,13 +5383,13 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:flt, {{1, 1}, {1, 5}, 12.3}, ~c"12.3"},
-                  {:";", {{1, 5}, {1, 6}, 0}}
+                  {:";", {{1, 5}, {1, 6}, 0}, nil}
                 ], ""}
 
       assert tokenize("\n\n12.3") ==
                {:ok,
                 [
-                  {:eol, {{1, 1}, {3, 1}, 2}},
+                  {:eol, {{1, 1}, {3, 1}, 2}, nil},
                   {:flt, {{3, 1}, {3, 5}, 12.3}, ~c"12.3"}
                 ], ""}
 
@@ -5324,8 +5425,8 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:paren_identifier, {{1, 1}, {1, 4}, _}, :a0c},
-                 {:"(", {{1, 4}, {1, 5}, nil}},
-                 {:")", {{1, 5}, {1, 6}, nil}}
+                 {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                 {:")", {{1, 5}, {1, 6}, nil}, nil}
                ],
                tokens
              )
@@ -5335,8 +5436,8 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:paren_identifier, {{1, 1}, {1, 5}, _}, :a0c!},
-                 {:"(", {{1, 5}, {1, 6}, nil}},
-                 {:")", {{1, 6}, {1, 7}, nil}}
+                 {:"(", {{1, 5}, {1, 6}, nil}, nil},
+                 {:")", {{1, 6}, {1, 7}, nil}, nil}
                ],
                tokens
              )
@@ -5353,9 +5454,9 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
+                 {:., {{1, 4}, {1, 5}, nil}, nil},
                  {:identifier, {{1, 5}, {1, 8}, _}, :bar},
-                 {:., {{1, 8}, {1, 9}, nil}},
+                 {:., {{1, 8}, {1, 9}, nil}, nil},
                  {:identifier, {{1, 9}, {1, 12}, _}, :baz}
                ],
                tokens
@@ -5368,7 +5469,7 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
+                 {:., {{1, 4}, {1, 5}, nil}, nil},
                  {:identifier, {{1, 5}, {1, 7}, _}, :do}
                ],
                tokens
@@ -5381,7 +5482,7 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{2, 1}, {2, 2}, nil}},
+                 {:., {{2, 1}, {2, 2}, nil}, nil},
                  {:identifier, {{2, 2}, {2, 5}, _}, :bar}
                ],
                tokens
@@ -5410,7 +5511,7 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
+                 {:., {{1, 4}, {1, 5}, nil}, nil},
                  {:identifier, {{2, 1}, {2, 2}, _}, :+},
                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                ],
@@ -5422,7 +5523,7 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
+                 {:., {{1, 4}, {1, 5}, nil}, nil},
                  {:identifier, {{2, 1}, {2, 2}, _}, :+},
                  {:int, {{2, 2}, {2, 3}, 1}, ~c"1"}
                ],
@@ -5437,8 +5538,8 @@ defmodule Toxic.ValidCodeTest do
                [
                  {:identifier, {{1, 1}, {1, 2}, _}, :f},
                  {:dot_call_op, {{1, 2}, {1, 3}, nil}, :.},
-                 {:"(", {{1, 3}, {1, 4}, nil}},
-                 {:")", {{1, 4}, {1, 5}, nil}}
+                 {:"(", {{1, 3}, {1, 4}, nil}, nil},
+                 {:")", {{1, 4}, {1, 5}, nil}, nil}
                ],
                tokens
              )
@@ -5453,9 +5554,9 @@ defmodule Toxic.ValidCodeTest do
       assert match?(
                [
                  {:alias, {{1, 1}, {1, 4}, _}, :Foo},
-                 {:., {{1, 4}, {1, 5}, nil}},
+                 {:., {{1, 4}, {1, 5}, nil}, nil},
                  {:alias, {{1, 5}, {1, 8}, _}, :Bar},
-                 {:., {{1, 8}, {1, 9}, nil}},
+                 {:., {{1, 8}, {1, 9}, nil}, nil},
                  {:alias, {{1, 9}, {1, 12}, _}, :Baz}
                ],
                tokens
@@ -5487,7 +5588,7 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:bin_heredoc, {{1, 1}, {3, 5}, nil}, 1, [<<"heredoc\n">>]},
-                  {:";", {{3, 5}, {3, 6}, 0}}
+                  {:";", {{3, 5}, {3, 6}, 0}, nil}
                 ], ""}
     end
 
@@ -5567,7 +5668,7 @@ defmodule Toxic.ValidCodeTest do
                [
                  {:identifier, {{1, 1}, {1, 4}, _}, :foo},
                  {:dual_op, {{1, 5}, {1, 6}, nil}, :+},
-                 {:eol, {{1, 6}, {2, 1}, 1}},
+                 {:eol, {{1, 6}, {2, 1}, 1}, nil},
                  {:int, {{2, 1}, {2, 2}, 2}, ~c"2"}
                ],
                tokens
@@ -5684,9 +5785,9 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:paren_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:eol, {{1, 5}, {2, 1}, 1}},
-                  {:")", {{2, 1}, {2, 2}, 1}}
+                  {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                  {:eol, {{1, 5}, {2, 1}, 1}, nil},
+                  {:")", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
 
       # Without newline, closing paren should have nil
@@ -5694,28 +5795,28 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:paren_identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:"(", {{1, 4}, {1, 5}, nil}},
-                  {:")", {{1, 5}, {1, 6}, nil}}
+                  {:"(", {{1, 4}, {1, 5}, nil}, nil},
+                  {:")", {{1, 5}, {1, 6}, nil}, nil}
                 ], ""}
 
       # Same for brackets
       assert tokenize("[1\n]") ==
                {:ok,
                 [
-                  {:"[", {{1, 1}, {1, 2}, nil}},
+                  {:"[", {{1, 1}, {1, 2}, nil}, nil},
                   {:int, {{1, 2}, {1, 3}, 1}, ~c"1"},
-                  {:eol, {{1, 3}, {2, 1}, 1}},
-                  {:"]", {{2, 1}, {2, 2}, 1}}
+                  {:eol, {{1, 3}, {2, 1}, 1}, nil},
+                  {:"]", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
 
       # And braces
       assert tokenize("{:ok\n}") ==
                {:ok,
                 [
-                  {:"{", {{1, 1}, {1, 2}, nil}},
+                  {:"{", {{1, 1}, {1, 2}, nil}, nil},
                   {:atom, {{1, 2}, {1, 5}, ~c"ok"}, :ok},
-                  {:eol, {{1, 5}, {2, 1}, 1}},
-                  {:"}", {{2, 1}, {2, 2}, 1}}
+                  {:eol, {{1, 5}, {2, 1}, 1}, nil},
+                  {:"}", {{2, 1}, {2, 2}, 1}, nil}
                 ], ""}
     end
 
@@ -5727,9 +5828,9 @@ defmodule Toxic.ValidCodeTest do
                   {:at_op, {{1, 1}, {1, 2}, nil}, :@},
                   {:identifier, {{1, 2}, {1, 6}, ~c"spec"}, :spec},
                   {:paren_identifier, {{1, 7}, {1, 10}, ~c"foo"}, :foo},
-                  {:"(", {{1, 10}, {1, 11}, nil}},
+                  {:"(", {{1, 10}, {1, 11}, nil}, nil},
                   {:identifier, {{1, 11}, {1, 15}, ~c"atom"}, :atom},
-                  {:")", {{1, 15}, {1, 16}, nil}}
+                  {:")", {{1, 15}, {1, 16}, nil}, nil}
                 ], ""}
 
       # Closing paren should not have count even if there's EOL earlier
@@ -5737,11 +5838,11 @@ defmodule Toxic.ValidCodeTest do
                {:ok,
                 [
                   {:identifier, {{1, 1}, {1, 4}, ~c"foo"}, :foo},
-                  {:eol, {{1, 4}, {2, 1}, 1}},
+                  {:eol, {{1, 4}, {2, 1}, 1}, nil},
                   {:paren_identifier, {{2, 1}, {2, 4}, ~c"bar"}, :bar},
-                  {:"(", {{2, 4}, {2, 5}, nil}},
+                  {:"(", {{2, 4}, {2, 5}, nil}, nil},
                   {:identifier, {{2, 5}, {2, 8}, ~c"baz"}, :baz},
-                  {:")", {{2, 8}, {2, 9}, nil}}
+                  {:")", {{2, 8}, {2, 9}, nil}, nil}
                 ], ""}
     end
 
@@ -5820,7 +5921,7 @@ defmodule Toxic.ValidCodeTest do
                   {:capture_op, {{1, 1}, {1, 2}, nil}, :&},
                   {:unary_op, {{1, 2}, {1, 5}, nil}, :not},
                   {:int, {{1, 6}, {1, 7}, 1}, ~c"1"},
-                  {:",", {{1, 7}, {1, 8}, 0}},
+                  {:",", {{1, 7}, {1, 8}, 0}, nil},
                   {:int, {{1, 9}, {1, 10}, 2}, ~c"2"}
                 ], ""}
 

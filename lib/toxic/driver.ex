@@ -101,10 +101,7 @@ defmodule Toxic.Driver do
 
   Same shapes as `Toxic.token()` but before being returned to the user.
   """
-  @type token ::
-          {atom(), term()}
-          | {atom(), term(), term()}
-          | {atom(), term(), term(), term()}
+  @type token :: {atom(), term(), term()}
 
   @typedoc """
   Interpolation context entry.
@@ -394,7 +391,7 @@ defmodule Toxic.Driver do
               "\n" <> binary_part_no_newline = binary_part
               {binary_part_no_newline, line - 1}
 
-            {:sigil_start, _, _, delim} when delim in ["\"\"\"", "'''"] ->
+            {:sigil_start, _, {_, delim}} when delim in ["\"\"\"", "'''"] ->
               "\n" <> binary_part_no_newline = binary_part
               {binary_part_no_newline, line - 1}
 
@@ -423,7 +420,7 @@ defmodule Toxic.Driver do
         )
 
       {:done, meta, indent, rest, line, column, scope} when kind == :sigil ->
-        end_token = {:sigil_end, meta, delim, indent}
+        end_token = token(:sigil_end, meta, delim, indent)
 
         {rest, modifiers} = Toxic.NormalTokenizer.Sigil.collect_modifiers(rest)
         modifiers_length = length(modifiers)
@@ -463,7 +460,7 @@ defmodule Toxic.Driver do
             scope
           end
 
-        return_token({end_token_type, meta, delim, indent}, rest, %{
+        return_token(token(end_token_type, meta, delim, indent), rest, %{
           state
           | line: line,
             column: column,
@@ -713,7 +710,8 @@ defmodule Toxic.Driver do
         {rest, %{state | line: line, column: column, scope: scope, deferrals: tl(deferrals)}}
 
       {:reset_eol, rest, line, column, scope} ->
-        [{kind, meta(start_line, start_column, _end_line, _end_column, _extra)} | t] = deferrals
+        [{kind, meta(start_line, start_column, _end_line, _end_column, _extra), extra} | t] =
+          deferrals
 
         {rest,
          %{
@@ -721,11 +719,12 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             deferrals: [{kind, meta(start_line, start_column, line, column, 0)} | t]
+             deferrals: [{kind, meta(start_line, start_column, line, column, 0), extra} | t]
          }}
 
       {:increase_eol, rest, line, column, scope} ->
-        [{kind, meta(start_line, start_column, _end_line, _end_column, extra)} | t] = deferrals
+        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] =
+          deferrals
 
         {rest,
          %{
@@ -733,10 +732,12 @@ defmodule Toxic.Driver do
            | line: line,
              column: column,
              scope: scope,
-             deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1)} | t]
+             deferrals: [
+               {kind, meta(start_line, start_column, line, column, extra + 1), extra_value} | t
+             ]
          }}
 
-      {{:token, {eol, _meta} = token}, rest, line, column, scope}
+      {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         new_output = Deferrals.flush(output, deferrals)
 
@@ -847,7 +848,7 @@ defmodule Toxic.Driver do
       {{:token_with_eol, token}, rest, line, column, scope} ->
         carry_with_recent =
           case {token, deferrals} do
-            {left, [{:eol, _} | tokens]} -> [left | tokens]
+            {left, [{:eol, _, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
 
@@ -1083,7 +1084,8 @@ defmodule Toxic.Driver do
     [_ | rest] = terms
     new_scope = scope(state.scope, terminators: rest)
 
-    inserted = if state.insert_structural_closers, do: [{closing_for(start), meta0}], else: []
+    inserted =
+      if state.insert_structural_closers, do: [{closing_for(start), meta0, nil}], else: []
 
     new_output = state.output ++ [error_token | inserted]
 

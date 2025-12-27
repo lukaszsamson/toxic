@@ -38,9 +38,7 @@ defmodule Toxic.ToString do
 
   defp get_meta(token) do
     case token do
-      {_type, meta} -> meta
-      {_type, meta, _val} -> meta
-      {_type, meta, _val, _extra} -> meta
+      {_type, meta, _extra} -> meta
     end
   end
 
@@ -79,22 +77,22 @@ defmodule Toxic.ToString do
         name = get_extra_or_atom(meta, atom)
         {name <> ":", context}
 
-      {true, _meta} ->
+      {true, _meta, _} ->
         {"true", context}
 
-      {false, _meta} ->
+      {false, _meta, _} ->
         {"false", context}
 
-      {nil, _meta} ->
+      {nil, _meta, _} ->
         {"nil", context}
 
-      {:do, _meta} ->
+      {:do, _meta, _} ->
         {"do", context}
 
-      {:end, _meta} ->
+      {:end, _meta, _} ->
         {"end", context}
 
-      {:fn, _meta} ->
+      {:fn, _meta, _} ->
         {"fn", context}
 
       {:block_identifier, _meta, atom} ->
@@ -196,7 +194,7 @@ defmodule Toxic.ToString do
       {:in_op, _meta, :in} ->
         {"in", context}
 
-      {:in_op, meta, :"not in", in_meta} ->
+      {:in_op, meta, {:"not in", in_meta}} ->
         {{start_line, start_col}, _, _} = meta
         {{in_line, in_col}, _, _} = in_meta
 
@@ -205,46 +203,46 @@ defmodule Toxic.ToString do
         {str, context}
 
       # Punctuation
-      {:., _meta} ->
+      {:., _meta, _} ->
         {".", context}
 
       {:dot_call_op, _meta, _} ->
         {".", context}
 
-      {:",", _meta} ->
+      {:",", _meta, _} ->
         {",", context}
 
-      {:";", _meta} ->
+      {:";", _meta, _} ->
         {";", context}
 
-      {:"<<", _meta} ->
+      {:"<<", _meta, _} ->
         {"<<", context}
 
-      {:">>", _meta} ->
+      {:">>", _meta, _} ->
         {">>", context}
 
-      {:"(", _meta} ->
+      {:"(", _meta, _} ->
         {"(", context}
 
-      {:")", _meta} ->
+      {:")", _meta, _} ->
         {")", context}
 
-      {:"[", _meta} ->
+      {:"[", _meta, _} ->
         {"[", context}
 
-      {:"]", _meta} ->
+      {:"]", _meta, _} ->
         {"]", context}
 
-      {:"{", _meta} ->
+      {:"{", _meta, _} ->
         {"{", context}
 
-      {:"}", _meta} ->
+      {:"}", _meta, _} ->
         {"}", context}
 
-      {:%, _meta} ->
+      {:%, _meta, _} ->
         {"%", context}
 
-      {:%{}, _meta} ->
+      {:%{}, _meta, _} ->
         {"%", context}
 
       # Strings
@@ -281,19 +279,19 @@ defmodule Toxic.ToString do
       {:list_heredoc_start, _meta, _} ->
         {"'''", [:heredoc | context]}
 
-      {:bin_heredoc_end, _meta, _, _} ->
+      {:bin_heredoc_end, _meta, {_delim, _indent}} ->
         {"\"\"\"", tl(context)}
 
-      {:list_heredoc_end, _meta, _, _} ->
+      {:list_heredoc_end, _meta, {_delim, _indent}} ->
         {"'''", tl(context)}
 
       # Sigils
-      {:sigil_start, _meta, sigil_atom, delim} ->
+      {:sigil_start, _meta, {sigil_atom, delim}} ->
         char = sigil_char(sigil_atom)
         str = "~" <> char <> delim_to_string(delim)
         {str, [delim | context]}
 
-      {:sigil_end, _meta, delim, _indent} ->
+      {:sigil_end, _meta, {delim, _indent}} ->
         str = delim_to_string(delim)
         {str, tl(context)}
 
@@ -351,7 +349,7 @@ defmodule Toxic.ToString do
         {str, tl(context)}
 
       # EOL
-      {:eol, meta} ->
+      {:eol, meta, _} ->
         count = elem(meta, 2)
         {String.duplicate("\n", count), context}
 

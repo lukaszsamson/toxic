@@ -7,11 +7,13 @@ defmodule Toxic.Driver.Synthesis do
   alias Toxic.{Driver, Error, Scope}
 
   @spec synthesize_end_for_kind(atom(), term(), term()) :: Driver.token()
-  def synthesize_end_for_kind(:sigil, delim, meta), do: {:sigil_end, meta, delim, 0}
-  def synthesize_end_for_kind(:bin_heredoc, delim, meta), do: {:bin_heredoc_end, meta, delim, 0}
+  def synthesize_end_for_kind(:sigil, delim, meta), do: token(:sigil_end, meta, delim, 0)
+
+  def synthesize_end_for_kind(:bin_heredoc, delim, meta),
+    do: token(:bin_heredoc_end, meta, delim, 0)
 
   def synthesize_end_for_kind(:list_heredoc, delim, meta),
-    do: {:list_heredoc_end, meta, delim, 0}
+    do: token(:list_heredoc_end, meta, delim, 0)
 
   def synthesize_end_for_kind(:quoted_identifier, delim, meta),
     do: {:quoted_identifier_end, meta, delim}
@@ -74,7 +76,7 @@ defmodule Toxic.Driver.Synthesis do
 
   defp synthesize_closing(closer, state) do
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    token = {closer, meta0}
+    token = {closer, meta0, nil}
     scope(terminators: terms) = state.scope
 
     [_ | rest] = terms
@@ -85,14 +87,14 @@ defmodule Toxic.Driver.Synthesis do
 
   def synthesize_opening(opening, state) do
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
-    token = {opening, meta0}
+    token = {opening, meta0, nil}
     scope(indentation: indent, terminators: terms) = state.scope
     new_terms = [{opening, meta0, indent} | terms]
 
     {:ok, token, scope(state.scope, terminators: new_terms)}
   end
 
-  defp maybe_tag_zero_len({kind, {{sl, sc}, {_el, _ec}, extra}}, _state) do
-    {kind, {{sl, sc}, {sl, sc}, extra}}
+  defp maybe_tag_zero_len({kind, {{sl, sc}, {_el, _ec}, extra}, payload}, _state) do
+    {kind, {{sl, sc}, {sl, sc}, extra}, payload}
   end
 end

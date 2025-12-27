@@ -907,7 +907,7 @@ defmodule Toxic.TolerantModeTest do
     test "map invalid open delimiter handles backslash CRLF continuation" do
       tokens = tokenize_tolerant("%\\\r\n{foo}")
 
-      assert Enum.any?(tokens, fn token -> match?({:%, _}, token) end)
+      assert Enum.any?(tokens, fn token -> match?({:%, _, _}, token) end)
 
       {:error_token, {{2, 1}, {2, 2}, _}, %Toxic.Error{code: :map_unexpected_space_after_percent}} =
         Enum.find(tokens, fn token -> match?({:error_token, _, _}, token) end)
@@ -1027,7 +1027,7 @@ defmodule Toxic.TolerantModeTest do
     test "map identifier sanitization does not emit synthetic percent" do
       tokens = tokenize_tolerant("%{Bad@Ident: 1}", insert_identifier_sanitization: true)
 
-      refute Enum.any?(tokens, fn token -> match?({:%, _}, token) end)
+      refute Enum.any?(tokens, fn token -> match?({:%, _, _}, token) end)
     end
   end
 
@@ -1758,7 +1758,7 @@ defmodule Toxic.TolerantModeTest do
 
       # Synthetic token should have zero-length meta
       case synthetic_paren do
-        {:"(", {{sl, sc}, {el, ec}, _}} ->
+        {:"(", {{sl, sc}, {el, ec}, _}, _} ->
           assert {sl, sc} == {el, ec}, "Synthetic token should have zero-length span"
 
         _ ->

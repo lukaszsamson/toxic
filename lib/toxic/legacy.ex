@@ -21,7 +21,7 @@ defmodule Toxic.Legacy do
 
   defp ranges_to_legacy_after_collapse([], _prev_was_eol, acc), do: Enum.reverse(acc)
 
-  defp ranges_to_legacy_after_collapse([{:eol, _} = token | rest], _prev_was_eol, acc) do
+  defp ranges_to_legacy_after_collapse([{:eol, _, _} = token | rest], _prev_was_eol, acc) do
     ranges_to_legacy_after_collapse(rest, true, [ranges_token_to_legacy(token) | acc])
   end
 
@@ -46,10 +46,6 @@ defmodule Toxic.Legacy do
     ranges_to_legacy_after_collapse(rest, false, [adjusted | acc])
   end
 
-  defp ranges_token_to_legacy({type, meta}) do
-    {type, legacy_meta(meta)}
-  end
-
   defp ranges_token_to_legacy({type, meta, value})
        when type in [
               :bin_string,
@@ -60,6 +56,53 @@ defmodule Toxic.Legacy do
               :kw_identifier_safe
             ] do
     {type, legacy_meta(meta), ranges_convert_parts(value)}
+  end
+
+  defp ranges_token_to_legacy({:in_op, meta, {:"not in", info}}) do
+    {:in_op, legacy_meta(meta), :"not in", legacy_meta(info)}
+  end
+
+  defp ranges_token_to_legacy({:sigil_start, meta, {sigil_atom, delim}}) do
+    {:sigil_start, legacy_meta(meta), sigil_atom, delim}
+  end
+
+  defp ranges_token_to_legacy({:sigil_end, meta, {delim, indent}}) do
+    {:sigil_end, legacy_meta(meta), delim, indent}
+  end
+
+  defp ranges_token_to_legacy({:bin_heredoc_end, meta, {delim, indent}}) do
+    {:bin_heredoc_end, legacy_meta(meta), delim, indent}
+  end
+
+  defp ranges_token_to_legacy({:list_heredoc_end, meta, {delim, indent}}) do
+    {:list_heredoc_end, legacy_meta(meta), delim, indent}
+  end
+
+  @legacy_simple_tokens [
+    true,
+    false,
+    nil,
+    :do,
+    :end,
+    :fn,
+    :eol,
+    :.,
+    :";",
+    :",",
+    :"<<",
+    :">>",
+    :"(",
+    :")",
+    :"[",
+    :"]",
+    :"{",
+    :"}",
+    :%,
+    :%{}
+  ]
+
+  defp ranges_token_to_legacy({type, meta, nil}) when type in @legacy_simple_tokens do
+    {type, legacy_meta(meta)}
   end
 
   defp ranges_token_to_legacy({type, meta, value}) do
@@ -76,10 +119,6 @@ defmodule Toxic.Legacy do
        ) do
     {:sigil, legacy_meta(meta), sigil_atom, ranges_convert_parts(parts), modifiers, indentation,
      delimiter}
-  end
-
-  defp ranges_token_to_legacy({:in_op, meta, :"not in", info}) do
-    {:in_op, legacy_meta(meta), :"not in", legacy_meta(info)}
   end
 
   defp legacy_meta({{line, column}, _end_meta, extra}), do: {line, column, extra}
@@ -115,7 +154,7 @@ defmodule Toxic.Legacy do
     end
   end
 
-  defp linear_to_legacy([{:sigil_start, meta, sigil_atom, delim} | rest], out, stack) do
+  defp linear_to_legacy([{:sigil_start, meta, {sigil_atom, delim}} | rest], out, stack) do
     linear_to_legacy(rest, out, [{:sigil, meta, sigil_atom, delim, []} | stack])
   end
 
@@ -164,7 +203,7 @@ defmodule Toxic.Legacy do
   end
 
   defp linear_to_legacy(
-         [{:sigil_end, end_meta, _delim, indent} | rest],
+         [{:sigil_end, end_meta, {_delim, indent}} | rest],
          out,
          [{:sigil, meta, sigil_atom, delim, parts_rev} | stack]
        ) do
@@ -220,7 +259,7 @@ defmodule Toxic.Legacy do
     end_token = :"#{heredoc_type}_end"
 
     defp linear_to_legacy(
-           [{unquote(end_token), meta_end, _delim1, indent} | rest],
+           [{unquote(end_token), meta_end, {_delim1, indent}} | rest],
            out,
            [{unquote(heredoc_type), meta_start, _delim2, parts_rev} | stack]
          ) do

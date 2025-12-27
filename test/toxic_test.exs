@@ -1056,7 +1056,7 @@ defmodule ToxicTest do
       stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
 
       assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
-      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
       assert {:error, _, _} = Toxic.next(stream)
@@ -1066,7 +1066,7 @@ defmodule ToxicTest do
       stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
 
       assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
-      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
       assert {:error, _, _} = Toxic.next(stream)
@@ -1076,7 +1076,7 @@ defmodule ToxicTest do
       stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict)
 
       assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
-      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
       assert {:error, _, _} = Toxic.peek(stream)
@@ -1086,7 +1086,7 @@ defmodule ToxicTest do
       stream = Toxic.new("A.\"abc\#{a}\"", 1, 1, error_mode: :strict, max_batch: 4)
 
       assert {:ok, {:alias, _, _}, stream} = Toxic.next(stream)
-      assert {:ok, {:., _}, stream} = Toxic.next(stream)
+      assert {:ok, {:., _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:quoted_identifier_start, _, _}, stream} = Toxic.next(stream)
       assert {:ok, {:string_fragment, _, _}, stream} = Toxic.next(stream)
       assert {:error, _, _} = Toxic.peek(stream)
@@ -1141,10 +1141,10 @@ defmodule ToxicTest do
 
       # With synthesis enabled, we get synthetic { then actual }
       {:ok, token2, stream} = Toxic.next(stream)
-      assert {:"{", _} = token2
+      assert {:"{", _, _} = token2
 
       {:ok, token3, stream} = Toxic.next(stream)
-      assert {:"}", _} = token3
+      assert {:"}", _, _} = token3
 
       # EOF after tokens
       assert {:eof, _} = Toxic.next(stream)
@@ -1229,8 +1229,8 @@ defmodule ToxicTest do
       assert length(tokens) == 4
       assert {:int, {{1, 1}, {1, 2}, 1}, ~c"1"} = Enum.at(tokens, 0)
       assert {:error_token, _, _} = Enum.at(tokens, 1)
-      assert {:"{", _} = Enum.at(tokens, 2)
-      assert {:"}", _} = Enum.at(tokens, 3)
+      assert {:"{", _, _} = Enum.at(tokens, 2)
+      assert {:"}", _, _} = Enum.at(tokens, 3)
     end
 
     test "tolerant position/1 recovers error for accurate position" do

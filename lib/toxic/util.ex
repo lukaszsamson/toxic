@@ -37,12 +37,12 @@ defmodule Toxic.Util do
     {events, rest, line, column, scope}
   end
 
-  def previous_was_eol([{:",", {_, _, count}} | _]) when count > 0, do: count
-  def previous_was_eol([{:";", {_, _, count}} | _]) when count > 0, do: count
-  def previous_was_eol([{:eol, {_, _, count}} | _]) when count > 0, do: count
+  def previous_was_eol([{:",", {_, _, count}, _} | _]) when count > 0, do: count
+  def previous_was_eol([{:";", {_, _, count}, _} | _]) when count > 0, do: count
+  def previous_was_eol([{:eol, {_, _, count}, _} | _]) when count > 0, do: count
   def previous_was_eol(_), do: nil
 
-  def previous_was_dot?([{:., _} | _]), do: true
+  def previous_was_dot?([{:., _, _} | _]), do: true
   def previous_was_dot?(_), do: false
 
   def unsafe_to_atom(part, line, column, _scope)
