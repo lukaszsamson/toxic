@@ -517,8 +517,7 @@ defmodule Toxic.NormalTokenizer do
   # End of line
 
   # Consecutive semicolons - emit error
-  def next([?; | _rest], line, column, _scope, [top | _] = _tokens)
-      when elem(top, 0) == :";" do
+  def next([?; | _rest], line, column, _scope, [{:";", _, _} | _] = _tokens) do
     # Match Elixir's token format: ";" (column N, code point U+003B)
     token_display = [
       ?\",
@@ -547,8 +546,7 @@ defmodule Toxic.NormalTokenizer do
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next([?; | rest], line, column, scope, [top | _] = _tokens)
-      when elem(top, 0) != :";" do
+  def next([?; | rest], line, column, scope, [{kind, _, _} | _] = _tokens) when kind != :";" do
     token = semicolon(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end

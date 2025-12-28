@@ -8,6 +8,6 @@ defmodule Toxic.Driver.Deferrals do
 
   @spec append(list(), list(), list()) :: list()
   def append(output, deferrals, tokens) do
-    output ++ Enum.reverse(deferrals) ++ tokens
+    output ++ Enum.reverse(deferrals, tokens)
   end
 end

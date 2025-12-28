@@ -191,8 +191,8 @@ defmodule Toxic.Driver.Contexts do
 
   @spec compute_start_info(Driver.token(), term(), pos_integer(), pos_integer()) :: map()
   def compute_start_info(start_token, delimiter, line, column) do
-    {{_meta_start_line, _meta_start_column}, {meta_end_line, meta_end_column}, _extra} =
-      elem(start_token, 1)
+    {_, {{_meta_start_line, _meta_start_column}, {meta_end_line, meta_end_column}, _extra}, _} =
+      start_token
 
     delimiter_length = delimiter_length(delimiter)
 

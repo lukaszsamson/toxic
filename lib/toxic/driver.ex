@@ -606,8 +606,8 @@ defmodule Toxic.Driver do
                   {true, content} ->
                     # For atoms, extract the token start column from the start_token meta
                     # The start_token has the : position, but start_info.column points to the delimiter
-                    {{_start_line, token_start_col}, {_end_line, _end_col}, _extra} =
-                      elem(start_info.token, 1)
+                    {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} =
+                      start_info.token
 
                     Contexts.maybe_warn_unnecessary_quote(
                       kind,
