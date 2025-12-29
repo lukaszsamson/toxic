@@ -33,7 +33,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         _tokens
       )
       when is_downcase(s) do
-    sigil_name = [?~ | Enum.reverse(name_acc)] ++ original
+    sigil_name = [?~ | Enum.reverse(name_acc, original)]
     # Error position should be at the start of the sigil (~)
     error_column = column - length(name_acc) - 1
 
@@ -68,7 +68,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         _tokens
       )
       when is_downcase(s) do
-    sigil_name = [?~ | Enum.reverse(name_acc)] ++ original
+    sigil_name = [?~ | Enum.reverse(name_acc, original)]
     error_column = column - length(name_acc) - 1
 
     err = %Toxic.Error{

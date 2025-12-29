@@ -11,6 +11,18 @@ defmodule Toxic.Util do
   def strip_horizontal_space(t, counter), do: {t, counter}
 
   # Binary variant
+  def strip_horizontal_space_bin(<<h, h, h, h, h, h, h, h, t::binary>>, counter) when is_horizontal_space(h) do
+    strip_horizontal_space_bin(t, counter + 8)
+  end
+
+  def strip_horizontal_space_bin(<<h, h, h, h, t::binary>>, counter) when is_horizontal_space(h) do
+    strip_horizontal_space_bin(t, counter + 4)
+  end
+
+  def strip_horizontal_space_bin(<<h, h, t::binary>>, counter) when is_horizontal_space(h) do
+    strip_horizontal_space_bin(t, counter + 2)
+  end
+
   def strip_horizontal_space_bin(<<h, t::binary>>, counter) when is_horizontal_space(h) do
     strip_horizontal_space_bin(t, counter + 1)
   end

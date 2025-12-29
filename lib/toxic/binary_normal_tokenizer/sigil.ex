@@ -33,7 +33,7 @@ defmodule Toxic.BinaryNormalTokenizer.Sigil do
         _tokens
       )
       when is_downcase(s) do
-    sigil_name = [?~ | Enum.reverse(name_acc)] ++ String.to_charlist(original)
+    sigil_name = [?~ | Enum.reverse(name_acc, String.to_charlist(original))]
     error_column = column - length(name_acc) - 1
 
     err = %Toxic.Error{
@@ -66,7 +66,7 @@ defmodule Toxic.BinaryNormalTokenizer.Sigil do
         _tokens
       )
       when is_downcase(s) do
-    sigil_name = [?~ | Enum.reverse(name_acc)] ++ String.to_charlist(original)
+    sigil_name = [?~ | Enum.reverse(name_acc, String.to_charlist(original))]
     error_column = column - length(name_acc) - 1
 
     err = %Toxic.Error{

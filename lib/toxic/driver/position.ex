@@ -169,23 +169,20 @@ defmodule Toxic.Driver.Position do
     {rest, line, col}
   end
 
-  # Non-ASCII - use grapheme cluster handling
+  # Non-ASCII - use grapheme cluster handling with :unicode_util.gc
   def consume_one_bin(rest, state) when is_binary(rest) do
     scope(column: base_column) = state.scope
 
-    case String.next_grapheme(rest) do
-      {grapheme, new_rest} ->
-        # Check if grapheme contains a newline
-        {line, col} =
-          if String.contains?(grapheme, "\n") do
-            {state.line + 1, base_column}
-          else
-            {state.line, state.column + 1}
-          end
-
+    case :unicode_util.gc(rest) do
+      [cluster | new_rest] when is_list(cluster) ->
+        {line, col} = advance_pos_cluster(cluster, state.line, state.column, base_column)
         {new_rest, line, col}
 
-      nil ->
+      [codepoint | new_rest] when is_integer(codepoint) ->
+        {line, col} = advance_pos(codepoint, state.line, state.column, base_column)
+        {new_rest, line, col}
+
+      [] ->
         {<<>>, state.line, state.column}
     end
   end
@@ -224,22 +221,20 @@ defmodule Toxic.Driver.Position do
     end
   end
 
-  # Non-ASCII - use grapheme handling
+  # Non-ASCII - use grapheme handling with :unicode_util.gc
   defp do_scan_to_sync_bin(bin, state, scanned) when is_binary(bin) do
-    case String.next_grapheme(bin) do
-      {grapheme, rest} ->
+    case :unicode_util.gc(bin) do
+      [cluster | rest] when is_list(cluster) ->
         scope(column: base_column) = state.scope
-
-        {next_line, next_col} =
-          if String.contains?(grapheme, "\n") do
-            {state.line + 1, base_column}
-          else
-            {state.line, state.column + 1}
-          end
-
+        {next_line, next_col} = advance_pos_cluster(cluster, state.line, state.column, base_column)
         do_scan_to_sync_bin(rest, %{state | line: next_line, column: next_col}, scanned + 1)
 
-      nil ->
+      [codepoint | rest] when is_integer(codepoint) ->
+        scope(column: base_column) = state.scope
+        {next_line, next_col} = advance_pos(codepoint, state.line, state.column, base_column)
+        do_scan_to_sync_bin(rest, %{state | line: next_line, column: next_col}, scanned + 1)
+
+      [] ->
         {bin, state.line, state.column}
     end
   end

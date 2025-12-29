@@ -221,7 +221,7 @@ defmodule Toxic.BinaryInterpolationTokenizer do
 
   # Single character terminator with non-empty buffer
   def next(
-        <<last, rest::binary>>,
+        <<last, _rest::binary>> = original,
         buffer = [_ | _],
         line,
         column,
@@ -233,7 +233,7 @@ defmodule Toxic.BinaryInterpolationTokenizer do
       )
       when is_integer(last) do
     {:fragment, meta(start_line, start_column, line, column, nil),
-     Toxic.Util.characters_to_binary(Enum.reverse(buffer)), <<last, rest::binary>>, line, column, scope}
+     Toxic.Util.characters_to_binary(Enum.reverse(buffer)), original, line, column, scope}
   end
 
   # Single character terminator with empty buffer
@@ -570,11 +570,11 @@ defmodule Toxic.BinaryInterpolationTokenizer do
        )
        when is_integer(h) do
     case strip_horizontal_space_bin(rest, [], base_column) do
-      {<<^h, ^h, ^h, new_rest::binary>>, _new_buffer, column} ->
+      {<<^h, ^h, ^h, _::binary>> = original, _new_buffer, column} ->
         scope = scope(scope, allow_triple_terminator: true)
 
         {:fragment, meta(start_line, start_column, line + 1, column, nil),
-         Toxic.Util.characters_to_binary(Enum.reverse(buffer)), <<h, h, h, new_rest::binary>>, line + 1,
+         Toxic.Util.characters_to_binary(Enum.reverse(buffer)), original, line + 1,
          column, scope}
 
       {new_rest, new_buffer, column} ->
@@ -614,6 +614,21 @@ defmodule Toxic.BinaryInterpolationTokenizer do
       interpol,
       last
     )
+  end
+
+  defp strip_horizontal_space_bin(<<h, h, h, h, h, h, h, h, rest::binary>>, buffer, counter)
+       when is_horizontal_space(h) do
+    strip_horizontal_space_bin(rest, [h, h, h, h, h, h, h, h | buffer], counter + 8)
+  end
+
+  defp strip_horizontal_space_bin(<<h, h, h, h, rest::binary>>, buffer, counter)
+       when is_horizontal_space(h) do
+    strip_horizontal_space_bin(rest, [h, h, h, h | buffer], counter + 4)
+  end
+
+  defp strip_horizontal_space_bin(<<h, h, rest::binary>>, buffer, counter)
+       when is_horizontal_space(h) do
+    strip_horizontal_space_bin(rest, [h, h | buffer], counter + 2)
   end
 
   defp strip_horizontal_space_bin(<<h, rest::binary>>, buffer, counter)

@@ -3,17 +3,51 @@ defmodule Toxic.BinaryNormalTokenizer.Comment do
   import Toxic.CharacterClassifier
   import Toxic.Scope
 
+  # Terminators - return charlist (not binary) for preserve_comments compatibility
   def tokenize_comment(<<?\r, ?\n, _::binary>> = rest, acc) do
-    {rest, IO.iodata_to_binary(acc)}
+    {rest, :lists.reverse(acc)}
   end
 
   def tokenize_comment(<<?\n, _::binary>> = rest, acc) do
-    {rest, IO.iodata_to_binary(acc)}
+    {rest, :lists.reverse(acc)}
   end
 
-  # ASCII fast path - single byte, check bidi/break after
+  # 8-byte ASCII fast path - comments are typically ASCII
+  def tokenize_comment(<<c1, c2, c3, c4, c5, c6, c7, c8, rest::binary>>, acc)
+      when c1 < 128 and c2 < 128 and c3 < 128 and c4 < 128 and
+             c5 < 128 and c6 < 128 and c7 < 128 and c8 < 128 and
+             c1 != ?\n and c1 != ?\r and
+             c2 != ?\n and c2 != ?\r and
+             c3 != ?\n and c3 != ?\r and
+             c4 != ?\n and c4 != ?\r and
+             c5 != ?\n and c5 != ?\r and
+             c6 != ?\n and c6 != ?\r and
+             c7 != ?\n and c7 != ?\r and
+             c8 != ?\n and c8 != ?\r do
+    tokenize_comment(rest, [c8, c7, c6, c5, c4, c3, c2, c1 | acc])
+  end
+
+  # 4-byte ASCII fast path
+  def tokenize_comment(<<c1, c2, c3, c4, rest::binary>>, acc)
+      when c1 < 128 and c2 < 128 and c3 < 128 and c4 < 128 and
+             c1 != ?\n and c1 != ?\r and
+             c2 != ?\n and c2 != ?\r and
+             c3 != ?\n and c3 != ?\r and
+             c4 != ?\n and c4 != ?\r do
+    tokenize_comment(rest, [c4, c3, c2, c1 | acc])
+  end
+
+  # 2-byte ASCII fast path
+  def tokenize_comment(<<c1, c2, rest::binary>>, acc)
+      when c1 < 128 and c2 < 128 and
+             c1 != ?\n and c1 != ?\r and
+             c2 != ?\n and c2 != ?\r do
+    tokenize_comment(rest, [c2, c1 | acc])
+  end
+
+  # Single ASCII byte
   def tokenize_comment(<<h, rest::binary>>, acc) when h < 128 do
-    tokenize_comment(rest, [acc, h])
+    tokenize_comment(rest, [h | acc])
   end
 
   # Non-ASCII - need to check codepoint for bidi/break
@@ -26,11 +60,12 @@ defmodule Toxic.BinaryNormalTokenizer.Comment do
   end
 
   def tokenize_comment(<<h::utf8, rest::binary>>, acc) do
-    tokenize_comment(rest, [acc | <<h::utf8>>])
+    # h is the codepoint, add directly to charlist
+    tokenize_comment(rest, [h | acc])
   end
 
   def tokenize_comment(<<>>, acc) do
-    {<<>>, IO.iodata_to_binary(acc)}
+    {<<>>, :lists.reverse(acc)}
   end
 
   def preserve_comments(

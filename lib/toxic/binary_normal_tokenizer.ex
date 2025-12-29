@@ -82,7 +82,7 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Char tokens
 
-  def next(<<??::utf8, ?\\, h, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<??, ?\\, h, rest::binary>>, line, column, scope, _tokens) do
     char = Toxic.Unescape.unescape_map(h)
 
     new_scope =
@@ -120,7 +120,7 @@ defmodule Toxic.BinaryNormalTokenizer do
     emit(token, rest, new_line, new_column, new_scope)
   end
 
-  def next(<<??::utf8, char, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<??, char::utf8, rest::binary>>, line, column, scope, _tokens) do
     new_scope =
       case handle_char(char) do
         {escape, name} ->
