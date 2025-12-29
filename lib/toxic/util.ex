@@ -3,11 +3,19 @@ defmodule Toxic.Util do
   import Toxic.CharacterClassifier, only: [is_horizontal_space: 1]
   import Toxic.Scope
 
+  # Charlist variant
   def strip_horizontal_space([h | t], counter) when is_horizontal_space(h) do
     strip_horizontal_space(t, counter + 1)
   end
 
   def strip_horizontal_space(t, counter), do: {t, counter}
+
+  # Binary variant
+  def strip_horizontal_space_bin(<<h, t::binary>>, counter) when is_horizontal_space(h) do
+    strip_horizontal_space_bin(t, counter + 1)
+  end
+
+  def strip_horizontal_space_bin(t, counter) when is_binary(t), do: {t, counter}
 
   def no_token(rest, line, column, scope) do
     {nil, rest, line, column, scope}
@@ -135,6 +143,26 @@ defmodule Toxic.Util do
 
   def unsafe_to_atom(list, _line, _column, _scope) when is_list(list) do
     {:ok, List.to_atom(list)}
+  end
+
+  # Binary-specific clauses - avoid charlist conversion for common path
+  def unsafe_to_atom(bin, line, column, scope(existing_atoms_only: true)) when is_binary(bin) do
+    try do
+      {:ok, String.to_existing_atom(bin)}
+    rescue
+      ArgumentError ->
+        {:error,
+         %Toxic.Error{
+           code: :identifier_nonexistent_atom_when_existing_only,
+           domain: :identifier,
+           token_display: :binary.bin_to_list(bin),
+           details: %{line: line, column: column}
+         }}
+    end
+  end
+
+  def unsafe_to_atom(bin, _line, _column, _scope) when is_binary(bin) do
+    {:ok, String.to_atom(bin)}
   end
 
   def characters_to_binary(data) when is_list(data) do

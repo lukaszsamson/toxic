@@ -2,24 +2,25 @@
 
 # Profiling script for Toxic tokenizer on real-world Elixir code
 # Usage examples:
-#   elixir profile_toxic.exs --type time
-#   elixir profile_toxic.exs --type memory
-#   elixir profile_toxic.exs --type calls
-#   elixir profile_toxic.exs --type time --matching Toxic.Driver
-#   elixir profile_toxic.exs --type time --project phoenix
-#   elixir profile_toxic.exs --type time --limit 100
+#   mix run profile_toxic.exs --type time
+#   mix run profile_toxic.exs --type memory
+#   mix run profile_toxic.exs --type calls
+#   mix run profile_toxic.exs --type time --matching Toxic.Driver
+#   mix run profile_toxic.exs --type time --project phoenix
+#   mix run profile_toxic.exs --type time --limit 100
+#   mix run profile_toxic.exs --backend binary --type time
 #
 # Profiler selection:
-#   elixir profile_toxic.exs --profiler fprof              # use fprof (detailed caller/callee)
-#   elixir profile_toxic.exs --profiler fprof --callers    # show caller/callee relationships
-#   elixir profile_toxic.exs --profiler fprof --details    # per-process breakdown
-#   elixir profile_toxic.exs --profiler fprof --sort own   # sort by own time (not accumulated)
-#   elixir profile_toxic.exs --profiler eprof              # force eprof
-#   elixir profile_toxic.exs --profiler cprof              # force cprof (calls only)
+#   mix run profile_toxic.exs --profiler fprof              # use fprof (detailed caller/callee)
+#   mix run profile_toxic.exs --profiler fprof --callers    # show caller/callee relationships
+#   mix run profile_toxic.exs --profiler fprof --details    # per-process breakdown
+#   mix run profile_toxic.exs --profiler fprof --sort own   # sort by own time (not accumulated)
+#   mix run profile_toxic.exs --profiler eprof              # force eprof
+#   mix run profile_toxic.exs --profiler cprof              # force cprof (calls only)
 
-Mix.install([
-  {:toxic, path: Path.expand(".", __DIR__)}
-])
+# Note: When running inside a Mix project, use `mix run profile_toxic.exs`
+# When running standalone, uncomment the Mix.install line below:
+# Mix.install([{:toxic, path: Path.expand(".", __DIR__)}])
 
 defmodule ToxicProfiler do
   @moduledoc """
@@ -35,6 +36,7 @@ defmodule ToxicProfiler do
 
     IO.puts("Toxic Tokenizer Profiler")
     IO.puts("========================")
+    IO.puts("Backend: #{opts.backend}")
     IO.puts("Profiler: #{opts.profiler}")
     IO.puts("Profile type: #{opts.type}")
     IO.puts("Matching: #{format_matching(opts.matching)}")
@@ -58,7 +60,7 @@ defmodule ToxicProfiler do
 
     # Pre-warmup: ensure all code is loaded
     IO.puts("Loading code...")
-    _ = tokenize_file(hd(files))
+    _ = tokenize_file(hd(files), opts.backend)
 
     # Run the profiler
     run_profile(files, opts)
@@ -75,6 +77,7 @@ defmodule ToxicProfiler do
           limit: :integer,
           no_warmup: :boolean,
           sort: :string,
+          backend: :string,
           # fprof-specific options
           callers: :boolean,
           details: :boolean,
@@ -90,12 +93,17 @@ defmodule ToxicProfiler do
       limit: Keyword.get(parsed, :limit),
       warmup: not Keyword.get(parsed, :no_warmup, false),
       sort: parse_sort(Keyword.get(parsed, :sort)),
+      backend: parse_backend(Keyword.get(parsed, :backend, "charlist")),
       # fprof options
       callers: Keyword.get(parsed, :callers, false),
       details: Keyword.get(parsed, :details, false),
       trace_to_file: Keyword.get(parsed, :trace_to_file, false)
     }
   end
+
+  defp parse_backend("charlist"), do: :charlist
+  defp parse_backend("binary"), do: :binary
+  defp parse_backend(other), do: raise("Invalid backend: #{other}. Use: charlist, binary")
 
   defp parse_type("time"), do: :time
   defp parse_type("memory"), do: :memory
@@ -194,10 +202,10 @@ defmodule ToxicProfiler do
       filename in @ignored_files
   end
 
-  def tokenize_file(file_path) do
+  def tokenize_file(file_path, backend \\ :charlist) do
     content = File.read!(file_path)
     byte_size = byte_size(content)
-    stream = Toxic.new(content, 1, 1, [])
+    stream = Toxic.new(content, 1, 1, lexer_backend: backend)
     {token_count, _stream} = count_tokens(stream, 0)
     {token_count, byte_size}
   end
@@ -218,9 +226,10 @@ defmodule ToxicProfiler do
 
   defp run_profile(files, opts) do
     # Prepare the workload function
+    backend = opts.backend
     workload = fn ->
       Enum.reduce(files, {0, 0}, fn file, {total_tokens, total_bytes} ->
-        {tokens, bytes} = tokenize_file(file)
+        {tokens, bytes} = tokenize_file(file, backend)
         {total_tokens + tokens, total_bytes + bytes}
       end)
     end

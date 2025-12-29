@@ -6,6 +6,10 @@ defmodule Toxic.Driver.Position do
 
   alias Toxic.Driver
 
+  # ============================================================================
+  # Charlist variants (original)
+  # ============================================================================
+
   def consume_until_newline([?\n | rest]), do: {rest, true}
   def consume_until_newline([?\r, ?\n | rest]), do: {rest, true}
   def consume_until_newline([_ | rest]), do: consume_until_newline(rest)
@@ -136,5 +140,139 @@ defmodule Toxic.Driver.Position do
     delimiter
     |> Atom.to_string()
     |> String.to_charlist()
+  end
+
+  # ============================================================================
+  # Binary variants (for lexer_backend: :binary)
+  # ============================================================================
+
+  @doc """
+  Consume until newline in binary input.
+  """
+  def consume_until_newline_bin(<<?\n, rest::binary>>), do: {rest, true}
+  def consume_until_newline_bin(<<?\r, ?\n, rest::binary>>), do: {rest, true}
+  def consume_until_newline_bin(<<_, rest::binary>>), do: consume_until_newline_bin(rest)
+  def consume_until_newline_bin(<<>>), do: {<<>>, false}
+
+  @doc """
+  Consume one grapheme from binary input.
+  Uses ASCII fast path for single-byte characters.
+  """
+  def consume_one_bin(<<>>, state) do
+    {<<>>, state.line, state.column}
+  end
+
+  # ASCII fast path - single byte, no grapheme cluster lookup needed
+  def consume_one_bin(<<byte, rest::binary>>, state) when byte < 128 do
+    scope(column: base_column) = state.scope
+    {line, col} = advance_pos(byte, state.line, state.column, base_column)
+    {rest, line, col}
+  end
+
+  # Non-ASCII - use grapheme cluster handling
+  def consume_one_bin(rest, state) when is_binary(rest) do
+    scope(column: base_column) = state.scope
+
+    case String.next_grapheme(rest) do
+      {grapheme, new_rest} ->
+        # Check if grapheme contains a newline
+        {line, col} =
+          if String.contains?(grapheme, "\n") do
+            {state.line + 1, base_column}
+          else
+            {state.line, state.column + 1}
+          end
+
+        {new_rest, line, col}
+
+      nil ->
+        {<<>>, state.line, state.column}
+    end
+  end
+
+  @doc """
+  Scan to sync point in binary input.
+  Uses ASCII fast path for common cases.
+  """
+  def scan_to_sync_bin(rest, state) when is_binary(rest) do
+    do_scan_to_sync_bin(rest, state, 0)
+  end
+
+  defp do_scan_to_sync_bin(rest, state, scanned) when scanned >= state.error_max_skip do
+    consume_one_bin(rest, state)
+  end
+
+  defp do_scan_to_sync_bin(<<>>, state, _scanned), do: {<<>>, state.line, state.column}
+
+  # ASCII fast path - check sync points with single-byte patterns
+  defp do_scan_to_sync_bin(<<h, _::binary>> = bin, state, scanned) when h < 128 do
+    stop? =
+      stop_at_semicolon?(h, state) or
+        stop_at_newline_bin?(bin, state) or
+        stop_at_comma?(h, state) or
+        stop_at_comment?(h, state) or
+        stop_at_whitespace?(h, state) or
+        stop_at_closer_bin?(bin, state)
+
+    if stop? do
+      {bin, state.line, state.column}
+    else
+      scope(column: base_column) = state.scope
+      {next_line, next_col} = advance_pos(h, state.line, state.column, base_column)
+      <<_, rest::binary>> = bin
+      do_scan_to_sync_bin(rest, %{state | line: next_line, column: next_col}, scanned + 1)
+    end
+  end
+
+  # Non-ASCII - use grapheme handling
+  defp do_scan_to_sync_bin(bin, state, scanned) when is_binary(bin) do
+    case String.next_grapheme(bin) do
+      {grapheme, rest} ->
+        scope(column: base_column) = state.scope
+
+        {next_line, next_col} =
+          if String.contains?(grapheme, "\n") do
+            {state.line + 1, base_column}
+          else
+            {state.line, state.column + 1}
+          end
+
+        do_scan_to_sync_bin(rest, %{state | line: next_line, column: next_col}, scanned + 1)
+
+      nil ->
+        {bin, state.line, state.column}
+    end
+  end
+
+  defp stop_at_newline_bin?(<<?\n, _::binary>>, %Driver{error_sync: sync}), do: :newline in sync
+
+  defp stop_at_newline_bin?(<<?\r, ?\n, _::binary>>, %Driver{error_sync: sync}),
+    do: :newline in sync
+
+  defp stop_at_newline_bin?(_, _state), do: false
+
+  defp stop_at_closer_bin?(rest, %Driver{error_sync: sync} = state) when is_binary(rest) do
+    if :closer in sync do
+      case Driver.current_terminators(state) do
+        [{start_token, _meta, _indent} | _] ->
+          expected = Driver.closing_for(start_token)
+          closer_starts_with_bin?(rest, expected)
+
+        _ ->
+          false
+      end
+    else
+      false
+    end
+  end
+
+  defp closer_starts_with_bin?(bin, :")"), do: String.starts_with?(bin, ")")
+  defp closer_starts_with_bin?(bin, :"]"), do: String.starts_with?(bin, "]")
+  defp closer_starts_with_bin?(bin, :"}"), do: String.starts_with?(bin, "}")
+  defp closer_starts_with_bin?(bin, :">>"), do: String.starts_with?(bin, ">>")
+  defp closer_starts_with_bin?(bin, :end), do: String.starts_with?(bin, "end")
+
+  defp closer_starts_with_bin?(bin, expected) when is_atom(expected) do
+    String.starts_with?(bin, Atom.to_string(expected))
   end
 end

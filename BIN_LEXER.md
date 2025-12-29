@@ -4,10 +4,22 @@
 
 This document outlines a plan to migrate the Toxic lexer from charlist-based processing to binary-based processing. The goals are:
 
-1. **Eliminate charlist conversion overhead** - Currently `String.to_charlist/1` is called on input
-2. **Reduce `:unicode_util.gc` calls** - Expensive grapheme cluster iteration
-3. **Maintain parity with legacy Elixir lexer** - All edge cases must be preserved
-4. **Improve performance** - Binary pattern matching is often more efficient for ASCII
+1. **Eliminate charlist conversion overhead** - avoid `String.to_charlist/1` at `Toxic.new/4`
+2. **Keep Unicode position correctness** - preserve current column semantics (grapheme-aware where Toxic is grapheme-aware today)
+3. **Maintain behavioral parity** - the full existing test suite must pass
+4. **Improve performance (mostly ASCII-heavy code)** - use binary pattern matching and ASCII fast paths
+
+### Non-goals (for the first migration)
+
+- Do **not** change the public token *shape* or meta invariants.
+- Do **not** change error handling semantics (strict vs tolerant) or recovery behavior.
+- Do **not** change token payload types by default (many tokens currently carry charlists, while some string fragments already use binaries).
+
+### Success Criteria (definition of “done”)
+
+- `mix test` passes with the binary backend enabled and disabled.
+- Token streams are identical (modulo allowed internal-only differences) for a curated corpus and the existing test suite.
+- Performance improves for typical Elixir source (ASCII-heavy) without regressing Unicode-heavy cases.
 
 ## Current Architecture Analysis
 
@@ -19,16 +31,16 @@ binary input
 String.to_charlist/1 (conversion)
     |
     v
-Toxic.Driver (charlist-based state)
+Toxic stream (`lib/toxic.ex`) stores remaining input as a charlist
     |
     v
-NormalTokenizer.next/5 (charlist pattern matching)
+Toxic.Driver.next/2 (`lib/toxic/driver.ex`) consumes 1 token at a time
     |
     v
-InterpolationTokenizer.next/9 (charlist pattern matching)
+Toxic.NormalTokenizer.next/5 and Toxic.InterpolationTokenizer.next/* (charlist pattern matching)
     |
     v
-Token output with charlist values
+Token output (mixed payloads: many charlists; string fragments are binaries)
 ```
 
 ### Key Modules and Their Charlist Usage
@@ -43,7 +55,7 @@ Token output with charlist values
 | `Toxic.NormalTokenizer.Comment` | Comment extraction | Simple iteration |
 | `Toxic.NormalTokenizer.Identifier` | Identifier tokenization | Calls String.Tokenizer |
 | `Toxic.NormalTokenizer.Sigil` | Sigil name/content parsing | |
-| `Toxic.String.Tokenizer` | **Already converted to binary** | Unicode identifier validation |
+| `Toxic.String.Tokenizer` (`lib/toxic/unicode/tokenizer.ex`) | **Binary-heavy already** | Unicode identifier validation + normalization tables |
 | `Toxic.Util` | `characters_to_binary/1`, `characters_to_list/1` | Conversions |
 
 ### Current `:unicode_util.gc` Usage
@@ -53,7 +65,11 @@ Located in:
 - `lib/toxic/driver/position.ex:57` - Grapheme iteration for position calculation
 - `lib/toxic/interpolation_tokenizer.ex:308` - Character extraction in strings
 
-These are used for **grapheme cluster handling** - essential for proper column counting with combined characters (emojis, accented letters, etc.).
+These implement **grapheme-cluster-aware advancement** in the places Toxic is already grapheme-aware today:
+- tolerant-mode recovery scan/advance (`Toxic.Driver.Position`)
+- string interpolation scanning (`Toxic.InterpolationTokenizer`)
+
+Note: the goal is not “zero grapheme ops” (that would break column semantics), but “avoid grapheme ops on the ASCII fast path”.
 
 ### Current `:unicode.characters_to_*` Usage
 
@@ -71,16 +87,16 @@ These are used for **grapheme cluster handling** - essential for proper column c
 binary input
     |
     v
-Toxic.Driver (binary-based state)
+Toxic stream stores remaining input as a binary
     |
     v
-NormalTokenizer.next/5 (binary pattern matching)
+Toxic.Driver.next/2 consumes binary and dispatches to a binary backend
     |
     v
-InterpolationTokenizer.next/9 (binary pattern matching)
+Binary NormalTokenizer + Binary InterpolationTokenizer
     |
     v
-Token output with binary values
+Token output: default payload types unchanged (optional “binary payload mode” can be a later phase)
 ```
 
 ### Binary Pattern Matching Strategy
@@ -119,19 +135,9 @@ def next(<<?:, ?:, ?:, rest::binary>>, line, column, ...) do
 
 ### Grapheme Cluster Handling
 
-Replace `:unicode_util.gc/1` with `String.next_grapheme/1`:
+When operating on **binary input**, use `String.next_grapheme/1` for the specific places Toxic currently needs grapheme semantics (position scanning + string extraction), and keep a tight ASCII fast path to avoid calling it for common cases:
 
 ```elixir
-# Old (charlist-based)
-case :unicode_util.gc(rest) do
-  [char | new_rest] when is_list(char) ->
-    # Extended grapheme cluster (e.g., combining characters)
-  [char | new_rest] when is_integer(char) ->
-    # Single codepoint
-  [] ->
-    # End of input
-end
-
 # New (binary-based)
 case String.next_grapheme(rest) do
   {grapheme, new_rest} ->
@@ -143,12 +149,13 @@ case String.next_grapheme(rest) do
 end
 ```
 
-**Important**: For column counting, a grapheme cluster counts as 1 column regardless of byte length or number of codepoints.
+**Important**: Keep the current semantics: advance by 1 column per grapheme cluster in the places that do grapheme-aware advancement today.
 
 ### Token Value Types
 
-Current: Token values use charlists (e.g., `~c"123"` for int original representation)
-New: Token values will use binaries (e.g., `"123"`)
+Current: Many token payloads use charlists (e.g., `~c"123"` for int original representation), while some string tokens already emit binaries (e.g. `:string_fragment`).
+
+Plan for success: keep token payload types unchanged by default during the migration. If emitting binaries for numeric/identifier payloads is desired, introduce it as an explicit opt-in later (e.g. `token_payloads: :charlist | :binary`), with a dedicated compatibility pass and clear release notes.
 
 This affects:
 - `{:int, meta, original_representation}` - currently charlist
@@ -159,23 +166,48 @@ This affects:
 
 ## Migration Phases
 
-### Phase 1: API and Type Changes (Non-Breaking Preparation)
+### Phase 0: Lock Compatibility Contract (must happen first)
 
-1. Update `@type` specifications to accept/return binaries
-2. Add `source_binary` field to stream struct (already exists)
-3. Create binary-based utility functions alongside charlist versions
-4. Update token construction to use binaries for original representations
+1. Decide and document what is *guaranteed identical* between backends:
+   - token kind sequence
+   - meta start/end positions and `meta.extra`
+   - error token emission and recovery behavior in tolerant mode
+   - warning emission (ordering and positions)
+2. Decide what is allowed to differ (ideally: nothing user-visible).
+3. Add a small “parity harness” test helper that can run both backends over the same inputs and compare token streams.
 
-**Key Changes:**
-- `Toxic.Token.int/2` - Accept binary for original representation
-- `Toxic.Token.flt/2` - Accept binary for original representation
-- Error structs - Use binaries for message components
+### Phase 1: Introduce Backend Switch (low risk)
 
-### Phase 2: NormalTokenizer Conversion
+1. Add `lexer_backend: :charlist | :binary` option (default `:charlist`).
+2. Thread it into the stream and driver initialization.
+3. Ensure the existing charlist path is untouched and remains the reference implementation.
+
+Definition of done:
+- Existing tests pass with default settings (charlist backend).
+- A minimal “smoke” suite passes for the binary backend (even if incomplete at this phase).
+
+### Phase 2: Binary Driver + Position Tracking (core plumbing)
+
+This phase is primarily about the *input representation* and position advancement, not tokenization rules.
+
+1. Add a binary driver path that:
+   - accepts `rest :: binary()`
+   - returns `new_rest :: binary()`
+   - preserves the existing Driver state machine and output/deferrals semantics
+2. Implement binary equivalents in `Toxic.Driver.Position`:
+   - `consume_one/2` on binary with ASCII fast path
+   - `scan_to_sync/2` on binary with ASCII fast path
+   - use `String.next_grapheme/1` only for non-ASCII bytes / when needed
+
+Definition of done:
+- A small corpus can be tokenized end-to-end using the binary backend without crashing.
+- Column tracking matches the charlist backend for the same inputs.
+
+### Phase 3: NormalTokenizer Conversion (largest surface area)
 
 Convert `lib/toxic/normal_tokenizer.ex` and submodules:
 
-#### 2.1 NormalTokenizer.ex (Main Entry)
+#### 3.1 NormalTokenizer.ex (Main Entry)
 
 Pattern matching conversion for ~150 clauses:
 
@@ -199,7 +231,7 @@ def next(<<?0, ?x, h, rest::binary>>, line, column, scope, _tokens) when is_hex(
 9. `NormalTokenizer.Identifier` - Complex, calls String.Tokenizer
 10. `NormalTokenizer.Dot` - Depends on several others
 
-#### 2.2 NormalTokenizer.Number Conversion
+#### 3.2 NormalTokenizer.Number Conversion
 
 ```elixir
 # Before
@@ -222,7 +254,7 @@ end
 - Use `Integer.parse/2` and `Float.parse/1` instead of `List.to_integer/2`
 - Accumulate original representation as binary or iolist
 
-#### 2.3 NormalTokenizer.Comment Conversion
+#### 3.3 NormalTokenizer.Comment Conversion
 
 ```elixir
 # Before
@@ -236,11 +268,11 @@ def tokenize_comment(<<?\n, _::binary>> = rest, acc) do
 end
 ```
 
-### Phase 3: InterpolationTokenizer Conversion
+### Phase 4: InterpolationTokenizer Conversion (high risk, string-heavy)
 
 Convert `lib/toxic/interpolation_tokenizer.ex`:
 
-#### 3.1 Buffer Handling
+#### 4.1 Buffer Handling
 
 Current approach uses charlist accumulator:
 ```elixir
@@ -260,7 +292,7 @@ def next(<<codepoint::utf8, rest::binary>>, buffer, ...) do
 end
 ```
 
-#### 3.2 Grapheme Handling
+#### 4.2 Grapheme Handling
 
 Replace `:unicode_util.gc/1` in `extract_char/9`:
 ```elixir
@@ -293,48 +325,17 @@ defp extract_char(rest, buffer, ...) do
 end
 ```
 
-### Phase 4: Driver and Position Tracking
+### Phase 5: Entry Point Updates (remove conversion)
 
-#### 4.1 Driver State Changes
+Update `Toxic.new/4` so binary input does not become a charlist, and the stream carries binary rest for the binary backend.
 
-```elixir
-# Current
-@type input :: charlist()
+Definition of done:
+- With `lexer_backend: :binary`, `Toxic.new/4` does not call `String.to_charlist/1`.
+- With `lexer_backend: :charlist`, current behavior remains unchanged.
 
-# New
-@type input :: binary()
-```
+### Phase 6: Utility Functions and Cleanup
 
-Update `Toxic.Driver`:
-- Change pattern matching in `next_token/2` and related functions
-- Update context tracking to use binary rest
-
-#### 4.2 Position Module
-
-Convert `lib/toxic/driver/position.ex`:
-
-```elixir
-# Before (charlist with :unicode_util.gc)
-def column_offset_from_rest(rest, scope) do
-  case :unicode_util.gc(rest) do
-    [char | _] when is_list(char) -> 1
-    [_ | _] -> 1
-    [] -> 0
-  end
-end
-
-# After (binary with String.next_grapheme)
-def column_offset_from_rest(rest, scope) do
-  case String.next_grapheme(rest) do
-    {_, _} -> 1
-    nil -> 0
-  end
-end
-```
-
-### Phase 5: Utility Functions and Cleanup
-
-#### 5.1 Update Toxic.Util
+#### 6.1 Update Toxic.Util
 
 ```elixir
 # Remove or deprecate charlist functions
@@ -349,14 +350,14 @@ def unsafe_to_atom(binary, line, column, scope) when is_binary(binary) do
 end
 ```
 
-#### 5.2 Character Classifier Guards
+#### 6.2 Character Classifier Guards
 
 Guards in `Toxic.CharacterClassifier` work with codepoints (integers), so they remain unchanged. They work correctly with both:
 - `[head | _]` where head is codepoint
 - `<<head, _::binary>>` where head is byte (for ASCII)
 - `<<head::utf8, _::binary>>` where head is codepoint
 
-#### 5.3 Strip Functions
+#### 6.3 Strip Functions
 
 ```elixir
 # Before
@@ -370,36 +371,11 @@ def strip_horizontal_space(<<h, rest::binary>>, counter) when is_horizontal_spac
 end
 ```
 
-### Phase 6: Entry Point Updates
+### Phase 7 (Optional): Token Payload Binaries (explicit opt-in)
 
-#### 6.1 Remove Charlist Conversion
-
-```elixir
-# Before
-def new(source, line \\ 1, column \\ 1, opts \\ []) do
-  {driver_source, source_binary, effective_source} =
-    cond do
-      is_binary(source) ->
-        charlist = String.to_charlist(source)  # REMOVE THIS
-        {charlist, source, charlist}
-      ...
-
-# After
-def new(source, line \\ 1, column \\ 1, opts \\ []) do
-  source_binary =
-    if is_binary(source) do
-      source
-    else
-      IO.iodata_to_binary(source)  # Convert charlist input to binary
-    end
-
-  %__MODULE__{
-    driver: driver,
-    source: source_binary,
-    ...
-  }
-end
-```
+Only after parity is proven and performance goals are met:
+- Add an opt-in to emit selected payloads as binaries (e.g., numeric original representations).
+- Keep the default as today to avoid breaking downstream consumers.
 
 ## Avoiding Expensive Unicode Operations
 
@@ -415,12 +391,12 @@ end
 - `lib/toxic/driver/position.ex` - Column counting
 - `lib/toxic/interpolation_tokenizer.ex` - Character extraction
 
-**Solution**: Use `String.next_grapheme/1` which:
+**Solution (binary backend)**: Use `String.next_grapheme/1` which:
 - Takes binary input directly
 - Returns `{grapheme_binary, rest_binary}`
 - Handles all Unicode grapheme cluster rules
 
-**Performance Note**: `String.next_grapheme/1` is implemented in Erlang as `string:next_grapheme/1` which is highly optimized for common cases.
+**Performance Note**: Even with `String.next_grapheme/1`, still prioritize an ASCII fast path; grapheme decoding should be reserved for non-ASCII bytes.
 
 ### NFC Normalization
 
@@ -452,7 +428,7 @@ acc = :unicode.characters_to_nfc_binary(original_binary)
 
 ### Compatibility Tests
 
-Run against Elixir tokenizer reference output:
+Run against Elixir tokenizer reference output (optional but valuable):
 ```elixir
 defmodule Toxic.CompatibilityTest do
   # For each test case:
@@ -466,8 +442,18 @@ end
 
 ```elixir
 Benchee.run(%{
-  "charlist-based" => fn -> Toxic.V1.tokenize(large_source) end,
-  "binary-based" => fn -> Toxic.V2.tokenize(large_source) end
+  "charlist backend" =>
+    fn ->
+      Toxic.new(large_source, 1, 1, lexer_backend: :charlist)
+      |> Toxic.to_stream()
+      |> Enum.to_list()
+    end,
+  "binary backend" =>
+    fn ->
+      Toxic.new(large_source, 1, 1, lexer_backend: :binary)
+      |> Toxic.to_stream()
+      |> Enum.to_list()
+    end
 }, inputs: %{
   "ASCII code" => ascii_heavy_source,
   "Unicode code" => unicode_heavy_source,
@@ -491,10 +477,12 @@ Benchee.run(%{
 
 ## API Compatibility
 
-**Breaking Changes:**
-- Token metadata `extra` field: charlist values become binaries
-- `Toxic.current_terminators/1` returns charlists in terminator entries - will become binaries
-- `Toxic.slice/6` operates on charlist source - will need binary variant
+**Initial migration (recommended): no breaking changes**
+- Token payloads remain as they are today by default.
+- `Toxic.slice/6` already slices binaries; it should continue to work unchanged.
+
+**Potential future breaking changes (only if you opt into “binary payload mode”):**
+- Token payloads that are currently charlists may become binaries under an explicit option.
 
 **Non-Breaking:**
 - Token type atoms unchanged
@@ -505,12 +493,12 @@ Benchee.run(%{
 
 | Phase | Estimated Lines Changed | Complexity |
 |-------|------------------------|------------|
-| Phase 1 | ~100 | Low |
-| Phase 2 | ~500 | Medium-High |
-| Phase 3 | ~200 | High |
-| Phase 4 | ~150 | Medium |
-| Phase 5 | ~100 | Low |
-| Phase 6 | ~50 | Low |
+| Phase 1 | ~50 | Low |
+| Phase 2 | ~150 | Medium |
+| Phase 3 | ~500 | High |
+| Phase 4 | ~250 | High |
+| Phase 5 | ~50 | Low |
+| Phase 6 | ~100 | Low |
 | Testing | ~300 | Medium |
 
 **Total**: ~1400 lines of changes
@@ -519,8 +507,8 @@ Benchee.run(%{
 
 Migrating to binary-based lexing will:
 1. **Eliminate** the `String.to_charlist/1` overhead at input
-2. **Reduce** Unicode operations by using `String.next_grapheme/1` instead of `:unicode_util.gc/1`
-3. **Improve** memory efficiency (binaries are more compact than charlists for ASCII)
-4. **Maintain** full compatibility with Elixir lexer behavior
+2. **Avoid** list-walking costs on the ASCII path (binary matching is typically faster)
+3. **Preserve** Unicode column semantics by keeping grapheme-aware advancement where needed
+4. **Maintain** full Toxic behavior (tests + tolerant mode recovery)
 
 The migration should be done incrementally, with each phase validated against the existing test suite and Elixir tokenizer reference output.

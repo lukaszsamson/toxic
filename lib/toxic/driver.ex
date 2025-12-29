@@ -53,6 +53,7 @@ defmodule Toxic.Driver do
             insert_structural_closers: true,
             insert_identifier_sanitization: true,
             error_token_payload: :struct,
+            lexer_backend: :charlist,
             deferrals: [],
             output: [],
             recent_token: nil
@@ -133,6 +134,7 @@ defmodule Toxic.Driver do
           insert_structural_closers: boolean(),
           insert_identifier_sanitization: boolean(),
           error_token_payload: :struct | :tuple | :both,
+          lexer_backend: :charlist | :binary,
           deferrals: [token()],
           output: [token()],
           recent_token: token() | nil,
@@ -163,6 +165,7 @@ defmodule Toxic.Driver do
     insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
     insert_identifier_sanitization = Keyword.get(opts, :insert_identifier_sanitization, true)
     error_token_payload = Keyword.get(opts, :error_token_payload, :struct)
+    lexer_backend = Keyword.get(opts, :lexer_backend, :charlist)
 
     %__MODULE__{
       line: line,
@@ -173,6 +176,7 @@ defmodule Toxic.Driver do
       insert_structural_closers: insert_structural_closers,
       insert_identifier_sanitization: insert_identifier_sanitization,
       error_token_payload: error_token_payload,
+      lexer_backend: lexer_backend,
       scope:
         scope(
           elixir_compatibility: elixir_compatibility,
@@ -184,8 +188,8 @@ defmodule Toxic.Driver do
     }
   end
 
-  @typedoc "Input remaining to be tokenized (charlist)"
-  @type input :: charlist()
+  @typedoc "Input remaining to be tokenized (charlist or binary depending on backend)"
+  @type input :: charlist() | binary()
 
   @typedoc "Error reason tuple in legacy format"
   @type error_reason :: {charlist(), charlist(), charlist()}
@@ -269,6 +273,36 @@ defmodule Toxic.Driver do
     next([], %{state | deferrals: [], output: Enum.reverse(deferrals)})
   end
 
+  # Binary backend EOF handling
+  def next(<<>>, %__MODULE__{lexer_backend: :binary, deferrals: []} = state) do
+    case Contexts.pending_error(state) do
+      nil ->
+        {:eof, state}
+
+      error when state.error_mode == :strict ->
+        case error do
+          {:missing_interpolation, interp_context} ->
+            reason = Contexts.missing_interpolation_reason(interp_context, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
+
+          {:missing_context, interp_context} ->
+            reason = Contexts.missing_terminator_reason(interp_context, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
+
+          {:missing_scope, entry} ->
+            reason = Contexts.missing_scope_terminator_reason(entry, state)
+            {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
+        end
+
+      error when state.error_mode == :tolerant ->
+        emit_pending_error(error, state)
+    end
+  end
+
+  def next(<<>>, %__MODULE__{lexer_backend: :binary, deferrals: [_h | _t] = deferrals} = state) do
+    next(<<>>, %{state | deferrals: [], output: Enum.reverse(deferrals)})
+  end
+
   def next(
         [?} | rest],
         %__MODULE__{
@@ -326,7 +360,67 @@ defmodule Toxic.Driver do
     next(rest, new_state)
   end
 
-  def next(string, %__MODULE__{contexts: [:normal | _] = _contexts} = state) do
+  # Binary backend interpolation end handling
+  def next(
+        <<?}, rest::binary>>,
+        %__MODULE__{
+          lexer_backend: :binary,
+          contexts: [
+            :normal,
+            {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info, _fragments,
+             _saw_interp}
+            | _contexts_rest
+          ],
+          scope: scope(terminators: [{start_token, _meta, _indent} = entry | _])
+        } =
+          state
+      )
+      when start_token != :"{" do
+    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state)
+
+    case state.error_mode do
+      :strict ->
+        reason_tuple = Toxic.Error.to_reason_tuple(reason)
+        {:error, reason_tuple, rest, state}
+
+      :tolerant ->
+        Recovery.emit_error_and_advance(reason, rest, state)
+    end
+  end
+
+  def next(
+        <<?}, rest::binary>>,
+        %__MODULE__{
+          lexer_backend: :binary,
+          contexts: [
+            :normal,
+            {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+             saw_interp}
+            | contexts_rest
+          ],
+          deferrals: deferrals,
+          scope: scope(terminators: [])
+        } =
+          state
+      ) do
+    meta = {{state.line, state.column}, {state.line, state.column + 1}, nil}
+
+    new_state = %{
+      state
+      | column: state.column + 1,
+        contexts: [
+          {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+           saw_interp}
+          | contexts_rest
+        ],
+        output: Enum.reverse([{:end_interpolation, meta, kind} | deferrals]),
+        deferrals: []
+    }
+
+    next(rest, new_state)
+  end
+
+  def next(string, %__MODULE__{contexts: [:normal | _], lexer_backend: :charlist} = state) do
     carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
 
     result =
@@ -354,9 +448,38 @@ defmodule Toxic.Driver do
     end
   end
 
+  def next(string, %__MODULE__{contexts: [:normal | _], lexer_backend: :binary} = state) do
+    carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
+
+    result =
+      Toxic.BinaryNormalTokenizer.next(
+        string,
+        state.line,
+        state.column,
+        state.scope,
+        carry_with_recent
+      )
+
+    case handle_tokenize_result(state, result) do
+      {:error, reason, state} ->
+        case state.error_mode do
+          :strict ->
+            reason_tuple = Toxic.Error.to_reason_tuple(reason)
+            {:error, reason_tuple, string, state}
+
+          :tolerant ->
+            Recovery.emit_error_and_advance(reason, string, state)
+        end
+
+      {rest, state} ->
+        next(rest, state)
+    end
+  end
+
   def next(
         string,
         %__MODULE__{
+          lexer_backend: :charlist,
           contexts: [
             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
              fragments, saw_interp}
@@ -570,6 +693,337 @@ defmodule Toxic.Driver do
               end
 
             {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
+             %{
+               state
+               | line: line,
+                 column: column + 1,
+                 scope: scope(updated_scope, terminators: parent_terminators),
+                 contexts: contexts_rest
+             }}
+
+          _ ->
+            end_token_type =
+              case kind do
+                :charlist ->
+                  :list_string_end
+
+                :atom_safe ->
+                  :atom_safe_end
+
+                :atom_unsafe ->
+                  :atom_unsafe_end
+
+                _ ->
+                  :bin_string_end
+              end
+
+            # Check for unnecessary quotes on atoms and emit charlist warning for charlists
+            updated_scope =
+              if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
+                case Contexts.is_unnecessary_quote(
+                       Enum.reverse(fragments),
+                       saw_interp,
+                       kind,
+                       scope
+                     ) do
+                  {true, content} ->
+                    # For atoms, extract the token start column from the start_token meta
+                    # The start_token has the : position, but start_info.column points to the delimiter
+                    {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} =
+                      start_info.token
+
+                    Contexts.maybe_warn_unnecessary_quote(
+                      kind,
+                      content,
+                      delim,
+                      start_info.line,
+                      token_start_col,
+                      scope
+                    )
+
+                  false ->
+                    scope
+                end
+              else
+                # For charlists, emit deprecation warning
+                if end_token_type == :list_string_end and delim == ?' do
+                  warning =
+                    Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+
+                  Toxic.Scope.prepend_warning(warning, scope)
+                else
+                  scope
+                end
+              end
+
+            return_token({end_token_type, meta, delim}, rest, %{
+              state
+              | line: line,
+                column: column,
+                scope: scope(updated_scope, terminators: parent_terminators),
+                contexts: contexts_rest
+            })
+        end
+
+      {:begin_interpolation, meta, rest, line, column, scope} ->
+        if kind == :quoted_identifier do
+          reason =
+            Contexts.interpolation_in_quoted_identifier_reason(
+              start_info.line,
+              start_info.column,
+              delim
+            )
+
+          case state.error_mode do
+            :strict ->
+              reason_tuple = Toxic.Error.to_reason_tuple(reason)
+              {:error, reason_tuple, rest, state}
+
+            :tolerant ->
+              Recovery.emit_error_and_advance(reason, rest, %{
+                state
+                | line: line,
+                  column: column,
+                  scope: scope
+              })
+          end
+        else
+          # Mark that we saw interpolation in the parent context
+          updated_parent_context =
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, true}
+
+          updated = %{
+            state
+            | line: line,
+              column: column,
+              scope: scope,
+              contexts: [:normal, updated_parent_context | contexts_rest]
+          }
+
+          return_token({:begin_interpolation, meta, kind}, rest, updated)
+        end
+    end
+  end
+
+  # Binary backend interpolation handler
+  def next(
+        string,
+        %__MODULE__{
+          lexer_backend: :binary,
+          contexts: [
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, saw_interp}
+            | contexts_rest
+          ]
+        } =
+          state
+      ) do
+    case Toxic.BinaryInterpolationTokenizer.next(
+           state.line,
+           state.column,
+           state.scope,
+           interpolation_allowed?,
+           string,
+           delim
+         ) do
+      {:error, reason} ->
+        case state.error_mode do
+          :strict ->
+            reason_tuple = Toxic.Error.to_reason_tuple(reason)
+            {:error, reason_tuple, string, state}
+
+          :tolerant ->
+            Recovery.emit_error_and_advance(reason, string, state)
+        end
+
+      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
+       line, column, scope} ->
+        {binary_part, line} =
+          case state.recent_token do
+            {kind, _, _} when kind in [:bin_heredoc_start, :list_heredoc_start] ->
+              "\n" <> binary_part_no_newline = binary_part
+              {binary_part_no_newline, line - 1}
+
+            {:sigil_start, _, {_, delim}} when delim in ["\"\"\"", "'''"] ->
+              "\n" <> binary_part_no_newline = binary_part
+              {binary_part_no_newline, line - 1}
+
+            _ ->
+              {binary_part, line}
+          end
+
+        # Update context to accumulate this fragment
+        updated_contexts = [
+          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+           [binary_part | fragments], saw_interp}
+          | contexts_rest
+        ]
+
+        return_token(
+          {:string_fragment, meta(start_line, start_column, line, end_column, extra),
+           binary_part},
+          rest,
+          %{
+            state
+            | line: line,
+              column: column,
+              scope: scope,
+              contexts: updated_contexts
+          }
+        )
+
+      {:done, meta, indent, rest, line, column, scope} when kind == :sigil ->
+        end_token = token(:sigil_end, meta, delim, indent)
+
+        {rest, modifiers} = Toxic.BinaryNormalTokenizer.Sigil.collect_modifiers(rest)
+        modifiers_length = length(modifiers)
+
+        output =
+          if modifiers_length != 0 do
+            [{:sigil_modifiers, meta(line, column, modifiers_length, nil), modifiers}]
+          else
+            []
+          end
+
+        return_token(end_token, rest, %{
+          state
+          | line: line,
+            column: column + modifiers_length,
+            scope: scope(scope, terminators: parent_terminators),
+            contexts: contexts_rest,
+            output: output
+        })
+
+      {:done, meta, indent, rest, line, column, scope}
+      when kind in [:bin_heredoc, :list_heredoc] ->
+        end_token_type =
+          case kind do
+            :list_heredoc -> :list_heredoc_end
+            :bin_heredoc -> :bin_heredoc_end
+          end
+
+        # Emit charlist deprecation warning for list heredocs
+        updated_scope =
+          if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
+            warning =
+              Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+
+            Toxic.Scope.prepend_warning(warning, scope)
+          else
+            scope
+          end
+
+        return_token(token(end_token_type, meta, delim, indent), rest, %{
+          state
+          | line: line,
+            column: column,
+            scope: scope(updated_scope, terminators: parent_terminators),
+            contexts: contexts_rest
+        })
+
+      {:done, meta, nil, rest, line, column, scope} when kind == :quoted_identifier ->
+        end_token_type =
+          case rest do
+            <<?( , _::binary>> -> :quoted_paren_identifier_end
+            <<?[, _::binary>> -> :quoted_bracket_identifier_end
+            _ -> :quoted_identifier_end
+          end
+
+        # Check for unnecessary quotes on calls
+        updated_scope =
+          case Contexts.is_unnecessary_quote(
+                 Enum.reverse(fragments),
+                 saw_interp,
+                 :quoted_identifier,
+                 scope
+               ) do
+            {true, content} ->
+              Contexts.maybe_warn_unnecessary_quote(
+                :quoted_identifier,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                scope
+              )
+
+            false ->
+              scope
+          end
+
+        if end_token_type == :quoted_identifier_end do
+          next(rest, %{
+            state
+            | line: line,
+              column: column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest,
+              deferrals: [{end_token_type, meta, delim}]
+          })
+        else
+          return_token({end_token_type, meta, delim}, rest, %{
+            state
+            | line: line,
+              column: column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest
+          })
+        end
+
+      {:done, meta, nil, rest, line, column, scope} ->
+        case rest do
+          <<?:, ws, tail::binary>> when is_space(ws) ->
+            {{sl, sc}, {el, ec}, extra} = meta
+            adj_meta = {{sl, sc}, {el, ec + 1}, extra}
+
+            end_token_type =
+              case scope do
+                scope(existing_atoms_only: true) ->
+                  :kw_identifier_safe_end
+
+                _ ->
+                  :kw_identifier_unsafe_end
+              end
+
+            # Check for unnecessary quotes on keywords
+            # For keywords: emit "unnecessary quote" OR "single quotes deprecated", not both
+            # Note: Elixir reports warnings at column-1 (the ' position), so start_info.column
+            # already points there (it's before the quote delimiter)
+            updated_scope =
+              case Contexts.is_unnecessary_quote(
+                     Enum.reverse(fragments),
+                     saw_interp,
+                     end_token_type,
+                     scope
+                   ) do
+                {true, content} ->
+                  # Quotes are unnecessary - emit only this warning
+                  Contexts.maybe_warn_unnecessary_quote(
+                    end_token_type,
+                    content,
+                    delim,
+                    start_info.line,
+                    start_info.column,
+                    scope
+                  )
+
+                false ->
+                  # Quotes are necessary - check if single quotes deprecated
+                  if delim == ?' do
+                    warning =
+                      Toxic.Warning.deprecated_single_quote_keyword(
+                        start_info.line,
+                        start_info.column
+                      )
+
+                    Toxic.Scope.prepend_warning(warning, scope)
+                  else
+                    scope
+                  end
+              end
+
+            {:ok, {end_token_type, adj_meta, delim}, <<ws, tail::binary>>,
              %{
                state
                | line: line,

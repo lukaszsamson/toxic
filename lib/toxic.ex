@@ -44,6 +44,7 @@ defmodule Toxic do
           | {:existing_atoms_only, boolean()}
           | {:static_atoms_encoder,
              nil | (binary(), keyword() -> {:ok, term()} | {:error, binary()})}
+          | {:lexer_backend, :charlist | :binary}
         ]
 
   @typedoc """
@@ -121,7 +122,8 @@ defmodule Toxic do
     elixir_compatibility: false,
     preserve_comments: false,
     existing_atoms_only: false,
-    static_atoms_encoder: nil
+    static_atoms_encoder: nil,
+    lexer_backend: :charlist
   ]
 
   @doc """
@@ -162,18 +164,30 @@ defmodule Toxic do
       |> Keyword.merge(line: line, column: column)
 
     driver = Toxic.Driver.new(opts)
+    lexer_backend = Keyword.get(opts, :lexer_backend, :charlist)
 
     {driver_source, source_binary, effective_source} =
-      cond do
-        is_binary(source) ->
+      case {lexer_backend, source} do
+        {:binary, source} when is_binary(source) ->
+          # Binary backend with binary source - use directly
+          {source, source, source}
+
+        {:binary, source} when is_list(source) ->
+          # Binary backend with charlist source - convert to binary
+          bin = :unicode.characters_to_binary(source)
+          {bin, bin, bin}
+
+        {:charlist, source} when is_binary(source) ->
+          # Charlist backend with binary source - convert to charlist
           charlist = String.to_charlist(source)
           {charlist, source, charlist}
 
-        is_list(source) ->
+        {:charlist, source} when is_list(source) ->
+          # Charlist backend with charlist source - use directly
           bin = :unicode.characters_to_binary(source)
           {source, bin, source}
 
-        true ->
+        {_, source} ->
           raise ArgumentError,
                 "Unsupported source type: #{inspect(source)}. Expected binary or flat charlist"
       end
