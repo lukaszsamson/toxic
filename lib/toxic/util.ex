@@ -57,12 +57,23 @@ defmodule Toxic.Util do
     {events, rest, line, column, scope}
   end
 
-  def previous_was_eol([{:",", {_, _, count}, _} | _]) when count > 0, do: count
-  def previous_was_eol([{:";", {_, _, count}, _} | _]) when count > 0, do: count
-  def previous_was_eol([{:eol, {_, _, count}, _} | _]) when count > 0, do: count
+  @type lookbehind :: {Toxic.token() | nil, boolean(), non_neg_integer()}
+
+  def lookbehind_from_token(nil), do: {nil, false, 0}
+
+  def lookbehind_from_token({kind, {_, _, count}, _} = token)
+      when kind in [:eol, :";", :","] and is_integer(count) and count > 0 do
+    {token, true, count}
+  end
+
+  def lookbehind_from_token(token), do: {token, false, 0}
+
+  def prev_token({prev, _prev_was_eol, _prev_eol_count}), do: prev
+
+  def previous_was_eol({_prev, true, count}) when is_integer(count) and count > 0, do: count
   def previous_was_eol(_), do: nil
 
-  def previous_was_dot?([{:., _, _} | _]), do: true
+  def previous_was_dot?({{:., _, _}, _, _}), do: true
   def previous_was_dot?(_), do: false
 
   def unsafe_to_atom(part, line, column, _scope)

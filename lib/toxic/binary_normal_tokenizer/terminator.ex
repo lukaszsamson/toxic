@@ -3,7 +3,14 @@ defmodule Toxic.BinaryNormalTokenizer.Terminator do
   import Toxic.Scope
   import Toxic.Util
 
-  def handle_terminator(_rest, _, _, _scope, {:"(", meta, _}, [{:alias, _, alias} | _tokens])
+  def handle_terminator(
+        _rest,
+        _line,
+        _column,
+        _scope,
+        {:"(", meta, _},
+        {{:alias, _, alias}, _, _}
+      )
       when is_atom(alias) do
     {{line, column}, _, _} = meta
 
@@ -17,11 +24,11 @@ defmodule Toxic.BinaryNormalTokenizer.Terminator do
   end
 
   # In elixir_tokenizer this clause is used only in eex
-  def handle_terminator(rest, line, column, scope(terminators: :none) = scope, token, _tokens) do
+  def handle_terminator(rest, line, column, scope(terminators: :none) = scope, token, _lookbehind) do
     emit(token, rest, line, column, scope)
   end
 
-  def handle_terminator(rest, line, column, scope, token, _tokens) do
+  def handle_terminator(rest, line, column, scope, token, _lookbehind) do
     scope(terminators: terminators) = scope
 
     case check_terminator(token, terminators, scope) do

@@ -15,7 +15,7 @@ defmodule Toxic.NormalTokenizer do
 
   # VC merge conflict
 
-  def next([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _tokens) do
+  def next([?<, ?<, ?<, ?<, ?<, ?<, ?< | _] = original, line, 1, _scope, _lookbehind) do
     first_line = Enum.take_while(original, fn c -> c != ?\n and c != ?\r end)
 
     err = %Toxic.Error{
@@ -30,19 +30,19 @@ defmodule Toxic.NormalTokenizer do
 
   # Base integers
 
-  def next([?0, ?x, h | t], line, column, scope, _tokens) when is_hex(h) do
+  def next([?0, ?x, h | t], line, column, scope, _lookbehind) when is_hex(h) do
     {rest, number, original_representation, length} = Number.tokenize_hex(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def next([?0, ?b, h | t], line, column, scope, _tokens) when is_bin(h) do
+  def next([?0, ?b, h | t], line, column, scope, _lookbehind) when is_bin(h) do
     {rest, number, original_representation, length} = Number.tokenize_bin(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def next([?0, ?o, h | t], line, column, scope, _tokens) when is_octal(h) do
+  def next([?0, ?o, h | t], line, column, scope, _lookbehind) when is_octal(h) do
     {rest, number, original_representation, length} = Number.tokenize_octal(t, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
@@ -50,7 +50,7 @@ defmodule Toxic.NormalTokenizer do
 
   # Comments
 
-  def next([?# | string], line, column, scope, tokens) do
+  def next([?# | string], line, column, scope, lookbehind) do
     case Comment.tokenize_comment(string, [?#]) do
       {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
         token = :io_lib.format("\\u~4.16.0B", [char])
@@ -65,10 +65,10 @@ defmodule Toxic.NormalTokenizer do
         {:error, err}
 
       {rest, comment} ->
-        Comment.preserve_comments(line, column, tokens, comment, rest, scope)
+        Comment.preserve_comments(line, column, lookbehind, comment, rest, scope)
 
-        case tokens do
-          [{:eol, _meta, _} | _] -> reset_eol(rest, line, column, scope)
+        case prev_token(lookbehind) do
+          {:eol, _meta, _} -> reset_eol(rest, line, column, scope)
           _ -> no_token(rest, line, column, scope)
         end
     end
@@ -76,14 +76,14 @@ defmodule Toxic.NormalTokenizer do
 
   # Sigils
 
-  def next([?~, h | _t] = original, line, column, scope, tokens)
+  def next([?~, h | _t] = original, line, column, scope, lookbehind)
       when is_upcase(h) or is_downcase(h) do
-    Sigil.tokenize_sigil(original, line, column, scope, tokens)
+    Sigil.tokenize_sigil(original, line, column, scope, lookbehind)
   end
 
   # Char tokens
 
-  def next([??, ?\\, h | t], line, column, scope, _tokens) do
+  def next([??, ?\\, h | t], line, column, scope, _lookbehind) do
     char = Toxic.Unescape.unescape_map(h)
 
     new_scope =
@@ -122,7 +122,7 @@ defmodule Toxic.NormalTokenizer do
     emit(token, rest, new_line, new_column, new_scope)
   end
 
-  def next([??, char | t], line, column, scope, _tokens) do
+  def next([??, char | t], line, column, scope, _lookbehind) do
     new_scope =
       case handle_char(char) do
         {escape, name} ->
@@ -153,25 +153,25 @@ defmodule Toxic.NormalTokenizer do
 
   # Heredocs
 
-  def next([?", ?", ?" | t], line, column, scope, tokens) do
-    NormalTokenizer.String.handle_heredocs(t, line, column, ?", scope, tokens)
+  def next([?", ?", ?" | t], line, column, scope, lookbehind) do
+    NormalTokenizer.String.handle_heredocs(t, line, column, ?", scope, lookbehind)
   end
 
-  def next([?', ?', ?' | t], line, column, scope, tokens) do
+  def next([?', ?', ?' | t], line, column, scope, lookbehind) do
     # Note: Charlist deprecation warning will be emitted in the driver
-    NormalTokenizer.String.handle_heredocs(t, line, column, ?', scope, tokens)
+    NormalTokenizer.String.handle_heredocs(t, line, column, ?', scope, lookbehind)
   end
 
   # Strings
 
-  def next([?" | t], line, column, scope, tokens) do
-    NormalTokenizer.String.handle_strings(t, line, column + 1, ?", scope, tokens)
+  def next([?" | t], line, column, scope, lookbehind) do
+    NormalTokenizer.String.handle_strings(t, line, column + 1, ?", scope, lookbehind)
   end
 
-  def next([?' | t], line, column, scope, tokens) do
+  def next([?' | t], line, column, scope, lookbehind) do
     # Note: Don't emit charlist deprecation warning here yet
     # It will be emitted in the driver after we know if this is a keyword identifier or not
-    NormalTokenizer.String.handle_strings(t, line, column + 1, ?', scope, tokens)
+    NormalTokenizer.String.handle_strings(t, line, column + 1, ?', scope, lookbehind)
   end
 
   # Operator atoms
@@ -179,7 +179,7 @@ defmodule Toxic.NormalTokenizer do
     atom = List.to_atom(chars)
     length = length(chars) + 1
 
-    def next([unquote_splicing(chars), ?: | rest], line, column, scope, _tokens)
+    def next([unquote_splicing(chars), ?: | rest], line, column, scope, _lookbehind)
         when is_space(hd(rest)) do
       token = kw_identifier(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, rest, line, column + unquote(length), scope)
@@ -190,14 +190,14 @@ defmodule Toxic.NormalTokenizer do
     atom = List.to_atom(chars)
     length = length(chars) + 1
 
-    def next([?:, unquote_splicing(chars) | rest], line, column, scope, _tokens) do
+    def next([?:, unquote_splicing(chars) | rest], line, column, scope, _lookbehind) do
       token = atom(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, rest, line, column + unquote(length), scope)
     end
   end
 
   # Three Token Operators
-  def next([?:, t1, t2, t3 | rest], line, column, scope, _tokens)
+  def next([?:, t1, t2, t3 | rest], line, column, scope, _lookbehind)
       when unary_op3(t1, t2, t3) or comp_op3(t1, t2, t3) or and_op3(t1, t2, t3) or
              or_op3(t1, t2, t3) or
              arrow_op3(t1, t2, t3) or xor_op3(t1, t2, t3) or concat_op3(t1, t2, t3) or
@@ -208,14 +208,14 @@ defmodule Toxic.NormalTokenizer do
 
   # Two Token Operators
 
-  def next([?:, ?:, ?: | rest], line, column, scope, _tokens) do
+  def next([?:, ?:, ?: | rest], line, column, scope, _lookbehind) do
     warning = Toxic.Warning.ambiguous_triple_colon_atom(line, column)
     new_scope = Toxic.Scope.prepend_warning(warning, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
   end
 
-  def next([?:, t1, t2 | rest], line, column, scope, _tokens)
+  def next([?:, t1, t2 | rest], line, column, scope, _lookbehind)
       when comp_op2(t1, t2) or rel_op2(t1, t2) or and_op(t1, t2) or or_op(t1, t2) or
              arrow_op(t1, t2) or in_match_op(t1, t2) or concat_op(t1, t2) or power_op(t1, t2) or
              stab_op(t1, t2) or range_op(t1, t2) do
@@ -224,7 +224,7 @@ defmodule Toxic.NormalTokenizer do
   end
 
   # Single Token Operators
-  def next([?:, t | rest], line, column, scope, _tokens)
+  def next([?:, t | rest], line, column, scope, _lookbehind)
       when at_op(t) or unary_op(t) or capture_op(t) or dual_op(t) or mult_op(t) or
              rel_op(t) or match_op(t) or pipe_op(t) or t == ?. do
     token = atom(meta(line, column, 2, nil), List.to_atom([t]))
@@ -233,14 +233,14 @@ defmodule Toxic.NormalTokenizer do
 
   # Stand-alone tokens
 
-  def next([?=, ?> | rest], line, column, scope, tokens) do
-    token = {:assoc_op, meta(line, column, 2, previous_was_eol(tokens)), :"=>"}
+  def next([?=, ?> | rest], line, column, scope, lookbehind) do
+    token = {:assoc_op, meta(line, column, 2, previous_was_eol(lookbehind)), :"=>"}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
   # Ternary operator
 
-  def next([?., ?., ?/, ?/ | rest] = string, line, column, scope, _tokens) do
+  def next([?., ?., ?/, ?/ | rest] = string, line, column, scope, _lookbehind) do
     case strip_horizontal_space(rest, 0) do
       {[?/ | _] = remaining, extra} ->
         token = {:identifier, meta(line, column, 4, nil), :..//}
@@ -265,7 +265,7 @@ defmodule Toxic.NormalTokenizer do
         :handle_op
       end
 
-    def next([t1, t2, t3 | rest], line, column, scope, tokens)
+    def next([t1, t2, t3 | rest], line, column, scope, lookbehind)
         when unquote(token)(t1, t2, t3) do
       new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope)
 
@@ -277,28 +277,28 @@ defmodule Toxic.NormalTokenizer do
         3,
         List.to_atom([t1, t2, t3]),
         new_scope,
-        tokens
+        lookbehind
       )
     end
   end
 
   # Containers + punctuation tokens
-  def next([?, | rest], line, column, scope, _tokens) do
+  def next([?, | rest], line, column, scope, _lookbehind) do
     token = comma(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next([?<, ?< | rest], line, column, scope, tokens) do
+  def next([?<, ?< | rest], line, column, scope, lookbehind) do
     token = open_bitstring(meta(line, column, 2, nil))
-    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, lookbehind)
   end
 
-  def next([?>, ?> | rest], line, column, scope, tokens) do
-    token = close_bitstring(meta(line, column, 2, previous_was_eol(tokens)))
-    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+  def next([?>, ?> | rest], line, column, scope, lookbehind) do
+    token = close_bitstring(meta(line, column, 2, previous_was_eol(lookbehind)))
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, lookbehind)
   end
 
-  def next([?{ | _rest], line, column, _scope, [{:%, _, _} | _] = _tokens) do
+  def next([?{ | _rest], line, column, _scope, {{:%, _, _}, _, _}) do
     err = %Toxic.Error{
       code: :map_unexpected_space_after_percent,
       domain: :map,
@@ -310,20 +310,20 @@ defmodule Toxic.NormalTokenizer do
     {:error, err}
   end
 
-  def next([t | rest], line, column, scope, tokens) when t in [?(, ?{, ?[] do
+  def next([t | rest], line, column, scope, lookbehind) when t in [?(, ?{, ?[] do
     token = token(List.to_atom([t]), meta(line, column, 1, nil), nil)
-    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
-  def next([t | rest], line, column, scope, tokens) when t in [?), ?}, ?]] do
-    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(tokens)), nil)
-    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+  def next([t | rest], line, column, scope, lookbehind) when t in [?), ?}, ?]] do
+    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
   # Two Token Operators
-  def next([t1, t2 | rest], line, column, scope, tokens) when ternary_op(t1, t2) do
+  def next([t1, t2 | rest], line, column, scope, lookbehind) when ternary_op(t1, t2) do
     op = List.to_atom([t1, t2])
-    token = {:ternary_op, meta(line, column, 2, previous_was_eol(tokens)), op}
+    token = {:ternary_op, meta(line, column, 2, previous_was_eol(lookbehind)), op}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
@@ -332,15 +332,24 @@ defmodule Toxic.NormalTokenizer do
   for token <- @two_token_ops do
     token_name = token |> to_string() |> String.replace_suffix("2", "") |> String.to_atom()
 
-    def next([t1, t2 | rest], line, column, scope, tokens)
+    def next([t1, t2 | rest], line, column, scope, lookbehind)
         when unquote(token)(t1, t2) do
-      handle_op(rest, line, column, unquote(token_name), 2, List.to_atom([t1, t2]), scope, tokens)
+      handle_op(
+        rest,
+        line,
+        column,
+        unquote(token_name),
+        2,
+        List.to_atom([t1, t2]),
+        scope,
+        lookbehind
+      )
     end
   end
 
   # Single Token Operators
 
-  def next([?& | rest], line, column, scope, _tokens) do
+  def next([?& | rest], line, column, scope, _lookbehind) do
     kind =
       case strip_horizontal_space(rest, 0) do
         {[int | _], 0} when is_digit(int) ->
@@ -371,8 +380,8 @@ defmodule Toxic.NormalTokenizer do
         :handle_op
       end
 
-    def next([t | rest], line, column, scope, tokens) when unquote(token)(t) do
-      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, tokens)
+    def next([t | rest], line, column, scope, lookbehind) when unquote(token)(t) do
+      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, lookbehind)
     end
   end
 
@@ -383,7 +392,7 @@ defmodule Toxic.NormalTokenizer do
         line,
         column,
         base_scope = scope(existing_atoms_only: existing_atoms_only),
-        _tokens
+        _lookbehind
       )
       when is_quote(h) do
     scope =
@@ -409,7 +418,7 @@ defmodule Toxic.NormalTokenizer do
         line,
         column,
         scope = scope(cursor_completion: cursor_completion),
-        _tokens
+        _lookbehind
       ) do
     case Identifier.tokenize_identifier(string, line, column, scope, false) do
       {_kind, unencoded, atom, rest, length, ascii?, _special} ->
@@ -440,7 +449,7 @@ defmodule Toxic.NormalTokenizer do
   end
 
   # Integers and floats
-  def next([h | t], line, column, scope, _tokens) when is_digit(h) do
+  def next([h | t], line, column, scope, _lookbehind) when is_digit(h) do
     scope(cursor_completion: cursor_completion) = scope
 
     case Number.tokenize_number(t, [h], 1, false) do
@@ -509,15 +518,15 @@ defmodule Toxic.NormalTokenizer do
 
   # Spaces
 
-  def next([t | rest], line, column, scope, tokens) when is_horizontal_space(t) do
+  def next([t | rest], line, column, scope, lookbehind) when is_horizontal_space(t) do
     {remaining, stripped} = strip_horizontal_space(rest, 0)
-    handle_space_sensitive_tokens(remaining, line, column + 1 + stripped, scope, tokens)
+    handle_space_sensitive_tokens(remaining, line, column + 1 + stripped, scope, lookbehind)
   end
 
   # End of line
 
   # Consecutive semicolons - emit error
-  def next([?; | _rest], line, column, _scope, [{:";", _, _} | _] = _tokens) do
+  def next([?; | _rest], line, column, _scope, {{:";", _, _}, _, _}) do
     # Match Elixir's token format: ";" (column N, code point U+003B)
     token_display = [
       ?\",
@@ -541,17 +550,12 @@ defmodule Toxic.NormalTokenizer do
      }}
   end
 
-  def next([?; | rest], line, column, scope, []) do
+  def next([?; | rest], line, column, scope, _lookbehind) do
     token = semicolon(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next([?; | rest], line, column, scope, [{kind, _, _} | _] = _tokens) when kind != :";" do
-    token = semicolon(meta(line, column, 1, 0))
-    emit(token, rest, line, column + 1, scope)
-  end
-
-  def next(~c"\\" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\" = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -561,7 +565,7 @@ defmodule Toxic.NormalTokenizer do
      }}
   end
 
-  def next(~c"\\\n" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\\n" = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -571,7 +575,7 @@ defmodule Toxic.NormalTokenizer do
      }}
   end
 
-  def next(~c"\\\r\n" = _original, line, column, _scope, _tokens) do
+  def next(~c"\\\r\n" = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -581,25 +585,25 @@ defmodule Toxic.NormalTokenizer do
      }}
   end
 
-  def next([?\\, ?\n | rest], line, _column, scope, _tokens) do
+  def next([?\\, ?\n | rest], line, _column, scope, _lookbehind) do
     tokenize_eol(rest, line, scope, nil)
   end
 
-  def next([?\\, ?\r, ?\n | rest], line, _column, scope, _tokens) do
+  def next([?\\, ?\r, ?\n | rest], line, _column, scope, _lookbehind) do
     tokenize_eol(rest, line, scope, nil)
   end
 
-  def next([?\n | rest], line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
+  def next([?\n | rest], line, column, scope, lookbehind) do
+    tokenize_eol(rest, line, scope, eol(line, column, scope, lookbehind))
   end
 
-  def next([?\r, ?\n | rest], line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
+  def next([?\r, ?\n | rest], line, column, scope, lookbehind) do
+    tokenize_eol(rest, line, scope, eol(line, column, scope, lookbehind))
   end
 
   # Others
 
-  def next([?%, ?( | _rest], line, column, _scope, _tokens) do
+  def next([?%, ?( | _rest], line, column, _scope, _lookbehind) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -610,7 +614,7 @@ defmodule Toxic.NormalTokenizer do
     {:error, err}
   end
 
-  def next([?%, ?[ | _rest], line, column, _scope, _tokens) do
+  def next([?%, ?[ | _rest], line, column, _scope, _lookbehind) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -626,7 +630,7 @@ defmodule Toxic.NormalTokenizer do
         line,
         column,
         scope = scope(elixir_compatibility: elixir_compatibility),
-        tokens
+        lookbehind
       ) do
     # this is a bug in elixir parser but the fix was not accepted
     # https://github.com/elixir-lang/elixir/pull/14741
@@ -639,9 +643,14 @@ defmodule Toxic.NormalTokenizer do
       )
 
     {_, rest, line, column, scope} =
-      Terminator.handle_terminator(t, line, column + 2, scope, token, [
-        token(:%{}, meta(line, column, 2, nil), nil) | tokens
-      ])
+      Terminator.handle_terminator(
+        t,
+        line,
+        column + 2,
+        scope,
+        token,
+        lookbehind
+      )
 
     {[
        {:token, token(:%{}, meta(line, column - 2, 1, nil), nil)},
@@ -649,13 +658,13 @@ defmodule Toxic.NormalTokenizer do
      ], rest, line, column, scope}
   end
 
-  def next([?% | t], line, column, scope, _tokens) do
+  def next([?% | t], line, column, scope, _lookbehind) do
     token = token(:%, meta(line, column, 1, nil), nil)
     emit(token, t, line, column + 1, scope)
   end
 
-  def next([?. | t], line, column, scope, tokens) do
-    Dot.tokenize_dot(t, line, column + 1, meta(line, column, 1, nil), scope, tokens)
+  def next([?. | t], line, column, scope, lookbehind) do
+    Dot.tokenize_dot(t, line, column + 1, meta(line, column, 1, nil), scope, lookbehind)
   end
 
   # Identifiers
@@ -665,14 +674,14 @@ defmodule Toxic.NormalTokenizer do
         line,
         column,
         original_scope = scope(cursor_completion: cursor_completion),
-        tokens
+        lookbehind
       ) do
     case Identifier.tokenize_identifier(
            string,
            line,
            column,
            original_scope,
-           not previous_was_dot?(tokens)
+           not previous_was_dot?(lookbehind)
          ) do
       {kind, unencoded, atom, rest, length, ascii, special} ->
         at? = :at in special
@@ -728,7 +737,7 @@ defmodule Toxic.NormalTokenizer do
               ascii,
               special,
               scope,
-              tokens
+              lookbehind
             )
 
           _ when kind == :identifier ->
@@ -760,7 +769,7 @@ defmodule Toxic.NormalTokenizer do
           atom,
           length,
           original_scope,
-          tokens
+          lookbehind
         )
 
       :empty when cursor_completion == false ->
@@ -834,12 +843,12 @@ defmodule Toxic.NormalTokenizer do
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
 
-  defp eol(_line, _column, _scope, [{token, _meta, _} | _tokens])
+  defp eol(_line, _column, _scope, {{token, _meta, _}, _, _})
        when token in ~w(, ; eol)a do
     :increase_eol
   end
 
-  defp eol(line, column, scope, _tokens) do
+  defp eol(line, column, scope, _lookbehind) do
     scope(column: base_column) = scope
     {:eol, meta(line, column, line + 1, base_column, 1), nil}
   end
@@ -862,15 +871,25 @@ defmodule Toxic.NormalTokenizer do
 
   # Ambiguous unary/binary operators tokens
   # Keywords are not ambiguous operators
-  defp handle_space_sensitive_tokens([sign, ?:, space | _] = string, line, column, scope, _tokens)
+  defp handle_space_sensitive_tokens(
+         [sign, ?:, space | _] = string,
+         line,
+         column,
+         scope,
+         _lookbehind
+       )
        when dual_op(sign) and is_space(space) do
     no_token(string, line, column, scope)
   end
 
   # But everything else, except other operators, are
-  defp handle_space_sensitive_tokens([sign, not_marker | t], line, column, scope, [
-         {token, _, _} = _h | _tokens
-       ])
+  defp handle_space_sensitive_tokens(
+         [sign, not_marker | t],
+         line,
+         column,
+         scope,
+         {{token, _, _}, _, _}
+       )
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest = [not_marker | t]
@@ -885,7 +904,7 @@ defmodule Toxic.NormalTokenizer do
   #                               [{identifier, Info, Identifier} | tokens]) when Cursor /= false ->
   #   tokenize([$(], line, column+1, scope, [{paren_identifier, Info, Identifier} | tokens]);
 
-  defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) do
+  defp handle_space_sensitive_tokens(string, line, column, scope, _lookbehind) do
     no_token(string, line, column, scope)
   end
 

@@ -141,51 +141,99 @@ defmodule Toxic.Driver do
           scope: Toxic.Scope.scope()
         }
 
+  @type cfg :: %{
+          error_mode: :tolerant | :strict,
+          error_sync: [:semicolon | :newline | :closer | :comma | :comment | :whitespace],
+          error_max_skip: non_neg_integer(),
+          insert_structural_closers: boolean(),
+          insert_identifier_sanitization: boolean(),
+          error_token_payload: :struct | :tuple | :both,
+          lexer_backend: :charlist | :binary
+        }
+
+  @type driver_hot :: {Toxic.Scope.scope(), [context()]}
+
+  @type lookbehind :: {token() | nil, boolean(), non_neg_integer()}
+
   @spec new(keyword()) :: Toxic.Driver.t()
   def new(opts \\ []) do
-    elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
-    preserve_comments = Keyword.get(opts, :preserve_comments, false)
-    existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
-    static_atoms_encoder = Keyword.get(opts, :static_atoms_encoder, nil)
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
-    error_mode = Keyword.get(opts, :error_mode, :tolerant)
-
-    error_sync =
-      Keyword.get(opts, :error_sync, [
-        :semicolon,
-        :newline,
-        :closer,
-        :comma,
-        :comment,
-        :whitespace
-      ])
-
-    error_max_skip = Keyword.get(opts, :error_max_skip, 4096)
-    insert_structural_closers = Keyword.get(opts, :insert_structural_closers, true)
-    insert_identifier_sanitization = Keyword.get(opts, :insert_identifier_sanitization, true)
-    error_token_payload = Keyword.get(opts, :error_token_payload, :struct)
-    lexer_backend = Keyword.get(opts, :lexer_backend, :charlist)
+    cfg = build_cfg(opts)
+    {scope, contexts} = build_hot(opts)
 
     %__MODULE__{
       line: line,
       column: column,
-      error_mode: error_mode,
-      error_sync: error_sync,
-      error_max_skip: error_max_skip,
-      insert_structural_closers: insert_structural_closers,
-      insert_identifier_sanitization: insert_identifier_sanitization,
-      error_token_payload: error_token_payload,
-      lexer_backend: lexer_backend,
-      scope:
-        scope(
-          elixir_compatibility: elixir_compatibility,
-          preserve_comments: preserve_comments,
-          existing_atoms_only: existing_atoms_only,
-          static_atoms_encoder: static_atoms_encoder,
-          column: column
-        )
+      error_mode: cfg.error_mode,
+      error_sync: cfg.error_sync,
+      error_max_skip: cfg.error_max_skip,
+      insert_structural_closers: cfg.insert_structural_closers,
+      insert_identifier_sanitization: cfg.insert_identifier_sanitization,
+      error_token_payload: cfg.error_token_payload,
+      lexer_backend: cfg.lexer_backend,
+      scope: scope,
+      contexts: contexts
     }
+  end
+
+  @spec build_cfg(keyword()) :: cfg()
+  def build_cfg(opts) do
+    error_mode = Keyword.get(opts, :error_mode, :tolerant)
+
+    %{
+      error_mode: error_mode,
+      error_sync:
+        Keyword.get(opts, :error_sync, [
+          :semicolon,
+          :newline,
+          :closer,
+          :comma,
+          :comment,
+          :whitespace
+        ]),
+      error_max_skip: Keyword.get(opts, :error_max_skip, 4096),
+      insert_structural_closers: Keyword.get(opts, :insert_structural_closers, true),
+      insert_identifier_sanitization: Keyword.get(opts, :insert_identifier_sanitization, true),
+      error_token_payload: Keyword.get(opts, :error_token_payload, :struct),
+      lexer_backend: Keyword.get(opts, :lexer_backend, :charlist)
+    }
+  end
+
+  @spec build_hot(keyword()) :: driver_hot()
+  def build_hot(opts) do
+    elixir_compatibility = Keyword.get(opts, :elixir_compatibility, false)
+    preserve_comments = Keyword.get(opts, :preserve_comments, false)
+    existing_atoms_only = Keyword.get(opts, :existing_atoms_only, false)
+    static_atoms_encoder = Keyword.get(opts, :static_atoms_encoder, nil)
+    column = Keyword.get(opts, :column, 1)
+
+    scope =
+      scope(
+        elixir_compatibility: elixir_compatibility,
+        preserve_comments: preserve_comments,
+        existing_atoms_only: existing_atoms_only,
+        static_atoms_encoder: static_atoms_encoder,
+        column: column
+      )
+
+    {scope, [:normal]}
+  end
+
+  def cfg_from_driver(%__MODULE__{} = driver) do
+    %{
+      error_mode: driver.error_mode,
+      error_sync: driver.error_sync,
+      error_max_skip: driver.error_max_skip,
+      insert_structural_closers: driver.insert_structural_closers,
+      insert_identifier_sanitization: driver.insert_identifier_sanitization,
+      error_token_payload: driver.error_token_payload,
+      lexer_backend: driver.lexer_backend
+    }
+  end
+
+  def hot_from_driver(%__MODULE__{} = driver) do
+    {driver.scope, driver.contexts}
   end
 
   @typedoc "Input remaining to be tokenized (charlist or binary depending on backend)"
@@ -220,6 +268,95 @@ defmodule Toxic.Driver do
     Recovery.emit_error_and_advance(reason, rest, state)
   end
 
+  @spec step(input(), pos_integer(), pos_integer(), driver_hot(), cfg(), lookbehind()) ::
+          {:ok, token(), input(), pos_integer(), pos_integer(), driver_hot(), lookbehind()}
+          | {:ok_many, [token()], input(), pos_integer(), pos_integer(), driver_hot(), lookbehind()}
+          | {:eof, driver_hot()}
+          | {:error, error_reason(), input(), pos_integer(), pos_integer(), driver_hot()}
+  def step(rest, line, column, {scope, contexts}, cfg, lookbehind) do
+    case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
+      {:ok, token, rest, line, column, scope, contexts, lookbehind} ->
+        {:ok, token, rest, line, column, {scope, contexts}, lookbehind}
+
+      :fallback ->
+        step_slow(rest, line, column, {scope, contexts}, cfg, lookbehind)
+    end
+  end
+
+  defp step_fast([], _line, _column, _scope, _contexts, _cfg, _lookbehind), do: :fallback
+  defp step_fast(<<>>, _line, _column, _scope, _contexts, _cfg, _lookbehind), do: :fallback
+
+  defp step_fast(rest, line, column, scope, [:normal | _] = contexts, cfg, lookbehind) do
+    result =
+      case cfg.lexer_backend do
+        :binary ->
+          Toxic.BinaryNormalTokenizer.next(rest, line, column, scope, lookbehind)
+
+        _ ->
+          Toxic.NormalTokenizer.next(rest, line, column, scope, lookbehind)
+      end
+
+    case result do
+      {nil, rest, line, column, scope} ->
+        step_fast(rest, line, column, scope, contexts, cfg, lookbehind)
+
+      {{:token, token}, rest, line, column, scope} ->
+        if fast_token?(token) do
+          lookbehind = Toxic.Util.lookbehind_from_token(token)
+          {:ok, token, rest, line, column, scope, contexts, lookbehind}
+        else
+          :fallback
+        end
+
+      _ ->
+        :fallback
+    end
+  end
+
+  defp step_fast(_rest, _line, _column, _scope, _contexts, _cfg, _lookbehind), do: :fallback
+
+  defp step_slow(rest, line, column, {scope, contexts}, cfg, lookbehind) do
+    driver = %{
+      line: line,
+      column: column,
+      scope: scope,
+      contexts: contexts,
+      error_mode: cfg.error_mode,
+      error_sync: cfg.error_sync,
+      error_max_skip: cfg.error_max_skip,
+      insert_structural_closers: cfg.insert_structural_closers,
+      insert_identifier_sanitization: cfg.insert_identifier_sanitization,
+      error_token_payload: cfg.error_token_payload,
+      lexer_backend: cfg.lexer_backend,
+      deferrals: [],
+      output: [],
+      recent_token: elem(lookbehind, 0)
+    }
+
+    case collect_until_no_deferrals(rest, driver, []) do
+      {:ok, [token], rest, driver} ->
+        lookbehind = Toxic.Util.lookbehind_from_token(token)
+        {:ok, token, rest, driver.line, driver.column, {driver.scope, driver.contexts}, lookbehind}
+
+      {:ok, tokens, rest, driver} ->
+        last = List.last(tokens)
+        lookbehind = Toxic.Util.lookbehind_from_token(last)
+
+        {:ok_many, tokens, rest, driver.line, driver.column, {driver.scope, driver.contexts},
+         lookbehind}
+
+      {:eof, driver} ->
+        {:eof, {driver.scope, driver.contexts}}
+
+      {:error, reason, rest, driver} ->
+        {:error, reason, rest, driver.line, driver.column, {driver.scope, driver.contexts}}
+    end
+  end
+
+  defp fast_token?({kind, _meta, _}) when kind in [:identifier, :eol, :";", :","], do: false
+  defp fast_token?({:quoted_identifier_end, _meta, _}), do: false
+  defp fast_token?(_token), do: true
+
   @doc """
   Get the next token from the driver.
 
@@ -240,27 +377,29 @@ defmodule Toxic.Driver do
           {:ok, token(), input(), t()}
           | {:eof, t()}
           | {:error, error_reason(), input(), t()}
-  def next(rest, %__MODULE__{output: [h | t]} = state) do
+  def next(rest, %{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end
 
-  def next([], %__MODULE__{deferrals: []} = state) do
-    case Contexts.pending_error(state) do
+  def next([], %{deferrals: []} = state) do
+    case Contexts.pending_error(state.contexts, state.scope) do
       nil ->
         {:eof, state}
 
       error when state.error_mode == :strict ->
         case error do
           {:missing_interpolation, interp_context} ->
-            reason = Contexts.missing_interpolation_reason(interp_context, state)
+            reason =
+              Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_context, interp_context} ->
-            reason = Contexts.missing_terminator_reason(interp_context, state)
+            reason = Contexts.missing_terminator_reason(interp_context, state.line, state.column)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_scope, entry} ->
-            reason = Contexts.missing_scope_terminator_reason(entry, state)
+            reason =
+              Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
         end
 
@@ -269,28 +408,30 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next([], %__MODULE__{deferrals: [_h | _t] = deferrals} = state) do
+  def next([], %{deferrals: [_h | _t] = deferrals} = state) do
     next([], %{state | deferrals: [], output: Enum.reverse(deferrals)})
   end
 
   # Binary backend EOF handling
-  def next(<<>>, %__MODULE__{lexer_backend: :binary, deferrals: []} = state) do
-    case Contexts.pending_error(state) do
+  def next(<<>>, %{lexer_backend: :binary, deferrals: []} = state) do
+    case Contexts.pending_error(state.contexts, state.scope) do
       nil ->
         {:eof, state}
 
       error when state.error_mode == :strict ->
         case error do
           {:missing_interpolation, interp_context} ->
-            reason = Contexts.missing_interpolation_reason(interp_context, state)
+            reason =
+              Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
             {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
 
           {:missing_context, interp_context} ->
-            reason = Contexts.missing_terminator_reason(interp_context, state)
+            reason = Contexts.missing_terminator_reason(interp_context, state.line, state.column)
             {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
 
           {:missing_scope, entry} ->
-            reason = Contexts.missing_scope_terminator_reason(entry, state)
+            reason =
+              Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
             {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
         end
 
@@ -299,13 +440,13 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next(<<>>, %__MODULE__{lexer_backend: :binary, deferrals: [_h | _t] = deferrals} = state) do
+  def next(<<>>, %{lexer_backend: :binary, deferrals: [_h | _t] = deferrals} = state) do
     next(<<>>, %{state | deferrals: [], output: Enum.reverse(deferrals)})
   end
 
   def next(
         [?} | rest],
-        %__MODULE__{
+        %{
           contexts: [
             :normal,
             {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info, _fragments,
@@ -317,7 +458,7 @@ defmodule Toxic.Driver do
           state
       )
       when start_token != :"{" do
-    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state)
+    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state.line, state.column)
 
     case state.error_mode do
       :strict ->
@@ -325,13 +466,13 @@ defmodule Toxic.Driver do
         {:error, reason_tuple, rest, state}
 
       :tolerant ->
-        Recovery.emit_error_and_advance(reason, rest, state)
+        emit_error_and_advance_hot(reason, rest, state)
     end
   end
 
   def next(
         [?} | rest],
-        %__MODULE__{
+        %{
           contexts: [
             :normal,
             {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
@@ -363,7 +504,7 @@ defmodule Toxic.Driver do
   # Binary backend interpolation end handling
   def next(
         <<?}, rest::binary>>,
-        %__MODULE__{
+        %{
           lexer_backend: :binary,
           contexts: [
             :normal,
@@ -376,7 +517,7 @@ defmodule Toxic.Driver do
           state
       )
       when start_token != :"{" do
-    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state)
+    reason = Contexts.mismatched_delimiter_reason(entry, :"}", state.line, state.column)
 
     case state.error_mode do
       :strict ->
@@ -384,13 +525,13 @@ defmodule Toxic.Driver do
         {:error, reason_tuple, rest, state}
 
       :tolerant ->
-        Recovery.emit_error_and_advance(reason, rest, state)
+        emit_error_and_advance_hot(reason, rest, state)
     end
   end
 
   def next(
         <<?}, rest::binary>>,
-        %__MODULE__{
+        %{
           lexer_backend: :binary,
           contexts: [
             :normal,
@@ -420,8 +561,8 @@ defmodule Toxic.Driver do
     next(rest, new_state)
   end
 
-  def next(string, %__MODULE__{contexts: [:normal | _], lexer_backend: :charlist} = state) do
-    carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
+  def next(string, %{contexts: [:normal | _], lexer_backend: :charlist} = state) do
+    lookbehind = lookbehind_from_deferrals(state.deferrals, state.recent_token)
 
     result =
       Toxic.NormalTokenizer.next(
@@ -429,7 +570,7 @@ defmodule Toxic.Driver do
         state.line,
         state.column,
         state.scope,
-        carry_with_recent
+        lookbehind
       )
 
     case handle_tokenize_result(state, result) do
@@ -440,7 +581,7 @@ defmodule Toxic.Driver do
             {:error, reason_tuple, string, state}
 
           :tolerant ->
-            Recovery.emit_error_and_advance(reason, string, state)
+            emit_error_and_advance_hot(reason, string, state)
         end
 
       {rest, state} ->
@@ -448,8 +589,8 @@ defmodule Toxic.Driver do
     end
   end
 
-  def next(string, %__MODULE__{contexts: [:normal | _], lexer_backend: :binary} = state) do
-    carry_with_recent = state.deferrals ++ List.wrap(state.recent_token)
+  def next(string, %{contexts: [:normal | _], lexer_backend: :binary} = state) do
+    lookbehind = lookbehind_from_deferrals(state.deferrals, state.recent_token)
 
     result =
       Toxic.BinaryNormalTokenizer.next(
@@ -457,7 +598,7 @@ defmodule Toxic.Driver do
         state.line,
         state.column,
         state.scope,
-        carry_with_recent
+        lookbehind
       )
 
     case handle_tokenize_result(state, result) do
@@ -468,7 +609,7 @@ defmodule Toxic.Driver do
             {:error, reason_tuple, string, state}
 
           :tolerant ->
-            Recovery.emit_error_and_advance(reason, string, state)
+            emit_error_and_advance_hot(reason, string, state)
         end
 
       {rest, state} ->
@@ -478,7 +619,7 @@ defmodule Toxic.Driver do
 
   def next(
         string,
-        %__MODULE__{
+        %{
           lexer_backend: :charlist,
           contexts: [
             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
@@ -503,7 +644,7 @@ defmodule Toxic.Driver do
             {:error, reason_tuple, string, state}
 
           :tolerant ->
-            Recovery.emit_error_and_advance(reason, string, state)
+            emit_error_and_advance_hot(reason, string, state)
         end
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
@@ -780,7 +921,7 @@ defmodule Toxic.Driver do
               {:error, reason_tuple, rest, state}
 
             :tolerant ->
-              Recovery.emit_error_and_advance(reason, rest, %{
+              emit_error_and_advance_hot(reason, rest, %{
                 state
                 | line: line,
                   column: column,
@@ -809,7 +950,7 @@ defmodule Toxic.Driver do
   # Binary backend interpolation handler
   def next(
         string,
-        %__MODULE__{
+        %{
           lexer_backend: :binary,
           contexts: [
             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
@@ -834,7 +975,7 @@ defmodule Toxic.Driver do
             {:error, reason_tuple, string, state}
 
           :tolerant ->
-            Recovery.emit_error_and_advance(reason, string, state)
+            emit_error_and_advance_hot(reason, string, state)
         end
 
       {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
@@ -1111,7 +1252,7 @@ defmodule Toxic.Driver do
               {:error, reason_tuple, rest, state}
 
             :tolerant ->
-              Recovery.emit_error_and_advance(reason, rest, %{
+              emit_error_and_advance_hot(reason, rest, %{
                 state
                 | line: line,
                   column: column,
@@ -1138,7 +1279,7 @@ defmodule Toxic.Driver do
   end
 
   defp handle_tokenize_result(
-         state = %__MODULE__{contexts: contexts, deferrals: deferrals, output: output},
+         state = %{contexts: contexts, deferrals: deferrals, output: output},
          result
        ) do
     case result do
@@ -1390,12 +1531,18 @@ defmodule Toxic.Driver do
   """
   @spec current_terminators(t()) :: [{atom(), term(), non_neg_integer()}]
   def current_terminators(%__MODULE__{} = driver) do
+    current_terminators_from(driver.scope, driver.contexts)
+  end
+
+  @spec current_terminators_from(Toxic.Scope.scope(), [context()]) ::
+          [{atom(), term(), non_neg_integer()}]
+  def current_terminators_from(scope, contexts) do
     # Collect current scope terminators and any parent terminators saved in
     # interpolation contexts on the driver's context stack, plus delimiters
     # from string/heredoc/atom/sigil constructs.
 
     # Read current terminators from scope record
-    scope(terminators: current_terms) = driver.scope
+    scope(terminators: current_terms) = scope
 
     current_terms =
       case current_terms do
@@ -1409,10 +1556,10 @@ defmodule Toxic.Driver do
 
     # Walk contexts to gather all parent terminators from interpolation frames
     # and add delimiter terminators from string-like constructs
-    context_length = length(driver.contexts)
+    context_length = length(contexts)
 
     context_terms =
-      driver.contexts
+      contexts
       |> Enum.with_index()
       |> Enum.flat_map(fn
         {:normal, index} when index < context_length - 1 ->
@@ -1487,12 +1634,54 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
+  defp collect_until_no_deferrals(rest, driver, acc) do
+    case next(rest, driver) do
+      {:ok, token, rest, driver} ->
+        acc = [token | acc]
+
+        if driver.deferrals == [] and driver.output == [] do
+          {:ok, Enum.reverse(acc), rest, driver}
+        else
+          collect_until_no_deferrals(rest, driver, acc)
+        end
+
+      {:eof, driver} ->
+        if acc == [] do
+          {:eof, driver}
+        else
+          {:ok, Enum.reverse(acc), rest, driver}
+        end
+
+      {:error, reason, rest, driver} ->
+        {:error, reason, rest, driver}
+    end
+  end
+
+  defp lookbehind_from_deferrals([token | _], _recent_token) do
+    Toxic.Util.lookbehind_from_token(token)
+  end
+
+  defp lookbehind_from_deferrals([], recent_token) do
+    Toxic.Util.lookbehind_from_token(recent_token)
+  end
+
+  defp emit_error_and_advance_hot(reason, rest, state) do
+    case Recovery.emit_error_and_advance_many(reason, rest, state) do
+      {:ok_many, [token | rest_tokens], new_rest, new_state} ->
+        {:ok, token, new_rest, %{new_state | output: rest_tokens, recent_token: token}}
+
+      {:ok_many, [], _new_rest, new_state} ->
+        {:eof, %{new_state | output: []}}
+    end
+  end
+
   defp emit_pending_error(
          {:missing_interpolation,
           {:interp, kind, _allow, _delim, _parents, _start, _frags, _saw} = interp_context},
          state
        ) do
-    reason = Contexts.missing_interpolation_reason(interp_context, state)
+    reason =
+      Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_payload(reason, state)}
 
@@ -1515,7 +1704,7 @@ defmodule Toxic.Driver do
           {:interp, kind, _allow, delim, parent_terms, _start, _frags, _saw} = interp_context},
          state
        ) do
-    reason = Contexts.missing_terminator_reason(interp_context, state)
+    reason = Contexts.missing_terminator_reason(interp_context, state.line, state.column)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_payload(reason, state)}
 
@@ -1545,7 +1734,8 @@ defmodule Toxic.Driver do
   end
 
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
-    reason = Contexts.missing_scope_terminator_reason(entry, state)
+    reason =
+      Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_payload(reason, state)}
 
@@ -1567,7 +1757,7 @@ defmodule Toxic.Driver do
     }
   end
 
-  defp error_payload(%Toxic.Error{} = error, %__MODULE__{error_token_payload: mode}) do
+  defp error_payload(%Toxic.Error{} = error, %{error_token_payload: mode}) do
     error = Toxic.Error.safe_validate(error)
 
     case mode do

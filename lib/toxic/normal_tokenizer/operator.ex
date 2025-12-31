@@ -3,6 +3,7 @@ defmodule Toxic.NormalTokenizer.Operator do
   import Toxic.CharacterClassifier, only: [is_space: 1]
   import Toxic.Token, only: [meta: 4]
   import Toxic.Util
+  require Toxic.Scope
   defguard at_op(t) when t == ?@
 
   defguard capture_op(t) when t == ?&
@@ -84,13 +85,13 @@ defmodule Toxic.NormalTokenizer.Operator do
 
   defguard xor_op3(t1, t2, t3) when t1 == ?^ and t2 == ?^ and t3 == ?^
 
-  def handle_unary_op([?: | rest], line, column, _kind, length, op, scope, _tokens)
+  def handle_unary_op([?: | rest], line, column, _kind, length, op, scope, _lookbehind)
       when is_space(hd(rest)) do
     token = {:kw_identifier, meta(line, column, length + 1, nil), op}
     emit(token, rest, line, column + length + 1, scope)
   end
 
-  def handle_unary_op(rest, line, column, kind, length, op, scope, _tokens) do
+  def handle_unary_op(rest, line, column, kind, length, op, scope, _lookbehind) do
     case strip_horizontal_space(rest, 0) do
       {[?/ | _] = remaining, extra} ->
         token = {:identifier, meta(line, column, length, nil), op}
@@ -113,13 +114,13 @@ defmodule Toxic.NormalTokenizer.Operator do
     end
   end
 
-  def handle_op([?: | rest], line, column, _kind, length, op, scope, _tokens)
+  def handle_op([?: | rest], line, column, _kind, length, op, scope, _lookbehind)
       when is_space(hd(rest)) do
     token = {:kw_identifier, meta(line, column, length + 1, nil), op}
     emit(token, rest, line, column + length + 1, scope)
   end
 
-  def handle_op(rest, line, column, kind, length, op, scope, tokens) do
+  def handle_op(rest, line, column, kind, length, op, scope, lookbehind) do
     case strip_horizontal_space(rest, 0) do
       {[?/ | _] = remaining, extra} ->
         token = {:identifier, meta(line, column, length, nil), op}
@@ -140,7 +141,7 @@ defmodule Toxic.NormalTokenizer.Operator do
               scope
           end
 
-        token = {kind, meta(line, column, length, previous_was_eol(tokens)), op}
+        token = {kind, meta(line, column, length, previous_was_eol(lookbehind)), op}
         emit_with_eol(token, remaining, line, column + length + extra, new_scope)
     end
   end

@@ -5,10 +5,10 @@ defmodule Toxic.NormalTokenizer.Sigil do
   import Toxic.Scope
   alias Toxic.NormalTokenizer
 
-  def tokenize_sigil([?~ | t], line, column, scope, tokens) do
-    case tokenize_sigil_name(t, [], line, column + 1, scope, tokens) do
-      {:ok, name, rest, new_line, new_column, new_scope, new_tokens} ->
-        tokenize_sigil_contents(rest, name, new_line, new_column, new_scope, new_tokens)
+  def tokenize_sigil([?~ | t], line, column, scope, lookbehind) do
+    case tokenize_sigil_name(t, [], line, column + 1, scope, lookbehind) do
+      {:ok, name, rest, new_line, new_column, new_scope, new_lookbehind} ->
+        tokenize_sigil_contents(rest, name, new_line, new_column, new_scope, new_lookbehind)
 
       {:error, reason} ->
         {:error, reason}
@@ -16,12 +16,12 @@ defmodule Toxic.NormalTokenizer.Sigil do
   end
 
   # A one-letter sigil is ok both as upcase as well as downcase.
-  def tokenize_sigil_name([s | t], [], line, column, scope, tokens) when is_downcase(s) do
-    tokenize_lower_sigil_name(t, [s], line, column + 1, scope, tokens)
+  def tokenize_sigil_name([s | t], [], line, column, scope, lookbehind) when is_downcase(s) do
+    tokenize_lower_sigil_name(t, [s], line, column + 1, scope, lookbehind)
   end
 
-  def tokenize_sigil_name([s | t], [], line, column, scope, tokens) when is_upcase(s) do
-    tokenize_upper_sigil_name(t, [s], line, column + 1, scope, tokens)
+  def tokenize_sigil_name([s | t], [], line, column, scope, lookbehind) when is_upcase(s) do
+    tokenize_upper_sigil_name(t, [s], line, column + 1, scope, lookbehind)
   end
 
   def tokenize_lower_sigil_name(
@@ -30,7 +30,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         line,
         column,
         _scope,
-        _tokens
+        _lookbehind
       )
       when is_downcase(s) do
     sigil_name = [?~ | Enum.reverse(name_acc, original)]
@@ -47,15 +47,15 @@ defmodule Toxic.NormalTokenizer.Sigil do
     {:error, err}
   end
 
-  def tokenize_lower_sigil_name(t, name_acc, line, column, scope, tokens) do
-    {:ok, Enum.reverse(name_acc), t, line, column, scope, tokens}
+  def tokenize_lower_sigil_name(t, name_acc, line, column, scope, lookbehind) do
+    {:ok, Enum.reverse(name_acc), t, line, column, scope, lookbehind}
   end
 
   # If we have an uppercase letter, we keep tokenizing the name.
   # A digit is allowed but an uppercase letter or digit must proceed it.
-  def tokenize_upper_sigil_name([s | t], name_acc, line, column, scope, tokens)
+  def tokenize_upper_sigil_name([s | t], name_acc, line, column, scope, lookbehind)
       when is_upcase(s) or is_digit(s) do
-    tokenize_upper_sigil_name(t, [s | name_acc], line, column + 1, scope, tokens)
+    tokenize_upper_sigil_name(t, [s | name_acc], line, column + 1, scope, lookbehind)
   end
 
   # With a lowercase letter and a non-empty name_acc we return an error.
@@ -65,7 +65,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         line,
         column,
         _scope,
-        _tokens
+        _lookbehind
       )
       when is_downcase(s) do
     sigil_name = [?~ | Enum.reverse(name_acc, original)]
@@ -82,8 +82,8 @@ defmodule Toxic.NormalTokenizer.Sigil do
   end
 
   # We finished the letters, so the name is over.
-  def tokenize_upper_sigil_name(t, name_acc, line, column, scope, tokens) do
-    {:ok, Enum.reverse(name_acc), t, line, column, scope, tokens}
+  def tokenize_upper_sigil_name(t, name_acc, line, column, scope, lookbehind) do
+    {:ok, Enum.reverse(name_acc), t, line, column, scope, lookbehind}
   end
 
   def tokenize_sigil_contents(
@@ -92,7 +92,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         line,
         column,
         scope,
-        _tokens
+        _lookbehind
       )
       when is_quote(h) do
     case NormalTokenizer.String.extract_heredoc_header(t) do
@@ -143,7 +143,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
         line,
         column,
         scope,
-        _tokens
+        _lookbehind
       )
       when is_sigil(h) do
     start_column = column - length(sigil_name) - 1
@@ -161,7 +161,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
     end
   end
 
-  def tokenize_sigil_contents([h | _] = _original, sigil_name, line, column, _scope, _tokens) do
+  def tokenize_sigil_contents([h | _] = _original, sigil_name, line, column, _scope, _lookbehind) do
     start_column = column - length(sigil_name) - 1
     char_hex = String.upcase(Integer.to_string(h, 16))
     char_hex_padded = String.pad_leading(char_hex, 4, "0")
@@ -188,7 +188,7 @@ defmodule Toxic.NormalTokenizer.Sigil do
   end
 
   # Incomplete sigil.
-  def tokenize_sigil_contents([], _sigil_name, line, column, scope, _tokens) do
+  def tokenize_sigil_contents([], _sigil_name, line, column, scope, _lookbehind) do
     {nil, [], line, column, scope}
   end
 

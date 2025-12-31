@@ -4,12 +4,12 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
   import Toxic.Util
   alias Toxic.BinaryNormalTokenizer.Terminator
 
-  def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, tokens) do
-    case tokenize_keyword_terminator(line, column, atom, length, tokens) do
+  def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, lookbehind) do
+    case tokenize_keyword_terminator(line, column, atom, length, lookbehind) do
       {:ok, list} ->
         {_, check} = List.last(list)
 
-        case Terminator.handle_terminator(rest, line, column + length, scope, check, tokens) do
+        case Terminator.handle_terminator(rest, line, column + length, scope, check, lookbehind) do
           {:error, reason} ->
             {:error, reason}
 
@@ -22,31 +22,28 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
     end
   end
 
-  def tokenize_keyword(:token, rest, line, column, atom, length, scope, _tokens) do
+  def tokenize_keyword(:token, rest, line, column, atom, length, scope, _lookbehind) do
     token = token(atom, meta(line, column, length, nil), nil)
     emit(token, rest, line, column + length, scope)
   end
 
-  def tokenize_keyword(:block, rest, line, column, atom, length, scope, _tokens) do
+  def tokenize_keyword(:block, rest, line, column, atom, length, scope, _lookbehind) do
     token = {:block_identifier, meta(line, column, length, nil), atom}
     emit(token, rest, line, column + length, scope)
   end
 
-  def tokenize_keyword(kind, rest, line, column, atom, length, scope, tokens) when is_binary(rest) do
+  def tokenize_keyword(kind, rest, line, column, atom, length, scope, lookbehind)
+      when is_binary(rest) do
     case strip_horizontal_space_bin(rest, 0) do
       {<<?/, _::binary>>, _} ->
         token = {:identifier, meta(line, column, length, nil), atom}
         emit(token, rest, line, column + length, scope)
 
       _ ->
-        info = meta(line, column, length, previous_was_eol(tokens))
+        info = meta(line, column, length, previous_was_eol(lookbehind))
 
-        case {kind, tokens} do
-          {:in_op,
-           [
-             {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}
-             | _t
-           ]} ->
+        case {kind, prev_token(lookbehind)} do
+          {:in_op, {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}} ->
             not_info_meta = meta(start_line, start_column, line, column + length, extra)
             token = token(:in_op, not_info_meta, :"not in", info)
             multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)
@@ -58,7 +55,7 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
     end
   end
 
-  defp tokenize_keyword_terminator(do_line, do_column, :do, length, [{token, _, _} | _t])
+  defp tokenize_keyword_terminator(do_line, do_column, :do, length, {{token, _, _}, _, _})
        when token in [:identifier, :quoted_identifier_end] do
     {:ok,
      [
@@ -67,7 +64,7 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
      ]}
   end
 
-  defp tokenize_keyword_terminator(line, column, :do, _length, [{:fn, _, _} | _]) do
+  defp tokenize_keyword_terminator(line, column, :do, _length, {{:fn, _, _}, _, _}) do
     message =
       ~c". Anonymous functions are written as:\n\n    fn pattern -> expression end\n\nPlease remove the \"do\" keyword"
 
@@ -80,8 +77,8 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
      }}
   end
 
-  defp tokenize_keyword_terminator(line, column, :do, length, tokens) do
-    case valid_do?(tokens) do
+  defp tokenize_keyword_terminator(line, column, :do, length, lookbehind) do
+    case valid_do?(prev_token(lookbehind)) do
       true ->
         {:ok, [{:token_with_eol, do_kw(meta(line, column, length, nil))}]}
 
@@ -99,11 +96,11 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
     end
   end
 
-  defp tokenize_keyword_terminator(line, column, atom, length, _tokens) do
+  defp tokenize_keyword_terminator(line, column, atom, length, _lookbehind) do
     {:ok, [{:token, token(atom, meta(line, column, length, nil), nil)}]}
   end
 
-  defp valid_do?([{atom, _, _} | _]) when atom in ~w(
+  defp valid_do?({atom, _, _}) when atom in ~w(
 ,
 ;
 not

@@ -14,7 +14,7 @@ defmodule Toxic.BinaryNormalTokenizer do
   import Toxic.Scope
 
   # VC merge conflict
-  def next(<<?<, ?<, ?<, ?<, ?<, ?<, ?<, _::binary>> = original, line, 1, _scope, _tokens) do
+  def next(<<?<, ?<, ?<, ?<, ?<, ?<, ?<, _::binary>> = original, line, 1, _scope, _lookbehind) do
     first_line = original |> String.split(~r/[\n\r]/, parts: 2) |> hd() |> String.to_charlist()
 
     err = %Toxic.Error{
@@ -29,19 +29,19 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Base integers
 
-  def next(<<?0, ?x, h, rest::binary>>, line, column, scope, _tokens) when is_hex(h) do
+  def next(<<?0, ?x, h, rest::binary>>, line, column, scope, _lookbehind) when is_hex(h) do
     {rest, number, original_representation, length} = Number.tokenize_hex(rest, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def next(<<?0, ?b, h, rest::binary>>, line, column, scope, _tokens) when is_bin(h) do
+  def next(<<?0, ?b, h, rest::binary>>, line, column, scope, _lookbehind) when is_bin(h) do
     {rest, number, original_representation, length} = Number.tokenize_bin(rest, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
   end
 
-  def next(<<?0, ?o, h, rest::binary>>, line, column, scope, _tokens) when is_octal(h) do
+  def next(<<?0, ?o, h, rest::binary>>, line, column, scope, _lookbehind) when is_octal(h) do
     {rest, number, original_representation, length} = Number.tokenize_octal(rest, [h], 1)
     token = int(meta(line, column, 2 + length, number), original_representation)
     emit(token, rest, line, column + 2 + length, scope)
@@ -49,7 +49,7 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Comments
 
-  def next(<<?#, string::binary>>, line, column, scope, tokens) do
+  def next(<<?#, string::binary>>, line, column, scope, lookbehind) do
     case Comment.tokenize_comment(string, [?#]) do
       {:error, {code, char}} when code in [:comment_invalid_bidi, :comment_invalid_linebreak] ->
         token = :io_lib.format("\\u~4.16.0B", [char])
@@ -64,10 +64,10 @@ defmodule Toxic.BinaryNormalTokenizer do
         {:error, err}
 
       {rest, comment} ->
-        Comment.preserve_comments(line, column, tokens, comment, rest, scope)
+        Comment.preserve_comments(line, column, lookbehind, comment, rest, scope)
 
-        case tokens do
-          [{:eol, _meta, _} | _] -> reset_eol(rest, line, column, scope)
+        case prev_token(lookbehind) do
+          {:eol, _meta, _} -> reset_eol(rest, line, column, scope)
           _ -> no_token(rest, line, column, scope)
         end
     end
@@ -75,14 +75,14 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Sigils
 
-  def next(<<?~, h, _::binary>> = original, line, column, scope, tokens)
+  def next(<<?~, h, _::binary>> = original, line, column, scope, lookbehind)
       when is_upcase(h) or is_downcase(h) do
-    Sigil.tokenize_sigil(original, line, column, scope, tokens)
+    Sigil.tokenize_sigil(original, line, column, scope, lookbehind)
   end
 
   # Char tokens
 
-  def next(<<??, ?\\, h, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<??, ?\\, h, rest::binary>>, line, column, scope, _lookbehind) do
     char = Toxic.Unescape.unescape_map(h)
 
     new_scope =
@@ -120,7 +120,7 @@ defmodule Toxic.BinaryNormalTokenizer do
     emit(token, rest, new_line, new_column, new_scope)
   end
 
-  def next(<<??, char::utf8, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<??, char::utf8, rest::binary>>, line, column, scope, _lookbehind) do
     new_scope =
       case handle_char(char) do
         {escape, name} ->
@@ -150,22 +150,22 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Heredocs
 
-  def next(<<?", ?", ?", rest::binary>>, line, column, scope, tokens) do
-    BinaryNormalTokenizer.String.handle_heredocs(rest, line, column, ?", scope, tokens)
+  def next(<<?", ?", ?", rest::binary>>, line, column, scope, lookbehind) do
+    BinaryNormalTokenizer.String.handle_heredocs(rest, line, column, ?", scope, lookbehind)
   end
 
-  def next(<<?', ?', ?', rest::binary>>, line, column, scope, tokens) do
-    BinaryNormalTokenizer.String.handle_heredocs(rest, line, column, ?', scope, tokens)
+  def next(<<?', ?', ?', rest::binary>>, line, column, scope, lookbehind) do
+    BinaryNormalTokenizer.String.handle_heredocs(rest, line, column, ?', scope, lookbehind)
   end
 
   # Strings
 
-  def next(<<?", rest::binary>>, line, column, scope, tokens) do
-    BinaryNormalTokenizer.String.handle_strings(rest, line, column + 1, ?", scope, tokens)
+  def next(<<?", rest::binary>>, line, column, scope, lookbehind) do
+    BinaryNormalTokenizer.String.handle_strings(rest, line, column + 1, ?", scope, lookbehind)
   end
 
-  def next(<<?', rest::binary>>, line, column, scope, tokens) do
-    BinaryNormalTokenizer.String.handle_strings(rest, line, column + 1, ?', scope, tokens)
+  def next(<<?', rest::binary>>, line, column, scope, lookbehind) do
+    BinaryNormalTokenizer.String.handle_strings(rest, line, column + 1, ?', scope, lookbehind)
   end
 
   # Operator atoms (., <<>>, %{}, %, &, {}, ..//)
@@ -174,7 +174,7 @@ defmodule Toxic.BinaryNormalTokenizer do
     length = length(chars) + 1
     pattern = IO.iodata_to_binary(chars)
 
-    def next(<<unquote(pattern), ?:, ws, rest::binary>>, line, column, scope, _tokens)
+    def next(<<unquote(pattern), ?:, ws, rest::binary>>, line, column, scope, _lookbehind)
         when is_space(ws) do
       token = kw_identifier(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, <<ws, rest::binary>>, line, column + unquote(length), scope)
@@ -186,14 +186,14 @@ defmodule Toxic.BinaryNormalTokenizer do
     length = length(chars) + 1
     pattern = IO.iodata_to_binary(chars)
 
-    def next(<<?:, unquote(pattern), rest::binary>>, line, column, scope, _tokens) do
+    def next(<<?:, unquote(pattern), rest::binary>>, line, column, scope, _lookbehind) do
       token = atom(meta(line, column, unquote(length), nil), unquote(atom))
       emit(token, rest, line, column + unquote(length), scope)
     end
   end
 
   # Three Token Operators
-  def next(<<?:, t1, t2, t3, rest::binary>>, line, column, scope, _tokens)
+  def next(<<?:, t1, t2, t3, rest::binary>>, line, column, scope, _lookbehind)
       when unary_op3(t1, t2, t3) or comp_op3(t1, t2, t3) or and_op3(t1, t2, t3) or
              or_op3(t1, t2, t3) or
              arrow_op3(t1, t2, t3) or xor_op3(t1, t2, t3) or concat_op3(t1, t2, t3) or
@@ -204,14 +204,14 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Two Token Operators
 
-  def next(<<?:, ?:, ?:, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<?:, ?:, ?:, rest::binary>>, line, column, scope, _lookbehind) do
     warning = Toxic.Warning.ambiguous_triple_colon_atom(line, column)
     new_scope = Toxic.Scope.prepend_warning(warning, scope)
     token = atom(meta(line, column, 3, nil), :"::")
     emit(token, rest, line, column + 3, new_scope)
   end
 
-  def next(<<?:, t1, t2, rest::binary>>, line, column, scope, _tokens)
+  def next(<<?:, t1, t2, rest::binary>>, line, column, scope, _lookbehind)
       when comp_op2(t1, t2) or rel_op2(t1, t2) or and_op(t1, t2) or or_op(t1, t2) or
              arrow_op(t1, t2) or in_match_op(t1, t2) or concat_op(t1, t2) or power_op(t1, t2) or
              stab_op(t1, t2) or range_op(t1, t2) do
@@ -220,7 +220,7 @@ defmodule Toxic.BinaryNormalTokenizer do
   end
 
   # Single Token Operators
-  def next(<<?:, t, rest::binary>>, line, column, scope, _tokens)
+  def next(<<?:, t, rest::binary>>, line, column, scope, _lookbehind)
       when at_op(t) or unary_op(t) or capture_op(t) or dual_op(t) or mult_op(t) or
              rel_op(t) or match_op(t) or pipe_op(t) or t == ?. do
     token = atom(meta(line, column, 2, nil), List.to_atom([t]))
@@ -229,14 +229,14 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Stand-alone tokens
 
-  def next(<<?=, ?>, rest::binary>>, line, column, scope, tokens) do
-    token = {:assoc_op, meta(line, column, 2, previous_was_eol(tokens)), :"=>"}
+  def next(<<?=, ?>, rest::binary>>, line, column, scope, lookbehind) do
+    token = {:assoc_op, meta(line, column, 2, previous_was_eol(lookbehind)), :"=>"}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
   # Ternary operator
 
-  def next(<<?., ?., ?/, ?/, _::binary>> = string, line, column, scope, _tokens) do
+  def next(<<?., ?., ?/, ?/, _::binary>> = string, line, column, scope, _lookbehind) do
     <<_, _, _, _, rest::binary>> = string
 
     case strip_horizontal_space_bin(rest, 0) do
@@ -264,7 +264,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         :handle_op
       end
 
-    def next(<<t1, t2, t3, rest::binary>>, line, column, scope, tokens)
+    def next(<<t1, t2, t3, rest::binary>>, line, column, scope, lookbehind)
         when unquote(token)(t1, t2, t3) do
       new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope)
 
@@ -276,28 +276,28 @@ defmodule Toxic.BinaryNormalTokenizer do
         3,
         List.to_atom([t1, t2, t3]),
         new_scope,
-        tokens
+        lookbehind
       )
     end
   end
 
   # Containers + punctuation tokens
-  def next(<<?,, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<?,, rest::binary>>, line, column, scope, _lookbehind) do
     token = comma(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next(<<?<, ?<, rest::binary>>, line, column, scope, tokens) do
+  def next(<<?<, ?<, rest::binary>>, line, column, scope, lookbehind) do
     token = open_bitstring(meta(line, column, 2, nil))
-    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, lookbehind)
   end
 
-  def next(<<?>, ?>, rest::binary>>, line, column, scope, tokens) do
-    token = close_bitstring(meta(line, column, 2, previous_was_eol(tokens)))
-    Terminator.handle_terminator(rest, line, column + 2, scope, token, tokens)
+  def next(<<?>, ?>, rest::binary>>, line, column, scope, lookbehind) do
+    token = close_bitstring(meta(line, column, 2, previous_was_eol(lookbehind)))
+    Terminator.handle_terminator(rest, line, column + 2, scope, token, lookbehind)
   end
 
-  def next(<<?{, _::binary>> = _rest, line, column, _scope, [{:%, _, _} | _] = _tokens) do
+  def next(<<?{, _::binary>> = _rest, line, column, _scope, {{:%, _, _}, _, _}) do
     err = %Toxic.Error{
       code: :map_unexpected_space_after_percent,
       domain: :map,
@@ -309,20 +309,20 @@ defmodule Toxic.BinaryNormalTokenizer do
     {:error, err}
   end
 
-  def next(<<t, rest::binary>>, line, column, scope, tokens) when t in [?(, ?{, ?[] do
+  def next(<<t, rest::binary>>, line, column, scope, lookbehind) when t in [?(, ?{, ?[] do
     token = token(List.to_atom([t]), meta(line, column, 1, nil), nil)
-    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
-  def next(<<t, rest::binary>>, line, column, scope, tokens) when t in [?), ?}, ?]] do
-    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(tokens)), nil)
-    Terminator.handle_terminator(rest, line, column + 1, scope, token, tokens)
+  def next(<<t, rest::binary>>, line, column, scope, lookbehind) when t in [?), ?}, ?]] do
+    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+    Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
   # Two Token Operators
-  def next(<<t1, t2, rest::binary>>, line, column, scope, tokens) when ternary_op(t1, t2) do
+  def next(<<t1, t2, rest::binary>>, line, column, scope, lookbehind) when ternary_op(t1, t2) do
     op = List.to_atom([t1, t2])
-    token = {:ternary_op, meta(line, column, 2, previous_was_eol(tokens)), op}
+    token = {:ternary_op, meta(line, column, 2, previous_was_eol(lookbehind)), op}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
@@ -331,15 +331,24 @@ defmodule Toxic.BinaryNormalTokenizer do
   for token <- @two_token_ops do
     token_name = token |> to_string() |> String.replace_suffix("2", "") |> String.to_atom()
 
-    def next(<<t1, t2, rest::binary>>, line, column, scope, tokens)
+    def next(<<t1, t2, rest::binary>>, line, column, scope, lookbehind)
         when unquote(token)(t1, t2) do
-      handle_op(rest, line, column, unquote(token_name), 2, List.to_atom([t1, t2]), scope, tokens)
+      handle_op(
+        rest,
+        line,
+        column,
+        unquote(token_name),
+        2,
+        List.to_atom([t1, t2]),
+        scope,
+        lookbehind
+      )
     end
   end
 
   # Single Token Operators
 
-  def next(<<?&, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<?&, rest::binary>>, line, column, scope, _lookbehind) do
     kind =
       case strip_horizontal_space_bin(rest, 0) do
         {<<int, _::binary>>, 0} when is_digit(int) ->
@@ -370,8 +379,8 @@ defmodule Toxic.BinaryNormalTokenizer do
         :handle_op
       end
 
-    def next(<<t, rest::binary>>, line, column, scope, tokens) when unquote(token)(t) do
-      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, tokens)
+    def next(<<t, rest::binary>>, line, column, scope, lookbehind) when unquote(token)(t) do
+      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, lookbehind)
     end
   end
 
@@ -382,7 +391,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         line,
         column,
         base_scope = scope(existing_atoms_only: existing_atoms_only),
-        _tokens
+        _lookbehind
       )
       when is_quote(h) do
     scope =
@@ -408,7 +417,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         line,
         column,
         scope = scope(cursor_completion: cursor_completion),
-        _tokens
+        _lookbehind
       ) do
     <<_, string::binary>> = original
 
@@ -441,7 +450,7 @@ defmodule Toxic.BinaryNormalTokenizer do
   end
 
   # Integers and floats
-  def next(<<h, rest::binary>>, line, column, scope, _tokens) when is_digit(h) do
+  def next(<<h, rest::binary>>, line, column, scope, _lookbehind) when is_digit(h) do
     scope(cursor_completion: cursor_completion) = scope
 
     case Number.tokenize_number(rest, [h], 1, false) do
@@ -497,15 +506,15 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   # Spaces
 
-  def next(<<t, rest::binary>>, line, column, scope, tokens) when is_horizontal_space(t) do
+  def next(<<t, rest::binary>>, line, column, scope, lookbehind) when is_horizontal_space(t) do
     {remaining, stripped} = strip_horizontal_space_bin(rest, 0)
-    handle_space_sensitive_tokens(remaining, line, column + 1 + stripped, scope, tokens)
+    handle_space_sensitive_tokens(remaining, line, column + 1 + stripped, scope, lookbehind)
   end
 
   # End of line
 
   # Consecutive semicolons - emit error
-  def next(<<?;, _::binary>> = _rest, line, column, _scope, [{:";", _, _} | _] = _tokens) do
+  def next(<<?;, _::binary>> = _rest, line, column, _scope, {{:";", _, _}, _, _}) do
     token_display = [
       ?\",
       ?;,
@@ -528,17 +537,12 @@ defmodule Toxic.BinaryNormalTokenizer do
      }}
   end
 
-  def next(<<?;, rest::binary>>, line, column, scope, []) do
+  def next(<<?;, rest::binary>>, line, column, scope, _lookbehind) do
     token = semicolon(meta(line, column, 1, 0))
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next(<<?;, rest::binary>>, line, column, scope, [{kind, _, _} | _] = _tokens) when kind != :";" do
-    token = semicolon(meta(line, column, 1, 0))
-    emit(token, rest, line, column + 1, scope)
-  end
-
-  def next(<<?\\>> = _original, line, column, _scope, _tokens) do
+  def next(<<?\\>> = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -548,7 +552,7 @@ defmodule Toxic.BinaryNormalTokenizer do
      }}
   end
 
-  def next(<<?\\, ?\n>> = _original, line, column, _scope, _tokens) do
+  def next(<<?\\, ?\n>> = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -558,7 +562,7 @@ defmodule Toxic.BinaryNormalTokenizer do
      }}
   end
 
-  def next(<<?\\, ?\r, ?\n>> = _original, line, column, _scope, _tokens) do
+  def next(<<?\\, ?\r, ?\n>> = _original, line, column, _scope, _lookbehind) do
     {:error,
      %Toxic.Error{
        code: :string_missing_terminator,
@@ -568,29 +572,41 @@ defmodule Toxic.BinaryNormalTokenizer do
      }}
   end
 
-  def next(<<?\\, ?\n, rest::binary>>, line, _column, scope, _tokens) do
+  def next(<<?\\, ?\n, rest::binary>>, line, _column, scope, _lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
     tokenize_eol(remaining, line, scope, nil, extra_newlines)
   end
 
-  def next(<<?\\, ?\r, ?\n, rest::binary>>, line, _column, scope, _tokens) do
+  def next(<<?\\, ?\r, ?\n, rest::binary>>, line, _column, scope, _lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
     tokenize_eol(remaining, line, scope, nil, extra_newlines)
   end
 
-  def next(<<?\n, rest::binary>>, line, column, scope, tokens) do
+  def next(<<?\n, rest::binary>>, line, column, scope, lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
-    tokenize_eol(remaining, line, scope, eol(line, column, scope, tokens, extra_newlines), extra_newlines)
+    tokenize_eol(
+      remaining,
+      line,
+      scope,
+      eol(line, column, scope, lookbehind, extra_newlines),
+      extra_newlines
+    )
   end
 
-  def next(<<?\r, ?\n, rest::binary>>, line, column, scope, tokens) do
+  def next(<<?\r, ?\n, rest::binary>>, line, column, scope, lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
-    tokenize_eol(remaining, line, scope, eol(line, column, scope, tokens, extra_newlines), extra_newlines)
+    tokenize_eol(
+      remaining,
+      line,
+      scope,
+      eol(line, column, scope, lookbehind, extra_newlines),
+      extra_newlines
+    )
   end
 
   # Others
 
-  def next(<<?%, ?(, _::binary>> = _rest, line, column, _scope, _tokens) do
+  def next(<<?%, ?(, _::binary>> = _rest, line, column, _scope, _lookbehind) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -601,7 +617,7 @@ defmodule Toxic.BinaryNormalTokenizer do
     {:error, err}
   end
 
-  def next(<<?%, ?[, _::binary>> = _rest, line, column, _scope, _tokens) do
+  def next(<<?%, ?[, _::binary>> = _rest, line, column, _scope, _lookbehind) do
     err = %Toxic.Error{
       code: :map_invalid_open_delimiter,
       domain: :map,
@@ -617,7 +633,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         line,
         column,
         scope = scope(elixir_compatibility: elixir_compatibility),
-        tokens
+        lookbehind
       ) do
     token =
       token(
@@ -627,9 +643,7 @@ defmodule Toxic.BinaryNormalTokenizer do
       )
 
     {_, rest, line, column, scope} =
-      Terminator.handle_terminator(rest, line, column + 2, scope, token, [
-        token(:%{}, meta(line, column, 2, nil), nil) | tokens
-      ])
+      Terminator.handle_terminator(rest, line, column + 2, scope, token, lookbehind)
 
     {[
        {:token, token(:%{}, meta(line, column - 2, 1, nil), nil)},
@@ -637,13 +651,13 @@ defmodule Toxic.BinaryNormalTokenizer do
      ], rest, line, column, scope}
   end
 
-  def next(<<?%, rest::binary>>, line, column, scope, _tokens) do
+  def next(<<?%, rest::binary>>, line, column, scope, _lookbehind) do
     token = token(:%, meta(line, column, 1, nil), nil)
     emit(token, rest, line, column + 1, scope)
   end
 
-  def next(<<?., rest::binary>>, line, column, scope, tokens) do
-    Dot.tokenize_dot(rest, line, column + 1, meta(line, column, 1, nil), scope, tokens)
+  def next(<<?., rest::binary>>, line, column, scope, lookbehind) do
+    Dot.tokenize_dot(rest, line, column + 1, meta(line, column, 1, nil), scope, lookbehind)
   end
 
   # Identifiers
@@ -653,14 +667,14 @@ defmodule Toxic.BinaryNormalTokenizer do
         line,
         column,
         original_scope = scope(cursor_completion: cursor_completion),
-        tokens
+        lookbehind
       ) when is_binary(string) and byte_size(string) > 0 do
     case Identifier.tokenize_identifier(
            string,
            line,
            column,
            original_scope,
-           not previous_was_dot?(tokens)
+           not previous_was_dot?(lookbehind)
          ) do
       {kind, unencoded, atom, rest, length, ascii, special} ->
         at? = :at in special
@@ -717,7 +731,7 @@ defmodule Toxic.BinaryNormalTokenizer do
               ascii,
               special,
               scope,
-              tokens
+              lookbehind
             )
 
           _ when kind == :identifier ->
@@ -750,7 +764,7 @@ defmodule Toxic.BinaryNormalTokenizer do
           atom,
           length,
           original_scope,
-          tokens
+          lookbehind
         )
 
       :empty when cursor_completion == false ->
@@ -817,12 +831,12 @@ defmodule Toxic.BinaryNormalTokenizer do
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
 
-  defp eol(_line, _column, _scope, [{token, _meta, _} | _tokens], _extra_newlines)
+  defp eol(_line, _column, _scope, {{token, _meta, _}, _, _}, _extra_newlines)
        when token in ~w(, ; eol)a do
     :increase_eol
   end
 
-  defp eol(line, column, scope, _tokens, extra_newlines) do
+  defp eol(line, column, scope, _lookbehind, extra_newlines) do
     scope(column: base_column) = scope
     # Total count is 1 (for first newline) + extra_newlines
     {:eol, meta(line, column, line + 1 + extra_newlines, base_column, 1 + extra_newlines), nil}
@@ -864,14 +878,24 @@ defmodule Toxic.BinaryNormalTokenizer do
   end
 
   # Ambiguous unary/binary operators tokens
-  defp handle_space_sensitive_tokens(<<sign, ?:, space, _::binary>> = string, line, column, scope, _tokens)
+  defp handle_space_sensitive_tokens(
+         <<sign, ?:, space, _::binary>> = string,
+         line,
+         column,
+         scope,
+         _lookbehind
+       )
        when dual_op(sign) and is_space(space) do
     no_token(string, line, column, scope)
   end
 
-  defp handle_space_sensitive_tokens(<<sign, not_marker, rest::binary>>, line, column, scope, [
-         {token, _, _} = _h | _tokens
-       ])
+  defp handle_space_sensitive_tokens(
+         <<sign, not_marker, rest::binary>>,
+         line,
+         column,
+         scope,
+         {{token, _, _}, _, _}
+       )
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest2 = <<not_marker, rest::binary>>
@@ -879,7 +903,8 @@ defmodule Toxic.BinaryNormalTokenizer do
     emit_op_identifier(dual_op_token, rest2, line, column + 1, scope)
   end
 
-  defp handle_space_sensitive_tokens(string, line, column, scope, _tokens) when is_binary(string) do
+  defp handle_space_sensitive_tokens(string, line, column, scope, _lookbehind)
+       when is_binary(string) do
     no_token(string, line, column, scope)
   end
 

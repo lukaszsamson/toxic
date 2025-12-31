@@ -6,12 +6,12 @@ defmodule Toxic.Driver.Contexts do
   alias Toxic.{Driver, Error, Identifier, Scope, Warning}
   alias Toxic.NormalTokenizer.Identifier
 
-  @spec pending_error(Driver.t()) ::
+  @spec pending_error([Driver.context()], Toxic.Scope.scope()) ::
           {:missing_scope, term()}
           | {:missing_interpolation, term()}
           | {:missing_context, term()}
           | nil
-  def pending_error(%Driver{contexts: contexts, scope: scope}) do
+  def pending_error(contexts, scope) do
     cond do
       entry = find_missing_scope_terminator(scope) ->
         {:missing_scope, entry}
@@ -27,11 +27,13 @@ defmodule Toxic.Driver.Contexts do
     end
   end
 
-  @spec mismatched_delimiter_reason({atom(), term(), term()}, atom(), Driver.t()) :: Error.t()
-  def mismatched_delimiter_reason({start, meta, _indent}, closing, %Driver{
-        line: end_line,
-        column: end_column
-      }) do
+  def pending_error(%Driver{contexts: contexts, scope: scope}) do
+    pending_error(contexts, scope)
+  end
+
+  @spec mismatched_delimiter_reason({atom(), term(), term()}, atom(), pos_integer(), pos_integer()) ::
+          Error.t()
+  def mismatched_delimiter_reason({start, meta, _indent}, closing, end_line, end_column) do
     expected = Driver.closing_for(start)
     closing_chars = terminator_chars(closing)
 
@@ -52,6 +54,10 @@ defmodule Toxic.Driver.Contexts do
         end_column: end_column
       }
     }
+  end
+
+  def mismatched_delimiter_reason(entry, closing, %Driver{line: end_line, column: end_column}) do
+    mismatched_delimiter_reason(entry, closing, end_line, end_column)
   end
 
   @spec interpolation_in_quoted_identifier_reason(pos_integer(), pos_integer(), term()) ::
@@ -88,11 +94,12 @@ defmodule Toxic.Driver.Contexts do
     end
   end
 
-  @spec missing_terminator_reason(term(), Driver.t()) :: Error.t()
+  @spec missing_terminator_reason(term(), pos_integer(), pos_integer()) :: Error.t()
   def missing_terminator_reason(
         {:interp, kind, _allowed?, delim, _parents,
          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
-        %Driver{line: end_line, column: end_column}
+        end_line,
+        end_column
       ) do
     delim_chars = delimiter_charlist(delim)
     opening_atom = delimiter_atom(delim_chars)
@@ -127,11 +134,16 @@ defmodule Toxic.Driver.Contexts do
     }
   end
 
-  @spec missing_interpolation_reason(term(), Driver.t()) :: Error.t()
+  def missing_terminator_reason(interp_context, %Driver{line: end_line, column: end_column}) do
+    missing_terminator_reason(interp_context, end_line, end_column)
+  end
+
+  @spec missing_interpolation_reason(term(), pos_integer(), pos_integer()) :: Error.t()
   def missing_interpolation_reason(
         {:interp, kind, _allowed?, delim, _parents,
          %{line: start_line, column: start_column} = start_info, _fragments, _saw_interp},
-        %Driver{line: end_line, column: end_column}
+        end_line,
+        end_column
       ) do
     delim_chars = delimiter_charlist(delim)
     opening_atom = delimiter_atom(delim_chars)
@@ -162,12 +174,13 @@ defmodule Toxic.Driver.Contexts do
     }
   end
 
-  @spec missing_scope_terminator_reason(term(), Driver.t()) :: Error.t()
-  def missing_scope_terminator_reason({start, meta, indent}, %Driver{
-        line: end_line,
-        column: end_column,
-        scope: scope
-      }) do
+  def missing_interpolation_reason(interp_context, %Driver{line: end_line, column: end_column}) do
+    missing_interpolation_reason(interp_context, end_line, end_column)
+  end
+
+  @spec missing_scope_terminator_reason(term(), pos_integer(), pos_integer(), Toxic.Scope.scope()) ::
+          Error.t()
+  def missing_scope_terminator_reason({start, meta, indent}, end_line, end_column, scope) do
     closing = Driver.closing_for(start)
     hint = missing_scope_hint({start, meta, indent}, closing, scope)
 
@@ -187,6 +200,13 @@ defmodule Toxic.Driver.Contexts do
         hint_iolist: hint
       }
     }
+  end
+
+  def missing_scope_terminator_reason(
+        entry,
+        %Driver{line: end_line, column: end_column, scope: scope}
+      ) do
+    missing_scope_terminator_reason(entry, end_line, end_column, scope)
   end
 
   @spec compute_start_info(Driver.token(), term(), pos_integer(), pos_integer()) :: map()

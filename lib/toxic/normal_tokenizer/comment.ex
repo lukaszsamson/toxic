@@ -30,16 +30,22 @@ defmodule Toxic.NormalTokenizer.Comment do
   def preserve_comments(
         line,
         column,
-        tokens,
+        lookbehind,
         comment,
         rest,
         scope(preserve_comments: preserve_comments)
       )
       when is_function(preserve_comments, 5) do
+    tokens =
+      case lookbehind do
+        {nil, _, _} -> []
+        {prev, _, _} -> [prev]
+      end
+
     preserve_comments.(line, column, tokens, comment, rest)
   end
 
-  def preserve_comments(_line, _column, _tokens, _comment, _rest, _scope) do
+  def preserve_comments(_line, _column, _lookbehind, _comment, _rest, _scope) do
     :ok
   end
 end

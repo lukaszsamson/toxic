@@ -3,7 +3,18 @@ defmodule Toxic.BinaryNormalTokenizer.Alias do
   import Toxic.Util
   import Toxic.Token
 
-  def tokenize_alias(rest, line, column, unencoded, atom, length, ascii?, special, scope, _tokens) do
+  def tokenize_alias(
+        rest,
+        line,
+        column,
+        unencoded,
+        atom,
+        length,
+        ascii?,
+        special,
+        scope,
+        _lookbehind
+      ) do
     if not ascii? or special != [] do
       # unencoded is charlist for compatibility
       invalid_char = hd(for c <- unencoded, c < ?A or c > 127, do: c)

@@ -4,7 +4,7 @@ defmodule Toxic.NormalTokenizer.String do
   import Toxic.CharacterClassifier
   import Toxic.Scope
 
-  def handle_heredocs(t, line, column, h, scope, _tokens) do
+  def handle_heredocs(t, line, column, h, scope, _lookbehind) do
     # First check if the heredoc header is valid (only whitespace + newline after opening)
     case extract_heredoc_header(t) do
       {:ok, headerless} ->
@@ -41,7 +41,7 @@ defmodule Toxic.NormalTokenizer.String do
     end
   end
 
-  def handle_strings(t, line, column, h, scope, _tokens) do
+  def handle_strings(t, line, column, h, scope, _lookbehind) do
     {start_type, kind} =
       case h do
         ?' -> {:list_string_start, :charlist}

@@ -54,7 +54,7 @@ defmodule Toxic.Driver.Recovery do
   # --------------------------
   # Always advances at least one codepoint if recovery didn't move forward, preventing infinite loops.
   #
-  def emit_error_and_advance(reason, rest, state) do
+  def emit_error_and_advance_many(reason, rest, state) do
     error = Error.ensure_struct(reason)
     {def_rest, def_line, def_col} = Position.scan_to_sync(rest, state)
 
@@ -98,7 +98,7 @@ defmodule Toxic.Driver.Recovery do
     # - Keep synthesized closers for mismatches even when insert_structural_closers is false
     # - Keep synthesized openers for unexpected closers only when flag is true
     {synth_side, inserted_struct, scope_after_insert} =
-      case Synthesis.synthesize_from_reason(error, %{state | scope: scope_after_pre}) do
+      case Synthesis.synthesize_from_reason(error, state.line, state.column, scope_after_pre) do
         {:closer, inserted_all, scope_after_all} ->
           {:closer, inserted_all, scope_after_all}
 
@@ -224,11 +224,43 @@ defmodule Toxic.Driver.Recovery do
         scope: scope_for_state
     }
 
-    # Return next token in output (could be a flushed deferral, then error token)
-    Driver.next(new_rest, new_state)
+    {:ok_many, new_output, new_rest, new_state}
   end
 
-  defp error_payload(%Error{} = error, %Driver{error_token_payload: mode}) do
+  def emit_error_and_advance(reason, rest, %Driver{} = state) do
+    state_map = Map.from_struct(state)
+
+    case emit_error_and_advance_many(reason, rest, state_map) do
+      {:ok_many, [token | rest_tokens], new_rest, new_state} ->
+        new_driver = %{
+          state
+          | line: new_state.line,
+            column: new_state.column,
+            scope: new_state.scope,
+            contexts: new_state.contexts,
+            deferrals: new_state.deferrals,
+            output: rest_tokens,
+            recent_token: token
+        }
+
+        {:ok, token, new_rest, new_driver}
+
+      {:ok_many, [], _new_rest, new_state} ->
+        new_driver = %{
+          state
+          | line: new_state.line,
+            column: new_state.column,
+            scope: new_state.scope,
+            contexts: new_state.contexts,
+            deferrals: new_state.deferrals,
+            output: []
+        }
+
+        {:eof, new_driver}
+    end
+  end
+
+  defp error_payload(%Error{} = error, %{error_token_payload: mode}) do
     error = Error.safe_validate(error)
 
     case mode do
@@ -285,7 +317,8 @@ defmodule Toxic.Driver.Recovery do
         meta_paren = meta(state.line, state.column, state.line, state.column + 1, nil)
         paren_token = {:"(", meta_paren, nil}
 
-        {:ok, _tok, new_scope} = Synthesis.synthesize_opening(:"(", state)
+        {:ok, _tok, new_scope} =
+          Synthesis.synthesize_opening(:"(", state.line, state.column, state.scope)
 
         {tail, state.line, state.column + 1, [paren_token], new_scope}
 
