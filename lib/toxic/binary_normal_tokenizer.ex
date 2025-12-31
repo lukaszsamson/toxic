@@ -569,19 +569,23 @@ defmodule Toxic.BinaryNormalTokenizer do
   end
 
   def next(<<?\\, ?\n, rest::binary>>, line, _column, scope, _tokens) do
-    tokenize_eol(rest, line, scope, nil)
+    {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+    tokenize_eol(remaining, line, scope, nil, extra_newlines)
   end
 
   def next(<<?\\, ?\r, ?\n, rest::binary>>, line, _column, scope, _tokens) do
-    tokenize_eol(rest, line, scope, nil)
+    {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+    tokenize_eol(remaining, line, scope, nil, extra_newlines)
   end
 
   def next(<<?\n, rest::binary>>, line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
+    {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+    tokenize_eol(remaining, line, scope, eol(line, column, scope, tokens, extra_newlines), extra_newlines)
   end
 
   def next(<<?\r, ?\n, rest::binary>>, line, column, scope, tokens) do
-    tokenize_eol(rest, line, scope, eol(line, column, scope, tokens))
+    {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+    tokenize_eol(remaining, line, scope, eol(line, column, scope, tokens, extra_newlines), extra_newlines)
   end
 
   # Others
@@ -813,30 +817,50 @@ defmodule Toxic.BinaryNormalTokenizer do
   defp handle_char(?\v), do: {~c"\\v", ~c"vertical tab"}
   defp handle_char(_), do: false
 
-  defp eol(_line, _column, _scope, [{token, _meta, _} | _tokens])
+  defp eol(_line, _column, _scope, [{token, _meta, _} | _tokens], _extra_newlines)
        when token in ~w(, ; eol)a do
     :increase_eol
   end
 
-  defp eol(line, column, scope, _tokens) do
+  defp eol(line, column, scope, _tokens, extra_newlines) do
     scope(column: base_column) = scope
-    {:eol, meta(line, column, line + 1, base_column, 1), nil}
+    # Total count is 1 (for first newline) + extra_newlines
+    {:eol, meta(line, column, line + 1 + extra_newlines, base_column, 1 + extra_newlines), nil}
   end
 
-  defp tokenize_eol(rest, line, scope = scope(column: base_column), eol) when is_binary(rest) do
+  # Count consecutive newlines (after the first one we already matched)
+  # Returns {remaining_binary, count}
+  defp count_newlines_bin(<<?\n, rest::binary>>, count) do
+    count_newlines_bin(rest, count + 1)
+  end
+
+  defp count_newlines_bin(<<?\r, ?\n, rest::binary>>, count) do
+    count_newlines_bin(rest, count + 1)
+  end
+
+  defp count_newlines_bin(rest, count) when is_binary(rest) do
+    {rest, count}
+  end
+
+  defp tokenize_eol(rest, line, scope = scope(column: base_column), eol, extra_newlines) when is_binary(rest) do
     {stripped_rest, column} = strip_horizontal_space_bin(rest, base_column)
     indented_scope = scope(scope, indentation: column - 1)
+    new_line = line + 1 + extra_newlines
 
     case eol do
       nil ->
-        no_token(stripped_rest, line + 1, column, indented_scope)
+        no_token(stripped_rest, new_line, column, indented_scope)
 
       :increase_eol ->
-        increase_eol(stripped_rest, line + 1, column, indented_scope)
+        increase_eol_by(stripped_rest, new_line, column, indented_scope, 1 + extra_newlines)
 
       eol_token ->
-        emit(eol_token, stripped_rest, line + 1, column, indented_scope)
+        emit(eol_token, stripped_rest, new_line, column, indented_scope)
     end
+  end
+
+  defp increase_eol_by(rest, line, column, scope, count) do
+    {{:increase_eol_by, count}, rest, line, column, scope}
   end
 
   # Ambiguous unary/binary operators tokens

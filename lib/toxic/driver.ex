@@ -1191,6 +1191,22 @@ defmodule Toxic.Driver do
              ]
          }}
 
+      # Multi-newline optimization: increase by specific count
+      {{:increase_eol_by, count}, rest, line, column, scope} ->
+        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] =
+          deferrals
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [
+               {kind, meta(start_line, start_column, line, column, extra + count), extra_value} | t
+             ]
+         }}
+
       {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         new_output = Deferrals.flush(output, deferrals)
