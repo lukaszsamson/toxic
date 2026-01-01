@@ -7,7 +7,14 @@ defmodule Toxic.BinaryNormalTokenizer.Keyword do
   def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, lookbehind) do
     case tokenize_keyword_terminator(line, column, atom, length, lookbehind) do
       {:ok, list} ->
-        {_, check} = List.last(list)
+        check =
+          case List.last(list) do
+            {:token, token} -> token
+            {:token, token, _lookbehind} -> token
+            {:token_with_eol, token} -> token
+            {:token_with_eol, token, _lookbehind} -> token
+            other -> other
+          end
 
         case Terminator.handle_terminator(rest, line, column + length, scope, check, lookbehind) do
           {:error, reason} ->

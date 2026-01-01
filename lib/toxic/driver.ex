@@ -300,6 +300,13 @@ defmodule Toxic.Driver do
       {nil, rest, line, column, scope} ->
         step_fast(rest, line, column, scope, contexts, cfg, lookbehind)
 
+      {{:token, token, lookbehind}, rest, line, column, scope} ->
+        if fast_token?(token) do
+          {:ok, token, rest, line, column, scope, contexts, lookbehind}
+        else
+          :fallback
+        end
+
       {{:token, token}, rest, line, column, scope} ->
         if fast_token?(token) do
           lookbehind = Toxic.Util.lookbehind_from_token(token)
@@ -336,7 +343,9 @@ defmodule Toxic.Driver do
     case collect_until_no_deferrals(rest, driver, []) do
       {:ok, [token], rest, driver} ->
         lookbehind = Toxic.Util.lookbehind_from_token(token)
-        {:ok, token, rest, driver.line, driver.column, {driver.scope, driver.contexts}, lookbehind}
+
+        {:ok, token, rest, driver.line, driver.column, {driver.scope, driver.contexts},
+         lookbehind}
 
       {:ok, tokens, rest, driver} ->
         last = List.last(tokens)
@@ -1348,6 +1357,20 @@ defmodule Toxic.Driver do
              ]
          }}
 
+      {{:token, {eol, _meta, _extra} = token, _lookbehind}, rest, line, column, scope}
+      when eol in [:eol, :";", :","] ->
+        new_output = Deferrals.flush(output, deferrals)
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: new_output,
+             deferrals: [token]
+         }}
+
       {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         new_output = Deferrals.flush(output, deferrals)
@@ -1391,6 +1414,19 @@ defmodule Toxic.Driver do
              deferrals: []
          }}
 
+      {{:token, {:identifier, _, _} = token, _lookbehind}, rest, line, column, scope} ->
+        new_output = Deferrals.flush(output, deferrals)
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: new_output,
+             deferrals: [token]
+         }}
+
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
         new_output = Deferrals.flush(output, deferrals)
 
@@ -1402,6 +1438,19 @@ defmodule Toxic.Driver do
              scope: scope,
              output: new_output,
              deferrals: [token]
+         }}
+
+      {{:token, token, _lookbehind}, rest, line, column, scope} ->
+        new_output = Deferrals.append(output, deferrals, [token])
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [],
+             output: new_output
          }}
 
       {{:token, token}, rest, line, column, scope} ->
@@ -1446,6 +1495,17 @@ defmodule Toxic.Driver do
              deferrals: []
          }}
 
+      {{:token_with_eol, {:unary_op, _meta, :not} = token, _lookbehind}, rest, line, column,
+       scope} ->
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             deferrals: [token | deferrals]
+         }}
+
       {{:token_with_eol, {:unary_op, _meta, :not} = token}, rest, line, column, scope} ->
         {rest,
          %{
@@ -1454,6 +1514,25 @@ defmodule Toxic.Driver do
              column: column,
              scope: scope,
              deferrals: [token | deferrals]
+         }}
+
+      {{:token_with_eol, token, _lookbehind}, rest, line, column, scope} ->
+        carry_with_recent =
+          case {token, deferrals} do
+            {left, [{:eol, _, _} | tokens]} -> [left | tokens]
+            {left, tokens} -> [left | tokens]
+          end
+
+        new_output = Deferrals.flush(output, carry_with_recent)
+
+        {rest,
+         %{
+           state
+           | line: line,
+             column: column,
+             scope: scope,
+             output: new_output,
+             deferrals: []
          }}
 
       {{:token_with_eol, token}, rest, line, column, scope} ->
@@ -1695,7 +1774,12 @@ defmodule Toxic.Driver do
       :ok,
       hd(new_output),
       [],
-      %{state | contexts: new_contexts, output: tl(new_output), recent_token: hd(new_output)}
+      %{
+        state
+        | contexts: new_contexts,
+          output: tl(new_output),
+          recent_token: hd(new_output)
+      }
     }
   end
 
@@ -1753,7 +1837,12 @@ defmodule Toxic.Driver do
       :ok,
       hd(new_output),
       [],
-      %{state | scope: new_scope, output: tl(new_output), recent_token: hd(new_output)}
+      %{
+        state
+        | scope: new_scope,
+          output: tl(new_output),
+          recent_token: hd(new_output)
+      }
     }
   end
 
