@@ -151,7 +151,7 @@ defmodule Toxic.Driver do
           lexer_backend: :charlist | :binary
         }
 
-  @type driver_hot :: {Toxic.Scope.scope(), [context()]}
+  @type driver_hot :: {Toxic.Scope.scope(), [context()], [token()], [token()], token() | nil}
 
   @type lookbehind :: {token() | nil, boolean(), non_neg_integer()}
 
@@ -160,7 +160,7 @@ defmodule Toxic.Driver do
     line = Keyword.get(opts, :line, 1)
     column = Keyword.get(opts, :column, 1)
     cfg = build_cfg(opts)
-    {scope, contexts} = build_hot(opts)
+    {scope, contexts, _deferrals, _output, _recent_token} = build_hot(opts)
 
     %__MODULE__{
       line: line,
@@ -217,7 +217,7 @@ defmodule Toxic.Driver do
         column: column
       )
 
-    {scope, [:normal]}
+    {scope, [:normal], [], [], nil}
   end
 
   def cfg_from_driver(%__MODULE__{} = driver) do
@@ -273,13 +273,27 @@ defmodule Toxic.Driver do
           | {:ok_many, [token()], input(), pos_integer(), pos_integer(), driver_hot(), lookbehind()}
           | {:eof, driver_hot()}
           | {:error, error_reason(), input(), pos_integer(), pos_integer(), driver_hot()}
-  def step(rest, line, column, {scope, contexts}, cfg, lookbehind) do
-    case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
-      {:ok, token, rest, line, column, scope, contexts, lookbehind} ->
-        {:ok, token, rest, line, column, {scope, contexts}, lookbehind}
+  def step(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind) do
+    case {deferrals, output} do
+      {[], []} ->
+        case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
+          {:ok, token, rest, line, column, scope, contexts, lookbehind} ->
+            {:ok, token, rest, line, column, {scope, contexts, deferrals, output, token},
+             lookbehind}
 
-      :fallback ->
-        step_slow(rest, line, column, {scope, contexts}, cfg, lookbehind)
+          :fallback ->
+            step_slow(
+              rest,
+              line,
+              column,
+              {scope, contexts, deferrals, output, recent_token},
+              cfg,
+              lookbehind
+            )
+        end
+
+      _ ->
+        step_slow(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind)
     end
   end
 
@@ -322,7 +336,14 @@ defmodule Toxic.Driver do
 
   defp step_fast(_rest, _line, _column, _scope, _contexts, _cfg, _lookbehind), do: :fallback
 
-  defp step_slow(rest, line, column, {scope, contexts}, cfg, lookbehind) do
+  defp step_slow(
+         rest,
+         line,
+         column,
+         {scope, contexts, deferrals, output, recent_token},
+         cfg,
+         _lookbehind
+       ) do
     driver = %{
       line: line,
       column: column,
@@ -335,30 +356,59 @@ defmodule Toxic.Driver do
       insert_identifier_sanitization: cfg.insert_identifier_sanitization,
       error_token_payload: cfg.error_token_payload,
       lexer_backend: cfg.lexer_backend,
-      deferrals: [],
-      output: [],
-      recent_token: elem(lookbehind, 0)
+      deferrals: deferrals,
+      output: output,
+      recent_token: recent_token
     }
 
-    case collect_until_no_deferrals(rest, driver, []) do
-      {:ok, [token], rest, driver} ->
-        lookbehind = Toxic.Util.lookbehind_from_token(token)
+    case next(rest, driver) do
+      {:ok, token, rest, driver} ->
+        if driver.deferrals == [] and driver.output == [] do
+          lookbehind = Toxic.Util.lookbehind_from_token(token)
+          hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
 
-        {:ok, token, rest, driver.line, driver.column, {driver.scope, driver.contexts},
-         lookbehind}
-
-      {:ok, tokens, rest, driver} ->
-        last = List.last(tokens)
-        lookbehind = Toxic.Util.lookbehind_from_token(last)
-
-        {:ok_many, tokens, rest, driver.line, driver.column, {driver.scope, driver.contexts},
-         lookbehind}
+          {:ok, token, rest, driver.line, driver.column, hot, lookbehind}
+        else
+          collect_until_no_deferrals(rest, driver, [token])
+        end
 
       {:eof, driver} ->
-        {:eof, {driver.scope, driver.contexts}}
+        {:eof, {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}}
 
       {:error, reason, rest, driver} ->
-        {:error, reason, rest, driver.line, driver.column, {driver.scope, driver.contexts}}
+        hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
+
+        {:error, reason, rest, driver.line, driver.column, hot}
+    end
+  end
+
+  defp collect_until_no_deferrals(rest, driver, acc) do
+    case next(rest, driver) do
+      {:ok, token, rest, driver} ->
+        acc = [token | acc]
+
+        if driver.deferrals == [] and driver.output == [] do
+          tokens = Enum.reverse(acc)
+          lookbehind = Toxic.Util.lookbehind_from_token(token)
+          hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
+
+          {:ok_many, tokens, rest, driver.line, driver.column, hot, lookbehind}
+        else
+          collect_until_no_deferrals(rest, driver, acc)
+        end
+
+      {:eof, driver} ->
+        tokens = Enum.reverse(acc)
+        last = List.last(tokens)
+        lookbehind = Toxic.Util.lookbehind_from_token(last)
+        hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
+
+        {:ok_many, tokens, rest, driver.line, driver.column, hot, lookbehind}
+
+      {:error, reason, rest, driver} ->
+        hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
+
+        {:error, reason, rest, driver.line, driver.column, hot}
     end
   end
 
@@ -1711,29 +1761,6 @@ defmodule Toxic.Driver do
 
   defp return_token(token, rest, state) do
     {:ok, token, rest, %{state | recent_token: token}}
-  end
-
-  defp collect_until_no_deferrals(rest, driver, acc) do
-    case next(rest, driver) do
-      {:ok, token, rest, driver} ->
-        acc = [token | acc]
-
-        if driver.deferrals == [] and driver.output == [] do
-          {:ok, Enum.reverse(acc), rest, driver}
-        else
-          collect_until_no_deferrals(rest, driver, acc)
-        end
-
-      {:eof, driver} ->
-        if acc == [] do
-          {:eof, driver}
-        else
-          {:ok, Enum.reverse(acc), rest, driver}
-        end
-
-      {:error, reason, rest, driver} ->
-        {:error, reason, rest, driver}
-    end
   end
 
   defp lookbehind_from_deferrals([token | _], _recent_token) do
