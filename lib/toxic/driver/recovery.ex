@@ -244,19 +244,6 @@ defmodule Toxic.Driver.Recovery do
         }
 
         {:ok, token, new_rest, new_driver}
-
-      {:ok_many, [], _new_rest, new_state} ->
-        new_driver = %{
-          state
-          | line: new_state.line,
-            column: new_state.column,
-            scope: new_state.scope,
-            contexts: new_state.contexts,
-            deferrals: new_state.deferrals,
-            output: []
-        }
-
-        {:eof, new_driver}
     end
   end
 

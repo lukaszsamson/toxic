@@ -141,6 +141,25 @@ defmodule Toxic.Driver do
           scope: Toxic.Scope.scope()
         }
 
+  @type state_map :: %{
+          line: pos_integer(),
+          column: pos_integer(),
+          contexts: [context()],
+          error_mode: :tolerant | :strict,
+          error_sync: [:semicolon | :newline | :closer | :comma | :comment | :whitespace],
+          error_max_skip: non_neg_integer(),
+          insert_structural_closers: boolean(),
+          insert_identifier_sanitization: boolean(),
+          error_token_payload: :struct | :tuple | :both,
+          lexer_backend: :charlist | :binary,
+          deferrals: [token()],
+          output: [token()],
+          recent_token: token() | nil,
+          scope: Toxic.Scope.scope()
+        }
+
+  @type driver_state :: t() | state_map()
+
   @type cfg :: %{
           error_mode: :tolerant | :strict,
           error_sync: [:semicolon | :newline | :closer | :comma | :comment | :whitespace],
@@ -314,13 +333,6 @@ defmodule Toxic.Driver do
       {nil, rest, line, column, scope} ->
         step_fast(rest, line, column, scope, contexts, cfg, lookbehind)
 
-      {{:token, token, lookbehind}, rest, line, column, scope} ->
-        if fast_token?(token) do
-          {:ok, token, rest, line, column, scope, contexts, lookbehind}
-        else
-          :fallback
-        end
-
       {{:token, token}, rest, line, column, scope} ->
         if fast_token?(token) do
           lookbehind = Toxic.Util.lookbehind_from_token(token)
@@ -432,10 +444,10 @@ defmodule Toxic.Driver do
   - `{:error, reason, rest, new_state}` - Error in strict mode
 
   """
-  @spec next(input(), t()) ::
-          {:ok, token(), input(), t()}
-          | {:eof, t()}
-          | {:error, error_reason(), input(), t()}
+  @spec next(input(), driver_state()) ::
+          {:ok, token(), input(), driver_state()}
+          | {:eof, driver_state()}
+          | {:error, error_reason(), input(), driver_state()}
   def next(rest, %{output: [h | t]} = state) do
     return_token(h, rest, %{state | output: t})
   end
@@ -1772,13 +1784,8 @@ defmodule Toxic.Driver do
   end
 
   defp emit_error_and_advance_hot(reason, rest, state) do
-    case Recovery.emit_error_and_advance_many(reason, rest, state) do
-      {:ok_many, [token | rest_tokens], new_rest, new_state} ->
+    {:ok_many, [token | rest_tokens], new_rest, new_state} = Recovery.emit_error_and_advance_many(reason, rest, state)
         {:ok, token, new_rest, %{new_state | output: rest_tokens, recent_token: token}}
-
-      {:ok_many, [], _new_rest, new_state} ->
-        {:eof, %{new_state | output: []}}
-    end
   end
 
   defp emit_pending_error(
