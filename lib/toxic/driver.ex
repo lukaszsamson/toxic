@@ -288,17 +288,16 @@ defmodule Toxic.Driver do
   end
 
   @spec step(input(), pos_integer(), pos_integer(), driver_hot(), cfg(), lookbehind()) ::
-          {:ok, token(), input(), pos_integer(), pos_integer(), driver_hot(), lookbehind()}
-          | {:ok_many, [token()], input(), pos_integer(), pos_integer(), driver_hot(), lookbehind()}
+          {:ok, token(), input(), pos_integer(), pos_integer(), driver_hot()}
+          | {:ok_many, [token()], input(), pos_integer(), pos_integer(), driver_hot()}
           | {:eof, driver_hot()}
           | {:error, error_reason(), input(), pos_integer(), pos_integer(), driver_hot()}
   def step(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind) do
     case {deferrals, output} do
       {[], []} ->
         case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
-          {:ok, token, rest, line, column, scope, contexts, lookbehind} ->
-            {:ok, token, rest, line, column, {scope, contexts, deferrals, output, token},
-             lookbehind}
+          {:ok, token, rest, line, column, scope, contexts} ->
+            {:ok, token, rest, line, column, {scope, contexts, deferrals, output, token}}
 
           :fallback ->
             step_slow(
@@ -335,8 +334,7 @@ defmodule Toxic.Driver do
 
       {{:token, token}, rest, line, column, scope} ->
         if fast_token?(token) do
-          lookbehind = Toxic.Util.lookbehind_from_token(token)
-          {:ok, token, rest, line, column, scope, contexts, lookbehind}
+          {:ok, token, rest, line, column, scope, contexts}
         else
           :fallback
         end
@@ -376,10 +374,9 @@ defmodule Toxic.Driver do
     case next(rest, driver) do
       {:ok, token, rest, driver} ->
         if driver.deferrals == [] and driver.output == [] do
-          lookbehind = Toxic.Util.lookbehind_from_token(token)
           hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
 
-          {:ok, token, rest, driver.line, driver.column, hot, lookbehind}
+          {:ok, token, rest, driver.line, driver.column, hot}
         else
           collect_until_no_deferrals(rest, driver, [token])
         end
@@ -401,21 +398,18 @@ defmodule Toxic.Driver do
 
         if driver.deferrals == [] and driver.output == [] do
           tokens = Enum.reverse(acc)
-          lookbehind = Toxic.Util.lookbehind_from_token(token)
           hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
 
-          {:ok_many, tokens, rest, driver.line, driver.column, hot, lookbehind}
+          {:ok_many, tokens, rest, driver.line, driver.column, hot}
         else
           collect_until_no_deferrals(rest, driver, acc)
         end
 
       {:eof, driver} ->
         tokens = Enum.reverse(acc)
-        last = List.last(tokens)
-        lookbehind = Toxic.Util.lookbehind_from_token(last)
         hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
 
-        {:ok_many, tokens, rest, driver.line, driver.column, hot, lookbehind}
+        {:ok_many, tokens, rest, driver.line, driver.column, hot}
 
       {:error, reason, rest, driver} ->
         hot = {driver.scope, driver.contexts, driver.deferrals, driver.output, driver.recent_token}
@@ -1775,13 +1769,19 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
-  defp lookbehind_from_deferrals([token | _], _recent_token) do
-    Toxic.Util.lookbehind_from_token(token)
+  defp lookbehind_from_deferrals([token | _], _recent_token), do: lookbehind_from_token(token)
+  defp lookbehind_from_deferrals([], recent_token), do: lookbehind_from_token(recent_token)
+
+  defp lookbehind_from_token(nil), do: {nil, false, 0}
+
+  defp lookbehind_from_token({kind, {_, _, count}, _} = token)
+       when kind in [:eol, :";", :","] and is_integer(count) and count > 0 do
+    {token, true, count}
   end
 
-  defp lookbehind_from_deferrals([], recent_token) do
-    Toxic.Util.lookbehind_from_token(recent_token)
-  end
+  defp lookbehind_from_token(token), do: {token, false, 0}
+
+  @compile {:inline, lookbehind_from_token: 1}
 
   defp emit_error_and_advance_hot(reason, rest, state) do
     {:ok_many, [token | rest_tokens], new_rest, new_state} = Recovery.emit_error_and_advance_many(reason, rest, state)
