@@ -293,6 +293,14 @@ defmodule Toxic.Driver do
           | {:eof, driver_hot()}
           | {:error, error_reason(), input(), pos_integer(), pos_integer(), driver_hot()}
   def step(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind) do
+    # Optional tracing for re-lex analysis (enabled via Process.put(:toxic_trace_lexing, true))
+    if Process.get(:toxic_trace_lexing, false) do
+      rest_size = if is_binary(rest), do: byte_size(rest), else: length(rest)
+      key = {__MODULE__, :step_calls}
+      calls = Process.get(key, %{})
+      Process.put(key, Map.update(calls, {line, column, rest_size}, 1, &(&1 + 1)))
+    end
+
     case {deferrals, output} do
       {[], []} ->
         case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
@@ -627,6 +635,14 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %{contexts: [:normal | _], lexer_backend: :charlist} = state) do
+    # Optional tracing for re-lex analysis (enabled via Process.put(:toxic_trace_lexing, true))
+    if Process.get(:toxic_trace_lexing, false) do
+      rest_size = length(string)
+      key = {__MODULE__, :step_calls}
+      calls = Process.get(key, %{})
+      Process.put(key, Map.update(calls, {state.line, state.column, rest_size}, 1, &(&1 + 1)))
+    end
+
     lookbehind = lookbehind_from_deferrals(state.deferrals, state.recent_token)
 
     result =
@@ -655,6 +671,14 @@ defmodule Toxic.Driver do
   end
 
   def next(string, %{contexts: [:normal | _], lexer_backend: :binary} = state) do
+    # Optional tracing for re-lex analysis (enabled via Process.put(:toxic_trace_lexing, true))
+    if Process.get(:toxic_trace_lexing, false) do
+      rest_size = byte_size(string)
+      key = {__MODULE__, :step_calls}
+      calls = Process.get(key, %{})
+      Process.put(key, Map.update(calls, {state.line, state.column, rest_size}, 1, &(&1 + 1)))
+    end
+
     lookbehind = lookbehind_from_deferrals(state.deferrals, state.recent_token)
 
     result =
