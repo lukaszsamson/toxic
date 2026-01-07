@@ -368,12 +368,24 @@ defmodule Toxic.NormalTokenizer do
   end
 
   def next([t | rest], line, column, scope, lookbehind) when t in [?(, ?{, ?[] do
-    token = token(List.to_atom([t]), meta(line, column, 1, nil), nil)
+    token =
+      case t do
+        ?( -> token(:"(", meta(line, column, 1, nil), nil)
+        ?{ -> token(:"{", meta(line, column, 1, nil), nil)
+        ?[ -> token(:"[", meta(line, column, 1, nil), nil)
+      end
+
     Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
   def next([t | rest], line, column, scope, lookbehind) when t in [?), ?}, ?]] do
-    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+    token =
+      case t do
+        ?) -> token(:")", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+        ?} -> token(:"}", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+        ?] -> token(:"]", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+      end
+
     Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
@@ -968,7 +980,11 @@ defmodule Toxic.NormalTokenizer do
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest = [not_marker | t]
-    dual_op_token = {:dual_op, meta(line, column, 1, nil), List.to_atom([sign])}
+    dual_op_atom = case sign do
+      ?+ -> :+
+      _ -> :-
+    end
+    dual_op_token = {:dual_op, meta(line, column, 1, nil), dual_op_atom}
     emit_op_identifier(dual_op_token, rest, line, column + 1, scope)
   end
 

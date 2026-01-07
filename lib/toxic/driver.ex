@@ -1740,7 +1740,7 @@ defmodule Toxic.Driver do
             end
 
           # Add delimiter terminator
-          delimiter_terminator = [{List.to_atom(List.wrap(delim)), nil, 0}]
+          delimiter_terminator = [{delimiter_atom(delim), nil, 0}]
 
           parent_terms ++ delimiter_terminator
 
@@ -1751,6 +1751,19 @@ defmodule Toxic.Driver do
 
     current_terms ++ context_terms
   end
+
+  defp delimiter_atom([single]) when is_integer(single), do: delimiter_atom(single)
+  defp delimiter_atom([?", ?", ?"]), do: :"\"\"\""
+  defp delimiter_atom([?', ?', ?']), do: :"'''"
+  defp delimiter_atom(?"), do: :"\""
+  defp delimiter_atom(?'), do: :"'"
+  defp delimiter_atom(?/), do: :"/"
+  defp delimiter_atom(?|), do: :"|"
+  defp delimiter_atom(?)), do: :")"
+  defp delimiter_atom(?]), do: :"]"
+  defp delimiter_atom(?}), do: :"}"
+  defp delimiter_atom(?>), do: :">"
+  defp delimiter_atom(_), do: :unknown_delimiter
 
   @doc """
   Get the expected closing delimiter for an opening delimiter.

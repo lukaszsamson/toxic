@@ -192,13 +192,64 @@ defmodule Toxic.BinaryNormalTokenizer do
     end
   end
 
+  defp op_atom3(?+, ?+, ?+), do: :"+++"
+  defp op_atom3(?-, ?-, ?-), do: :"---"
+  defp op_atom3(?<, ?<, ?<), do: :"<<<"
+  defp op_atom3(?>, ?>, ?>), do: :">>>"
+  defp op_atom3(?~, ?>, ?>), do: :"~>>"
+  defp op_atom3(?<, ?<, ?~), do: :"<<~"
+  defp op_atom3(?<, ?~, ?>), do: :"<~>"
+  defp op_atom3(?<, ?|, ?>), do: :"<|>"
+  defp op_atom3(?&, ?&, ?&), do: :"&&&"
+  defp op_atom3(?|, ?|, ?|), do: :"|||"
+  defp op_atom3(?=, ?=, ?=), do: :"==="
+  defp op_atom3(?!, ?=, ?=), do: :"!=="
+  defp op_atom3(?., ?., ?.), do: :"..."
+  defp op_atom3(?~, ?~, ?~), do: :"~~~"
+  defp op_atom3(?^, ?^, ?^), do: :"^^^"
+
+  defp op_atom2(?., ?.), do: :".."
+  defp op_atom2(?+, ?+), do: :"++"
+  defp op_atom2(?-, ?-), do: :"--"
+  defp op_atom2(?<, ?>), do: :"<>"
+  defp op_atom2(?*, ?*), do: :"**"
+  defp op_atom2(?|, ?>), do: :"|>"
+  defp op_atom2(?~, ?>), do: :"~>"
+  defp op_atom2(?<, ?~), do: :"<~"
+  defp op_atom2(?<, ?=), do: :"<="
+  defp op_atom2(?>, ?=), do: :">="
+  defp op_atom2(?=, ?=), do: :"=="
+  defp op_atom2(?=, ?~), do: :"=~"
+  defp op_atom2(?!, ?=), do: :"!="
+  defp op_atom2(?/, ?/), do: :"//"
+  defp op_atom2(?&, ?&), do: :"&&"
+  defp op_atom2(?|, ?|), do: :"||"
+  defp op_atom2(?<, ?-), do: :"<-"
+  defp op_atom2(?\\, ?\\), do: :"\\\\"
+  defp op_atom2(?-, ?>), do: :"->"
+  defp op_atom2(?:, ?:), do: :"::"
+
+  defp op_atom1(?@), do: :@
+  defp op_atom1(?&), do: :&
+  defp op_atom1(?!), do: :!
+  defp op_atom1(?^), do: :^
+  defp op_atom1(?+), do: :+
+  defp op_atom1(?-), do: :-
+  defp op_atom1(?*), do: :*
+  defp op_atom1(?/), do: :/
+  defp op_atom1(?<), do: :<
+  defp op_atom1(?>), do: :>
+  defp op_atom1(?=), do: :"="
+  defp op_atom1(?|), do: :|
+  defp op_atom1(?.), do: :"."
+
   # Three Token Operators
   def next(<<?:, t1, t2, t3, rest::binary>>, line, column, scope, _lookbehind)
       when unary_op3(t1, t2, t3) or comp_op3(t1, t2, t3) or and_op3(t1, t2, t3) or
              or_op3(t1, t2, t3) or
              arrow_op3(t1, t2, t3) or xor_op3(t1, t2, t3) or concat_op3(t1, t2, t3) or
              ellipsis_op3(t1, t2, t3) do
-    token = atom(meta(line, column, 4, nil), List.to_atom([t1, t2, t3]))
+    token = atom(meta(line, column, 4, nil), op_atom3(t1, t2, t3))
     emit(token, rest, line, column + 4, scope)
   end
 
@@ -215,7 +266,7 @@ defmodule Toxic.BinaryNormalTokenizer do
       when comp_op2(t1, t2) or rel_op2(t1, t2) or and_op(t1, t2) or or_op(t1, t2) or
              arrow_op(t1, t2) or in_match_op(t1, t2) or concat_op(t1, t2) or power_op(t1, t2) or
              stab_op(t1, t2) or range_op(t1, t2) do
-    token = atom(meta(line, column, 3, nil), List.to_atom([t1, t2]))
+    token = atom(meta(line, column, 3, nil), op_atom2(t1, t2))
     emit(token, rest, line, column + 3, scope)
   end
 
@@ -223,7 +274,7 @@ defmodule Toxic.BinaryNormalTokenizer do
   def next(<<?:, t, rest::binary>>, line, column, scope, _lookbehind)
       when at_op(t) or unary_op(t) or capture_op(t) or dual_op(t) or mult_op(t) or
              rel_op(t) or match_op(t) or pipe_op(t) or t == ?. do
-    token = atom(meta(line, column, 2, nil), List.to_atom([t]))
+    token = atom(meta(line, column, 2, nil), op_atom1(t))
     emit(token, rest, line, column + 2, scope)
   end
 
@@ -274,7 +325,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         column,
         unquote(token_name),
         3,
-        List.to_atom([t1, t2, t3]),
+        op_atom3(t1, t2, t3),
         new_scope,
         lookbehind
       )
@@ -310,18 +361,30 @@ defmodule Toxic.BinaryNormalTokenizer do
   end
 
   def next(<<t, rest::binary>>, line, column, scope, lookbehind) when t in [?(, ?{, ?[] do
-    token = token(List.to_atom([t]), meta(line, column, 1, nil), nil)
+    token =
+      case t do
+        ?( -> token(:"(", meta(line, column, 1, nil), nil)
+        ?{ -> token(:"{", meta(line, column, 1, nil), nil)
+        ?[ -> token(:"[", meta(line, column, 1, nil), nil)
+      end
+
     Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
   def next(<<t, rest::binary>>, line, column, scope, lookbehind) when t in [?), ?}, ?]] do
-    token = token(List.to_atom([t]), meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+    token =
+      case t do
+        ?) -> token(:")", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+        ?} -> token(:"}", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+        ?] -> token(:"]", meta(line, column, 1, previous_was_eol(lookbehind)), nil)
+      end
+
     Terminator.handle_terminator(rest, line, column + 1, scope, token, lookbehind)
   end
 
   # Two Token Operators
   def next(<<t1, t2, rest::binary>>, line, column, scope, lookbehind) when ternary_op(t1, t2) do
-    op = List.to_atom([t1, t2])
+    op = op_atom2(t1, t2)
     token = {:ternary_op, meta(line, column, 2, previous_was_eol(lookbehind)), op}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
@@ -339,7 +402,7 @@ defmodule Toxic.BinaryNormalTokenizer do
         column,
         unquote(token_name),
         2,
-        List.to_atom([t1, t2]),
+        op_atom2(t1, t2),
         scope,
         lookbehind
       )
@@ -380,7 +443,7 @@ defmodule Toxic.BinaryNormalTokenizer do
       end
 
     def next(<<t, rest::binary>>, line, column, scope, lookbehind) when unquote(token)(t) do
-      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, lookbehind)
+      unquote(call)(rest, line, column, unquote(token), 1, op_atom1(t), scope, lookbehind)
     end
   end
 
@@ -877,6 +940,9 @@ defmodule Toxic.BinaryNormalTokenizer do
     {{:increase_eol_by, count}, rest, line, column, scope}
   end
 
+  defp dual_op_atom(?+), do: :+
+  defp dual_op_atom(?-), do: :-
+
   # Ambiguous unary/binary operators tokens
   defp handle_space_sensitive_tokens(
          <<sign, ?:, space, _::binary>> = string,
@@ -899,7 +965,7 @@ defmodule Toxic.BinaryNormalTokenizer do
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest2 = <<not_marker, rest::binary>>
-    dual_op_token = {:dual_op, meta(line, column, 1, nil), List.to_atom([sign])}
+    dual_op_token = {:dual_op, meta(line, column, 1, nil), dual_op_atom(sign)}
     emit_op_identifier(dual_op_token, rest2, line, column + 1, scope)
   end
 

@@ -101,7 +101,7 @@ defmodule Toxic.NormalTokenizer.Dot do
         column,
         length,
         unencoded_op,
-        List.to_atom(unencoded_op),
+        op_atom_from_unencoded(unencoded_op),
         rest
       )
 
@@ -115,4 +115,50 @@ defmodule Toxic.NormalTokenizer.Dot do
       scope
     )
   end
+
+  defp op_atom_from_unencoded([?@]), do: :@
+  defp op_atom_from_unencoded([?!]), do: :!
+  defp op_atom_from_unencoded([?^]), do: :^
+  defp op_atom_from_unencoded([?&]), do: :&
+  defp op_atom_from_unencoded([?+]), do: :+
+  defp op_atom_from_unencoded([?-]), do: :-
+  defp op_atom_from_unencoded([?*]), do: :*
+  defp op_atom_from_unencoded([?/]), do: :/
+  defp op_atom_from_unencoded([?<]), do: :<
+  defp op_atom_from_unencoded([?>]), do: :>
+  defp op_atom_from_unencoded([?=]), do: :=
+  defp op_atom_from_unencoded([?|]), do: :|
+
+  defp op_atom_from_unencoded(~c"=="), do: :==
+  defp op_atom_from_unencoded(~c"=~"), do: :=~
+  defp op_atom_from_unencoded(~c"!="), do: :!=
+  defp op_atom_from_unencoded(~c"<="), do: :<=
+  defp op_atom_from_unencoded(~c">="), do: :>=
+  defp op_atom_from_unencoded(~c"&&"), do: :&&
+  defp op_atom_from_unencoded(~c"||"), do: :||
+  defp op_atom_from_unencoded(~c"|>"), do: :|>
+  defp op_atom_from_unencoded(~c"~>"), do: :~>
+  defp op_atom_from_unencoded(~c"<~"), do: :<~
+  defp op_atom_from_unencoded(~c"<-"), do: :<-
+  defp op_atom_from_unencoded(~c"\\\\"), do: :"\\\\"
+  defp op_atom_from_unencoded(~c"++"), do: :++
+  defp op_atom_from_unencoded(~c"--"), do: :--
+  defp op_atom_from_unencoded(~c"<>"), do: :<>
+  defp op_atom_from_unencoded(~c"**"), do: :**
+  defp op_atom_from_unencoded(~c"::"), do: :"::"
+
+  defp op_atom_from_unencoded(~c"+++"), do: :+++
+  defp op_atom_from_unencoded(~c"---"), do: :---
+  defp op_atom_from_unencoded(~c"<<<"), do: :<<<
+  defp op_atom_from_unencoded(~c">>>"), do: :>>>
+  defp op_atom_from_unencoded(~c"~>>"), do: :~>>
+  defp op_atom_from_unencoded(~c"<<~"), do: :<<~
+  defp op_atom_from_unencoded(~c"<~>"), do: :<~>
+  defp op_atom_from_unencoded(~c"<|>"), do: :<|>
+  defp op_atom_from_unencoded(~c"==="), do: :===
+  defp op_atom_from_unencoded(~c"!=="), do: :!==
+  defp op_atom_from_unencoded(~c"&&&"), do: :&&&
+  defp op_atom_from_unencoded(~c"|||"), do: :|||
+  defp op_atom_from_unencoded(~c"~~~"), do: :~~~
+  defp op_atom_from_unencoded(~c"^^^"), do: :^^^
 end

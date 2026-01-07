@@ -350,10 +350,29 @@ defmodule Toxic.Driver.Contexts do
   defp delimiter_charlist(delim) when is_integer(delim), do: [delim]
   defp delimiter_charlist(delim) when is_list(delim), do: delim
 
-  defp delimiter_atom(chars) do
-    chars
-    |> List.flatten()
-    |> List.to_atom()
+  defp delimiter_atom([?", ?", ?"]) do
+    :"\"\"\""
+  end
+
+  defp delimiter_atom([?', ?', ?']) do
+    :"'''"
+  end
+
+  defp delimiter_atom([delim]) when is_integer(delim) do
+    case delim do
+      ?" -> :"\""
+      ?' -> :"'"
+      ?/ -> :"/"
+      ?| -> :"|"
+      ?( -> :"("
+      ?) -> :")"
+      ?[ -> :"["
+      ?] -> :"]"
+      ?{ -> :"{"
+      ?} -> :"}"
+      ?< -> :"<"
+      ?> -> :">"
+    end
   end
 
   defp delimiter_length(delim) do
