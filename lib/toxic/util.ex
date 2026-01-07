@@ -4,6 +4,13 @@ defmodule Toxic.Util do
   import Toxic.Scope
 
   # Charlist variant
+  def strip_horizontal_space([h1, h2, h3, h4 | t], counter) when is_horizontal_space(h1) and is_horizontal_space(h2) and is_horizontal_space(h3) and is_horizontal_space(h4) do
+    strip_horizontal_space(t, counter + 4)
+  end
+
+  def strip_horizontal_space([h1, h2 | t], counter) when is_horizontal_space(h1) and is_horizontal_space(h2) do
+    strip_horizontal_space(t, counter + 2)
+  end
   def strip_horizontal_space([h | t], counter) when is_horizontal_space(h) do
     strip_horizontal_space(t, counter + 1)
   end
@@ -29,32 +36,46 @@ defmodule Toxic.Util do
 
   def strip_horizontal_space_bin(t, counter) when is_binary(t), do: {t, counter}
 
-  def no_token(rest, line, column, scope) do
-    {nil, rest, line, column, scope}
+  defmacro no_token(rest, line, column, scope) do
+    quote do
+    {nil, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def reset_eol(rest, line, column, scope) do
-    {:reset_eol, rest, line, column, scope}
+  defmacro reset_eol(rest, line, column, scope) do
+    quote do
+    {:reset_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def increase_eol(rest, line, column, scope) do
-    {:increase_eol, rest, line, column, scope}
+  defmacro increase_eol(rest, line, column, scope) do
+    quote do
+    {:increase_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def emit(token, rest, line, column, scope) do
-    {{:token, token}, rest, line, column, scope}
+  defmacro emit(token, rest, line, column, scope) do
+    quote do
+    {{:token, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def emit_with_eol(token, rest, line, column, scope) do
-    {{:token_with_eol, token}, rest, line, column, scope}
+  defmacro emit_with_eol(token, rest, line, column, scope) do
+    quote do
+    {{:token_with_eol, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def emit_op_identifier(token, rest, line, column, scope) do
-    {{:dual_op_identifier, token}, rest, line, column, scope}
+  defmacro emit_op_identifier(token, rest, line, column, scope) do
+    quote do
+    {{:dual_op_identifier, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
-  def multiple(events = [_ | _], rest, line, column, scope) do
-    {events, rest, line, column, scope}
+  defmacro multiple(events, rest, line, column, scope) do
+    quote do
+    {unquote(events), unquote(rest), unquote(line), unquote(column), unquote(scope)}
+    end
   end
 
   @type lookbehind :: {Toxic.token() | nil, boolean(), non_neg_integer()}
