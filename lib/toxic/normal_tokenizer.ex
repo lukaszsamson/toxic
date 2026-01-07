@@ -196,14 +196,15 @@ defmodule Toxic.NormalTokenizer do
     end
   end
 
-  # Three Token Operators
-  def next([?:, t1, t2, t3 | rest], line, column, scope, _lookbehind)
-      when unary_op3(t1, t2, t3) or comp_op3(t1, t2, t3) or and_op3(t1, t2, t3) or
-             or_op3(t1, t2, t3) or
-             arrow_op3(t1, t2, t3) or xor_op3(t1, t2, t3) or concat_op3(t1, t2, t3) or
-             ellipsis_op3(t1, t2, t3) do
-    token = atom(meta(line, column, 4, nil), List.to_atom([t1, t2, t3]))
-    emit(token, rest, line, column + 4, scope)
+  # Three Token Operator Atoms
+  for chars <- ~w(+++ --- <<< >>> ~>> <<~ <~> <|> === !== &&& ||| ... ~~~ ^^^)c do
+    atom = List.to_atom(chars)
+    length = length(chars) + 1
+
+    def next([?:, unquote_splicing(chars) | rest], line, column, scope, _lookbehind) do
+      token = atom(meta(line, column, unquote(length), nil), unquote(atom))
+      emit(token, rest, line, column + unquote(length), scope)
+    end
   end
 
   # Two Token Operators
@@ -215,20 +216,56 @@ defmodule Toxic.NormalTokenizer do
     emit(token, rest, line, column + 3, new_scope)
   end
 
-  def next([?:, t1, t2 | rest], line, column, scope, _lookbehind)
-      when comp_op2(t1, t2) or rel_op2(t1, t2) or and_op(t1, t2) or or_op(t1, t2) or
-             arrow_op(t1, t2) or in_match_op(t1, t2) or concat_op(t1, t2) or power_op(t1, t2) or
-             stab_op(t1, t2) or range_op(t1, t2) do
-    token = atom(meta(line, column, 3, nil), List.to_atom([t1, t2]))
-    emit(token, rest, line, column + 3, scope)
+  for chars <-
+        [
+          ~c"==",
+          ~c"=~",
+          ~c"!=",
+          ~c"<=",
+          ~c">=",
+          ~c"&&",
+          ~c"||",
+          ~c"|>",
+          ~c"~>",
+          ~c"<~",
+          ~c"<-",
+          ~c"++",
+          ~c"--",
+          ~c"<>",
+          ~c"**",
+          ~c"->",
+          ~c"..",
+          ~c"\\\\"
+        ] do
+    op = List.to_atom(chars)
+    length = length(chars) + 1
+
+    def next([?:, unquote_splicing(chars) | rest], line, column, scope, _lookbehind) do
+      token = atom(meta(line, column, unquote(length), nil), unquote(op))
+      emit(token, rest, line, column + unquote(length), scope)
+    end
   end
 
-  # Single Token Operators
-  def next([?:, t | rest], line, column, scope, _lookbehind)
-      when at_op(t) or unary_op(t) or capture_op(t) or dual_op(t) or mult_op(t) or
-             rel_op(t) or match_op(t) or pipe_op(t) or t == ?. do
-    token = atom(meta(line, column, 2, nil), List.to_atom([t]))
-    emit(token, rest, line, column + 2, scope)
+  # Single Token Operator Atoms
+  for {char, op} <- [
+        {?@, :@},
+        {?!, :!},
+        {?^, :^},
+        {?&, :&},
+        {?+, :+},
+        {?-, :-},
+        {?*, :*},
+        {?/, :/},
+        {?<, :<},
+        {?>, :>},
+        {?=, :=},
+        {?|, :|},
+        {?., :.}
+      ] do
+    def next([?:, unquote(char) | rest], line, column, scope, _lookbehind) do
+      token = atom(meta(line, column, 2, nil), unquote(op))
+      emit(token, rest, line, column + 2, scope)
+    end
   end
 
   # Stand-alone tokens
@@ -252,33 +289,53 @@ defmodule Toxic.NormalTokenizer do
   end
 
   # Three token operators
-  @three_token_ops ~w(unary_op3 ellipsis_op3 comp_op3 and_op3 or_op3 xor_op3 concat_op3 arrow_op3)a
-  @unary_three_token_ops ~w(unary_op3 ellipsis_op3)a
+  for chars <- ~w(~~~)c do
+    op = List.to_atom(chars)
 
-  for token <- @three_token_ops do
-    token_name = token |> to_string() |> String.replace_suffix("3", "") |> String.to_atom()
+    def next([unquote_splicing(chars) | rest], line, column, scope, lookbehind) do
+      new_scope =
+        maybe_warn_too_many_of_same_char(unquote(chars), rest, line, column, scope)
 
-    call =
-      if token in @unary_three_token_ops do
-        :handle_unary_op
-      else
-        :handle_op
+      handle_unary_op(rest, line, column, :unary_op, 3, unquote(op), new_scope, lookbehind)
+    end
+  end
+
+  for chars <- ~w(...)c do
+    op = List.to_atom(chars)
+
+    def next([unquote_splicing(chars) | rest], line, column, scope, lookbehind) do
+      new_scope =
+        maybe_warn_too_many_of_same_char(unquote(chars), rest, line, column, scope)
+
+      handle_unary_op(rest, line, column, :ellipsis_op, 3, unquote(op), new_scope, lookbehind)
+    end
+  end
+
+  for chars <- ~w(+++ --- <<< >>> ~>> <<~ <~> <|> === !== &&& ||| ^^^)c do
+    op = List.to_atom(chars)
+
+    kind =
+      case chars do
+        ~c"+++" -> :concat_op
+        ~c"---" -> :concat_op
+        ~c"<<<" -> :arrow_op
+        ~c">>>" -> :arrow_op
+        ~c"~>>" -> :arrow_op
+        ~c"<<~" -> :arrow_op
+        ~c"<~>" -> :arrow_op
+        ~c"<|>" -> :arrow_op
+        ~c"===" -> :comp_op
+        ~c"!==" -> :comp_op
+        ~c"&&&" -> :and_op
+        ~c"|||" -> :or_op
+        ~c"^^^" -> :xor_op
       end
 
-    def next([t1, t2, t3 | rest], line, column, scope, lookbehind)
-        when unquote(token)(t1, t2, t3) do
-      new_scope = maybe_warn_too_many_of_same_char([t1, t2, t3], rest, line, column, scope)
+    def next([unquote_splicing(chars) | rest], line, column, scope, lookbehind) do
+      new_scope =
+        maybe_warn_too_many_of_same_char(unquote(chars), rest, line, column, scope)
 
-      unquote(call)(
-        rest,
-        line,
-        column,
-        unquote(token_name),
-        3,
-        List.to_atom([t1, t2, t3]),
-        new_scope,
-        lookbehind
-      )
+      handle_op(rest, line, column, unquote(kind), 3, unquote(op), new_scope, lookbehind)
     end
   end
 
@@ -322,28 +379,36 @@ defmodule Toxic.NormalTokenizer do
 
   # Two Token Operators
   def next([t1, t2 | rest], line, column, scope, lookbehind) when ternary_op(t1, t2) do
-    op = List.to_atom([t1, t2])
+    op = :"//"
     token = {:ternary_op, meta(line, column, 2, previous_was_eol(lookbehind)), op}
     emit_with_eol(token, rest, line, column + 2, scope)
   end
 
-  @two_token_ops ~w(power_op range_op concat_op arrow_op comp_op2 rel_op2 and_op or_op in_match_op type_op stab_op)a
+  for {chars, kind} <- [
+        {~c"**", :power_op},
+        {~c"..", :range_op},
+        {~c"++", :concat_op},
+        {~c"--", :concat_op},
+        {~c"<>", :concat_op},
+        {~c"|>", :arrow_op},
+        {~c"~>", :arrow_op},
+        {~c"<~", :arrow_op},
+        {~c"==", :comp_op},
+        {~c"=~", :comp_op},
+        {~c"!=", :comp_op},
+        {~c"<=", :rel_op},
+        {~c">=", :rel_op},
+        {~c"&&", :and_op},
+        {~c"||", :or_op},
+        {~c"<-", :in_match_op},
+        {~c"\\\\", :in_match_op},
+        {~c"::", :type_op},
+        {~c"->", :stab_op}
+      ] do
+    op = List.to_atom(chars)
 
-  for token <- @two_token_ops do
-    token_name = token |> to_string() |> String.replace_suffix("2", "") |> String.to_atom()
-
-    def next([t1, t2 | rest], line, column, scope, lookbehind)
-        when unquote(token)(t1, t2) do
-      handle_op(
-        rest,
-        line,
-        column,
-        unquote(token_name),
-        2,
-        List.to_atom([t1, t2]),
-        scope,
-        lookbehind
-      )
+    def next([unquote_splicing(chars) | rest], line, column, scope, lookbehind) do
+      handle_op(rest, line, column, unquote(kind), 2, unquote(op), scope, lookbehind)
     end
   end
 
@@ -369,19 +434,29 @@ defmodule Toxic.NormalTokenizer do
     emit(token, rest, line, column + 1, scope)
   end
 
-  @single_token_ops ~w(at_op unary_op rel_op dual_op mult_op match_op pipe_op)a
   @unary_single_token_ops ~w(at_op unary_op dual_op)a
 
-  for token <- @single_token_ops do
-    call =
-      if token in @unary_single_token_ops do
-        :handle_unary_op
-      else
-        :handle_op
+  for {char, kind, op} <- [
+        {?@, :at_op, :@},
+        {?!, :unary_op, :!},
+        {?^, :unary_op, :^},
+        {?+, :dual_op, :+},
+        {?-, :dual_op, :-},
+        {?<, :rel_op, :<},
+        {?>, :rel_op, :>},
+        {?*, :mult_op, :*},
+        {?/, :mult_op, :/},
+        {?=, :match_op, :=},
+        {?|, :pipe_op, :|}
+      ] do
+    if kind in @unary_single_token_ops do
+      def next([unquote(char) | rest], line, column, scope, lookbehind) do
+        handle_unary_op(rest, line, column, unquote(kind), 1, unquote(op), scope, lookbehind)
       end
-
-    def next([t | rest], line, column, scope, lookbehind) when unquote(token)(t) do
-      unquote(call)(rest, line, column, unquote(token), 1, List.to_atom([t]), scope, lookbehind)
+    else
+      def next([unquote(char) | rest], line, column, scope, lookbehind) do
+        handle_op(rest, line, column, unquote(kind), 1, unquote(op), scope, lookbehind)
+      end
     end
   end
 
