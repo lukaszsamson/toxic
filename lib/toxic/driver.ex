@@ -310,19 +310,25 @@ defmodule Toxic.Driver do
       {[], []} ->
         case step_fast(rest, line, column, scope, contexts, cfg, lookbehind) do
           {:ok, token, rest, line, column, scope, contexts} ->
-            {:ok, token, rest, line, column, {scope, contexts, deferrals, output, token}}
+            {:ok, token, rest, line, column, {scope, contexts, [], [], token}}
 
           :fallback ->
             step_slow(
               rest,
               line,
               column,
-              {scope, contexts, deferrals, output, recent_token},
+              {scope, contexts, [], [], recent_token},
               cfg,
               lookbehind
             )
         end
 
+      # A2 optimization: Pop from output directly without calling step_slow/next_hot
+      # This avoids the overhead of building hot record just to pop one token
+      {[], [h | t]} ->
+        {:ok, h, rest, line, column, {scope, contexts, [], t, h}}
+
+      # Deferrals need processing - must go through slow path
       _ ->
         step_slow(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind)
     end
