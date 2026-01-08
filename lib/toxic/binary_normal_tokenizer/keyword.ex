@@ -1,7 +1,7 @@
 defmodule Toxic.BinaryNormalTokenizer.Keyword do
   @moduledoc false
   import Toxic.Token
-  import Toxic.Util
+  import Toxic.Util, only: [strip_horizontal_space_bin: 2, emit: 5, emit_with_eol: 5, multiple: 5]
   alias Toxic.BinaryNormalTokenizer.Terminator
 
   def tokenize_keyword(:terminator, rest, line, column, atom, length, scope, lookbehind) do
@@ -123,4 +123,12 @@ rescue
     do: false
 
   defp valid_do?(_), do: true
+
+  # Inlined from Toxic.Util for cross-module call elimination
+  defp prev_token({prev, _prev_was_eol, _prev_eol_count}), do: prev
+
+  defp previous_was_eol({_prev, true, count}) when is_integer(count) and count > 0, do: count
+  defp previous_was_eol(_), do: nil
+
+  @compile {:inline, prev_token: 1, previous_was_eol: 1}
 end

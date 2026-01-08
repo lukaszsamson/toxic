@@ -5,6 +5,8 @@ defmodule Toxic.Driver.Deferrals do
   # list operations when one of the inputs is empty.
   # Use :lists.reverse/1,2 instead of Enum.reverse/1,2 in hot paths.
 
+  @compile {:inline, flush: 2, append: 3}
+
   @spec flush(list(), list()) :: list()
   # When output is empty, just reverse deferrals - no concatenation needed
   def flush([], deferrals), do: :lists.reverse(deferrals)

@@ -39,7 +39,6 @@ defmodule Toxic.Driver do
   import Toxic.CharacterClassifier
 
   alias Toxic.Driver.Contexts
-  alias Toxic.Driver.Deferrals
   alias Toxic.Driver.Recovery
   alias Toxic.Driver.Synthesis
 
@@ -471,6 +470,8 @@ defmodule Toxic.Driver do
   defp fast_token?({kind, _meta, _}) when kind in [:identifier, :eol, :";", :","], do: false
   defp fast_token?({:quoted_identifier_end, _meta, _}), do: false
   defp fast_token?(_token), do: true
+
+  @compile {:inline, fast_token?: 1}
 
   # ============================================================================
   # Hot tuple based tokenization (avoids map allocations in slow path)
@@ -1180,6 +1181,8 @@ defmodule Toxic.Driver do
     {:ok, token, rest, hot(state, recent_token: token)}
   end
 
+  @compile {:inline, return_token_hot: 3}
+
   # ============================================================================
   # handle_tokenize_result_hot - hot record version of handle_tokenize_result
   # ============================================================================
@@ -1235,7 +1238,7 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta, _extra} = token, _lookbehind}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1246,7 +1249,7 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1265,7 +1268,7 @@ defmodule Toxic.Driver do
             _ ->
               {[], deferrals}
           end
-        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+        new_output = append_deferrals(output, deferrals_result, output_tokens)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1275,7 +1278,7 @@ defmodule Toxic.Driver do
         )}
 
       {{:token, {:identifier, _, _} = token, _lookbehind}, rest, line, column, scope} ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1285,7 +1288,7 @@ defmodule Toxic.Driver do
         )}
 
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1295,7 +1298,7 @@ defmodule Toxic.Driver do
         )}
 
       {{:token, token, _lookbehind}, rest, line, column, scope} ->
-        new_output = Deferrals.append(output, deferrals, [token])
+        new_output = append_deferrals(output, deferrals, [token])
         {rest, hot(state,
           line: line,
           column: column,
@@ -1305,7 +1308,7 @@ defmodule Toxic.Driver do
         )}
 
       {{:token, token}, rest, line, column, scope} ->
-        new_output = Deferrals.append(output, deferrals, [token])
+        new_output = append_deferrals(output, deferrals, [token])
         {rest, hot(state,
           line: line,
           column: column,
@@ -1324,7 +1327,7 @@ defmodule Toxic.Driver do
             _ ->
               {[token], deferrals}
           end
-        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+        new_output = append_deferrals(output, deferrals_result, output_tokens)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1355,7 +1358,7 @@ defmodule Toxic.Driver do
             {left, [{:eol, _, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
-        new_output = Deferrals.flush(output, carry_with_recent)
+        new_output = flush_deferrals(output, carry_with_recent)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1370,7 +1373,7 @@ defmodule Toxic.Driver do
             {left, [{:eol, _, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
-        new_output = Deferrals.flush(output, carry_with_recent)
+        new_output = flush_deferrals(output, carry_with_recent)
         {rest, hot(state,
           line: line,
           column: column,
@@ -1386,7 +1389,7 @@ defmodule Toxic.Driver do
           {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info, [], false}
           | contexts
         ]
-        new_output = Deferrals.append(output, deferrals, [start_token])
+        new_output = append_deferrals(output, deferrals, [start_token])
         {rest, hot(state,
           line: line,
           column: column,
@@ -2543,7 +2546,7 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta, _extra} = token, _lookbehind}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
 
         {rest,
          %{
@@ -2557,7 +2560,7 @@ defmodule Toxic.Driver do
 
       {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
 
         {rest,
          %{
@@ -2586,7 +2589,7 @@ defmodule Toxic.Driver do
               {[], deferrals}
           end
 
-        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+        new_output = append_deferrals(output, deferrals_result, output_tokens)
 
         {rest,
          %{
@@ -2599,7 +2602,7 @@ defmodule Toxic.Driver do
          }}
 
       {{:token, {:identifier, _, _} = token, _lookbehind}, rest, line, column, scope} ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
 
         {rest,
          %{
@@ -2612,7 +2615,7 @@ defmodule Toxic.Driver do
          }}
 
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
-        new_output = Deferrals.flush(output, deferrals)
+        new_output = flush_deferrals(output, deferrals)
 
         {rest,
          %{
@@ -2625,7 +2628,7 @@ defmodule Toxic.Driver do
          }}
 
       {{:token, token, _lookbehind}, rest, line, column, scope} ->
-        new_output = Deferrals.append(output, deferrals, [token])
+        new_output = append_deferrals(output, deferrals, [token])
 
         {rest,
          %{
@@ -2638,7 +2641,7 @@ defmodule Toxic.Driver do
          }}
 
       {{:token, token}, rest, line, column, scope} ->
-        new_output = Deferrals.append(output, deferrals, [token])
+        new_output = append_deferrals(output, deferrals, [token])
 
         {rest,
          %{
@@ -2667,7 +2670,7 @@ defmodule Toxic.Driver do
               {[token], deferrals}
           end
 
-        new_output = Deferrals.append(output, deferrals_result, output_tokens)
+        new_output = append_deferrals(output, deferrals_result, output_tokens)
 
         {rest,
          %{
@@ -2707,7 +2710,7 @@ defmodule Toxic.Driver do
             {left, tokens} -> [left | tokens]
           end
 
-        new_output = Deferrals.flush(output, carry_with_recent)
+        new_output = flush_deferrals(output, carry_with_recent)
 
         {rest,
          %{
@@ -2726,7 +2729,7 @@ defmodule Toxic.Driver do
             {left, tokens} -> [left | tokens]
           end
 
-        new_output = Deferrals.flush(output, carry_with_recent)
+        new_output = flush_deferrals(output, carry_with_recent)
 
         {rest,
          %{
@@ -2749,7 +2752,7 @@ defmodule Toxic.Driver do
             | contexts
           ]
 
-        new_output = Deferrals.append(output, deferrals, [start_token])
+        new_output = append_deferrals(output, deferrals, [start_token])
 
         {rest,
          %{
@@ -2910,8 +2913,12 @@ defmodule Toxic.Driver do
     {:ok, token, rest, %{state | recent_token: token}}
   end
 
+  @compile {:inline, return_token: 3}
+
   defp lookbehind_from_deferrals([token | _], _recent_token), do: lookbehind_from_token(token)
   defp lookbehind_from_deferrals([], recent_token), do: lookbehind_from_token(recent_token)
+
+  @compile {:inline, lookbehind_from_deferrals: 2}
 
   defp lookbehind_from_token(nil), do: {nil, false, 0}
 
@@ -2923,6 +2930,23 @@ defmodule Toxic.Driver do
   defp lookbehind_from_token(token), do: {token, false, 0}
 
   @compile {:inline, lookbehind_from_token: 1}
+
+  # Inlined from Toxic.Driver.Deferrals for cross-module call elimination
+  # When output is empty, just reverse deferrals - no concatenation needed
+  defp flush_deferrals([], deferrals), do: :lists.reverse(deferrals)
+  # When deferrals is empty, just return output - no reverse needed
+  defp flush_deferrals(output, []), do: output
+  # General case: concatenate output with reversed deferrals
+  defp flush_deferrals(output, deferrals), do: output ++ :lists.reverse(deferrals)
+
+  # When output is empty, reverse deferrals onto tokens directly
+  defp append_deferrals([], deferrals, tokens), do: :lists.reverse(deferrals, tokens)
+  # When deferrals is empty, just concatenate output with tokens
+  defp append_deferrals(output, [], tokens), do: output ++ tokens
+  # General case: concatenate output with reversed deferrals and tokens
+  defp append_deferrals(output, deferrals, tokens), do: output ++ :lists.reverse(deferrals, tokens)
+
+  @compile {:inline, flush_deferrals: 2, append_deferrals: 3}
 
   defp emit_error_and_advance_hot(reason, rest, state) do
     {:ok_many, [token | rest_tokens], new_rest, new_state} = Recovery.emit_error_and_advance_many(reason, rest, state)

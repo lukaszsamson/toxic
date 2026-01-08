@@ -59,6 +59,8 @@ defmodule Toxic.Scope do
   def track_ascii(true, scope), do: scope
   def track_ascii(false, scope), do: scope(scope, ascii_identifiers_only: false)
 
+  @compile {:inline, track_ascii: 2, prepend_warning: 2}
+
   @doc """
   Prepends a structured warning to the scope's warning list.
 

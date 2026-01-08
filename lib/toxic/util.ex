@@ -89,6 +89,8 @@ defmodule Toxic.Util do
 
   def lookbehind_from_token(token), do: {token, false, 0}
 
+  @compile {:inline, lookbehind_from_token: 1, prev_token: 1, previous_was_eol: 1, previous_was_dot?: 1}
+
   def prev_token({prev, _prev_was_eol, _prev_eol_count}), do: prev
 
   def previous_was_eol({_prev, true, count}) when is_integer(count) and count > 0, do: count

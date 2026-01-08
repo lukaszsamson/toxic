@@ -10,8 +10,8 @@ defmodule Toxic.BinaryNormalTokenizer do
   import Toxic.CharacterClassifier
   import Toxic.Token
   import Toxic.BinaryNormalTokenizer.Operator
-  import Toxic.Util
-  import Toxic.Scope
+  import Toxic.Util, only: [strip_horizontal_space_bin: 2, no_token: 4, reset_eol: 4, emit: 5, emit_with_eol: 5, emit_op_identifier: 5]
+  import Toxic.Scope, except: [track_ascii: 2]
 
   # VC merge conflict
   def next(<<?<, ?<, ?<, ?<, ?<, ?<, ?<, _::binary>> = original, line, 1, _scope, _lookbehind) do
@@ -1013,4 +1013,19 @@ defmodule Toxic.BinaryNormalTokenizer do
         scope
       ),
       do: scope
+
+  # Inlined from Toxic.Util for cross-module call elimination
+  def prev_token({prev, _prev_was_eol, _prev_eol_count}), do: prev
+
+  def previous_was_eol({_prev, true, count}) when is_integer(count) and count > 0, do: count
+  def previous_was_eol(_), do: nil
+
+  def previous_was_dot?({{:., _, _}, _, _}), do: true
+  def previous_was_dot?(_), do: false
+
+  # Inlined from Toxic.Scope for cross-module call elimination
+  defp track_ascii(true, scope), do: scope
+  defp track_ascii(false, scope), do: scope(scope, ascii_identifiers_only: false)
+
+  @compile {:inline, prev_token: 1, previous_was_eol: 1, previous_was_dot?: 1, track_ascii: 2}
 end

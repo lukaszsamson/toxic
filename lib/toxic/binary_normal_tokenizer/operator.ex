@@ -2,7 +2,7 @@ defmodule Toxic.BinaryNormalTokenizer.Operator do
   @moduledoc false
   import Toxic.CharacterClassifier, only: [is_space: 1]
   import Toxic.Token, only: [meta: 4]
-  import Toxic.Util
+  import Toxic.Util, only: [emit: 5, emit_with_eol: 5, strip_horizontal_space_bin: 2]
   require Toxic.Scope
 
   # Guards are shared with charlist version - they work on codepoints (integers)
@@ -169,4 +169,10 @@ defmodule Toxic.BinaryNormalTokenizer.Operator do
         emit_with_eol(token, remaining, line, column + length + extra, new_scope)
     end
   end
+
+  # Inlined from Toxic.Util for cross-module call elimination
+  defp previous_was_eol({_prev, true, count}) when is_integer(count) and count > 0, do: count
+  defp previous_was_eol(_), do: nil
+
+  @compile {:inline, previous_was_eol: 1}
 end
