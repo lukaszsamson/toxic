@@ -74,8 +74,10 @@ defmodule Toxic.ErrorCodeTest do
     assert_error_code("Foo()", :alias_unexpected_paren)
   end
 
-  # Note: alias_invalid_character is tested in integration tests but requires specific
-  # invalid Unicode patterns that are detected during alias parsing
+  test "alias with non-ASCII character emits alias_invalid_character" do
+    # Aliases only allow ASCII characters, ö is invalid
+    assert_error_code("Foöbar", :alias_invalid_character)
+  end
 
   # -- Heredoc errors ---------------------------------------------------------
 
@@ -92,8 +94,20 @@ defmodule Toxic.ErrorCodeTest do
 
   # -- Sigil errors -----------------------------------------------------------
 
-  # Note: sigil_invalid_name and sigil_invalid_delimiter are emitted during sigil parsing
-  # but require specific edge cases that are tested in integration tests
+  test "sigil with invalid lowercase name emits sigil_invalid_name" do
+    # Lowercase sigil names must be single character, ~ab is invalid
+    assert_error_code("~ab()", :sigil_invalid_name)
+  end
+
+  test "sigil with mixed case name emits sigil_invalid_name" do
+    # Uppercase sigil followed by lowercase is invalid
+    assert_error_code("~Ab()", :sigil_invalid_name)
+  end
+
+  test "sigil with invalid delimiter emits sigil_invalid_delimiter" do
+    # $ is not a valid sigil delimiter
+    assert_error_code("~s$foo$", :sigil_invalid_delimiter)
+  end
 
   # -- Identifier errors ------------------------------------------------------
 
@@ -102,11 +116,15 @@ defmodule Toxic.ErrorCodeTest do
     assert_error_code("foo\u{0410}bar", :identifier_mixed_script)
   end
 
-  # Note: identifier_invalid_char is typically caught as :unexpected_token during tokenization
-  # before identifier validation can occur
+  test "identifier with @ character emits identifier_invalid_char" do
+    # @ is not allowed in the middle of identifiers
+    assert_error_code("foo@bar", :identifier_invalid_char)
+  end
 
-  # Note: identifier_nonexistent_atom_when_existing_only requires runtime atom table checks
-  # and is tested in integration tests with proper atom table setup
+  test "nonexistent atom with existing_atoms_only emits identifier_nonexistent_atom_when_existing_only" do
+    # Using existing_atoms_only: true with a non-existent atom
+    assert_error_code(":this_atom_definitely_does_not_exist_xyz123", :identifier_nonexistent_atom_when_existing_only, existing_atoms_only: true)
+  end
 
   # -- Comment errors ---------------------------------------------------------
 
@@ -130,8 +148,10 @@ defmodule Toxic.ErrorCodeTest do
 
   # -- Interpolation errors ---------------------------------------------------
 
-  # Note: interpolation_not_allowed_in_quoted_identifier is tested in integration tests
-  # as it requires specific parsing context to be triggered
+  test "interpolation in quoted identifier emits interpolation_not_allowed_in_quoted_identifier" do
+    # Interpolation is not allowed in quoted call identifiers like Foo."bar#{baz}"
+    assert_error_code(~S(Foo."bar#{baz}"), :interpolation_not_allowed_in_quoted_identifier)
+  end
 
   # -- Helper functions -------------------------------------------------------
 

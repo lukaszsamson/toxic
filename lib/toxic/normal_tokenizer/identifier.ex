@@ -36,19 +36,22 @@ defmodule Toxic.NormalTokenizer.Identifier do
         # Check if a confusable/simpler form exists to determine position
         wrong_column = column + length(wrong) - 1
 
-        has_suggestion? =
+        {has_suggestion?, suggestion_message} =
           case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
-            {:error, %Toxic.Error{}} -> true
-            :no_suggestion -> false
+            {:error, %Toxic.Error{token_display: message}} -> {true, message}
+            :no_suggestion -> {false, nil}
           end
 
         # Use END position if suggestion exists, START otherwise (matching Elixir)
         error_column = if has_suggestion?, do: wrong_column, else: column
 
-        # Always preserve :identifier_mixed_script code, even with suggestion
         message_suffix =
-          suffix ++
-            ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+          if has_suggestion? do
+            trim_trailing_newlines(suffix) ++ ~c"\n" ++ suggestion_message
+          else
+            suffix ++
+              ~c"\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+          end
 
         err = %Toxic.Error{
           code: :identifier_mixed_script,
@@ -140,6 +143,13 @@ defmodule Toxic.NormalTokenizer.Identifier do
 
   defp keyword_or_unsafe_to_atom(_, part, line, column, scope) do
     unsafe_to_atom(part, line, column, scope)
+  end
+
+  defp trim_trailing_newlines(list) do
+    list
+    |> Enum.reverse()
+    |> Enum.drop_while(&(&1 == ?\n))
+    |> Enum.reverse()
   end
 
   defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, _scope) do

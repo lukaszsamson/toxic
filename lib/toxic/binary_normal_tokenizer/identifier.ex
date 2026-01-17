@@ -47,17 +47,20 @@ defmodule Toxic.BinaryNormalTokenizer.Identifier do
         wrong_charlist = String.to_charlist(wrong)
         wrong_column = column + String.length(wrong) - 1
 
-        has_suggestion? =
+        {has_suggestion?, suggestion_message} =
           case suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, scope) do
-            {:error, %Toxic.Error{}} -> true
-            :no_suggestion -> false
+            {:error, %Toxic.Error{token_display: message}} -> {true, message}
+            :no_suggestion -> {false, nil}
           end
 
         error_column = if has_suggestion?, do: wrong_column, else: column
 
         message_suffix =
-          suffix <>
-            "\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+          if has_suggestion? do
+            String.trim_trailing(suffix, "\n") <> "\n" <> IO.iodata_to_binary(suggestion_message)
+          else
+            suffix <> "\nSee https://hexdocs.pm/elixir/unicode-syntax.html for more information."
+          end
 
         err = %Toxic.Error{
           code: :identifier_mixed_script,
@@ -159,7 +162,8 @@ defmodule Toxic.BinaryNormalTokenizer.Identifier do
     unsafe_to_atom(String.to_charlist(part), line, column, scope)
   end
 
-  defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, _scope) when is_binary(wrong) do
+  defp suggest_simpler_unexpected_token_in_error(wrong, line, wrong_column, _scope)
+       when is_binary(wrong) do
     wrong_charlist = String.to_charlist(wrong)
     nfkc = :unicode.characters_to_nfkc_list(wrong_charlist)
 
@@ -170,6 +174,7 @@ defmodule Toxic.BinaryNormalTokenizer.Identifier do
         case Toxic.String.Tokenizer.tokenize(IO.iodata_to_binary(confusable)) do
           {_, simpler, _, _, _, _} ->
             simpler_charlist = String.to_charlist(simpler)
+
             message =
               suggest_change(
                 ~c"Codepoint failed identifier tokenization, but a simpler form was found.",
@@ -193,6 +198,7 @@ defmodule Toxic.BinaryNormalTokenizer.Identifier do
 
       {_, nfkc_str, _, _, _, _} ->
         nfkc_chars = String.to_charlist(nfkc_str)
+
         message =
           suggest_change(
             ~c"Elixir expects unquoted Unicode atoms, variables, and calls to use allowed codepoints and to be in NFC form.",

@@ -147,6 +147,90 @@ defmodule Toxic.ErrorDetailsTest do
       # Alias errors have position details
       assert is_map(d)
     end
+
+    test "sigil_invalid_name includes position details" do
+      # Lowercase sigil names must be single character
+      tokens = tokenize_tolerant("~ab()")
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :sigil_invalid_name, details: d}} =
+               error_token
+
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+    end
+
+    test "sigil_invalid_delimiter includes position details" do
+      # $ is not a valid sigil delimiter
+      tokens = tokenize_tolerant("~s$foo$")
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :sigil_invalid_delimiter, details: d}} =
+               error_token
+
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+    end
+
+    test "alias_invalid_character includes message details" do
+      # Aliases only allow ASCII characters
+      tokens = tokenize_tolerant("Foöbar")
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :alias_invalid_character, details: d}} =
+               error_token
+
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+      assert is_list(d[:message_iolist])
+      msg_str = IO.iodata_to_binary(d[:message_iolist])
+      assert msg_str =~ "invalid character"
+    end
+
+    test "identifier_invalid_char includes message details" do
+      # @ is not allowed in the middle of identifiers
+      tokens = tokenize_tolerant("foo@bar")
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :identifier_invalid_char, details: d}} =
+               error_token
+
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+      assert is_list(d[:msg_iolist])
+      msg_str = IO.iodata_to_binary(d[:msg_iolist])
+      assert msg_str =~ "invalid character"
+    end
+
+    test "identifier_nonexistent_atom_when_existing_only includes position details" do
+      # Using existing_atoms_only: true with a non-existent atom
+      tokens = tokenize_tolerant(":this_atom_definitely_does_not_exist_xyz123", existing_atoms_only: true)
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :identifier_nonexistent_atom_when_existing_only, details: d}} =
+               error_token
+
+      assert is_integer(d[:line])
+      assert is_integer(d[:column])
+    end
+
+    test "interpolation_not_allowed_in_quoted_identifier includes position details" do
+      # Interpolation is not allowed in quoted call identifiers
+      tokens = tokenize_tolerant(~S(Foo."bar#{baz}"))
+
+      error_token = find_error_token(tokens)
+
+      assert {:error_token, _meta, %Error{code: :interpolation_not_allowed_in_quoted_identifier, details: d}} =
+               error_token
+
+      assert is_integer(d[:start_line])
+      assert is_integer(d[:start_column])
+    end
   end
 
   # -- Position Field Verification --------------------------------------------
