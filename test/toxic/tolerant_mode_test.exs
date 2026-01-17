@@ -1031,6 +1031,179 @@ defmodule Toxic.TolerantModeTest do
     end
   end
 
+  # ============================================================================
+  # Error Code Recovery Tests (all 6 previously missing error codes)
+  # ============================================================================
+
+  describe "sigil_invalid_name recovery" do
+    test "lowercase multi-char sigil name recovers and continues" do
+      tokens = tokenize_tolerant("~ab() + 1")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      # Verify forward progress
+      assert_forward_progress(tokens)
+    end
+
+    test "mixed case sigil name recovers and continues" do
+      tokens = tokenize_tolerant("~Ab/foo/ + world")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :identifier in types
+
+      valid = valid_tokens(tokens)
+      assert Enum.any?(valid, fn t -> match?({:identifier, _, :world}, t) end)
+    end
+  end
+
+  describe "sigil_invalid_delimiter recovery" do
+    test "invalid delimiter $ recovers and continues" do
+      tokens = tokenize_tolerant("~s$foo$ + 1")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      assert_forward_progress(tokens)
+    end
+
+    test "invalid delimiter ! recovers and continues" do
+      tokens = tokenize_tolerant("~s!foo! + bar")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :identifier in types
+
+      valid = valid_tokens(tokens)
+      assert Enum.any?(valid, fn t -> match?({:identifier, _, :bar}, t) end)
+    end
+  end
+
+  describe "alias_invalid_character recovery" do
+    test "non-ASCII character in alias recovers and continues" do
+      tokens = tokenize_tolerant("Foöbar + 1")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      assert_forward_progress(tokens)
+    end
+
+    test "cyrillic character in alias recovers and continues" do
+      tokens = tokenize_tolerant("Fooбar + Bar")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :alias in types
+
+      valid = valid_tokens(tokens)
+      assert Enum.any?(valid, fn t -> match?({:alias, _, :Bar}, t) end)
+    end
+  end
+
+  describe "identifier_invalid_char recovery" do
+    test "@ in middle of identifier recovers and continues" do
+      tokens = tokenize_tolerant("foo@bar + 1")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      # Verify sanitized identifier was inserted and lexer continued
+      assert :identifier in types
+
+      # Verify the tokens after the error have correct positions
+      # The "+" should be at column 9, "1" at column 11
+      dual_op_token = Enum.find(tokens, fn t -> match?({:dual_op, _, _}, t) end)
+      assert {:dual_op, {{1, 9}, {1, 10}, _}, :+} = dual_op_token
+
+      int_token = Enum.find(tokens, fn t -> match?({:int, _, _}, t) end)
+      assert {:int, {{1, 11}, {1, 12}, _}, ~c"1"} = int_token
+    end
+
+    test "@ in identifier with following expression" do
+      tokens = tokenize_tolerant("test@email, other")
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :"," in types
+      assert :identifier in types
+
+      # Verify "other" is at correct position (column 13)
+      other_token = Enum.find(tokens, fn t -> match?({:identifier, _, :other}, t) end)
+      assert {:identifier, {{1, 13}, {1, 18}, _}, :other} = other_token
+    end
+  end
+
+  describe "identifier_nonexistent_atom_when_existing_only recovery" do
+    test "nonexistent atom recovers and continues" do
+      tokens = tokenize_tolerant(":nonexistent_atom_xyz123 + 1", existing_atoms_only: true)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      # Verify tokens after error have correct positions
+      # ":nonexistent_atom_xyz123" is 24 chars, so "+" at 26, "1" at 28
+      dual_op_token = Enum.find(tokens, fn t -> match?({:dual_op, _, _}, t) end)
+      assert {:dual_op, {{1, 26}, {1, 27}, _}, :+} = dual_op_token
+
+      int_token = Enum.find(tokens, fn t -> match?({:int, _, _}, t) end)
+      assert {:int, {{1, 28}, {1, 29}, _}, ~c"1"} = int_token
+    end
+
+    test "nonexistent atom in keyword position recovers" do
+      tokens = tokenize_tolerant("[nonexistent_kw_xyz123: 1, foo: 2]", existing_atoms_only: true)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      # Should continue and find the list brackets
+      assert :"[" in types
+      assert :"]" in types
+
+      # Verify the closing bracket is at the correct position (column 34)
+      close_bracket = Enum.find(tokens, fn t -> match?({:"]", _, _}, t) end)
+      assert {:"]", {{1, 34}, {1, 35}, _}, _} = close_bracket
+    end
+  end
+
+  describe "interpolation_not_allowed_in_quoted_identifier recovery" do
+    test "interpolation in quoted call identifier recovers and continues" do
+      tokens = tokenize_tolerant(~S|Foo."bar#{baz}"() + 1|)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :dual_op in types
+      assert :int in types
+
+      assert_forward_progress(tokens)
+    end
+
+    test "interpolation in quoted identifier with continuation" do
+      tokens = tokenize_tolerant(~S|Mod."func#{x}"(arg) ; other|)
+
+      types = token_types(tokens)
+      assert :error_token in types
+      assert :";" in types
+      assert :identifier in types
+
+      valid = valid_tokens(tokens)
+      assert Enum.any?(valid, fn t -> match?({:identifier, _, :other}, t) end)
+    end
+  end
+
   describe "Sigil errors" do
     test "invalid uppercase sigil name" do
       tokens = tokenize_tolerant("~Ab/foo/ + world")
