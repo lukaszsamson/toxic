@@ -123,7 +123,9 @@ defmodule Toxic.ErrorCodeTest do
 
   test "nonexistent atom with existing_atoms_only emits identifier_nonexistent_atom_when_existing_only" do
     # Using existing_atoms_only: true with a non-existent atom
-    assert_error_code(":this_atom_definitely_does_not_exist_xyz123", :identifier_nonexistent_atom_when_existing_only, existing_atoms_only: true)
+    assert_error_code(
+      ":this_atom_definitely_does_not_exist_xyz123",
+      :identifier_nonexistent_atom_when_existing_only, existing_atoms_only: true)
   end
 
   # -- Comment errors ---------------------------------------------------------
@@ -151,6 +153,12 @@ defmodule Toxic.ErrorCodeTest do
   test "interpolation in quoted identifier emits interpolation_not_allowed_in_quoted_identifier" do
     # Interpolation is not allowed in quoted call identifiers like Foo."bar#{baz}"
     assert_error_code(~S(Foo."bar#{baz}"), :interpolation_not_allowed_in_quoted_identifier)
+  end
+
+  # -- Repro cases errors ---------------------------------------------------
+
+  test "missing_scope_hint repro" do
+    assert_error_code(~S(fn x when fn{'% -> 1 end), :string_missing_terminator)
   end
 
   # -- Helper functions -------------------------------------------------------

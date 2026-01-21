@@ -96,7 +96,16 @@ defmodule Toxic.BinaryNormalTokenizer.Dot do
     emit_with_eol(token, rest, line, column, scope)
   end
 
-  defp handle_call_identifier(rest, line, column, dot_info, length, unencoded_op, scope, _lookbehind) do
+  defp handle_call_identifier(
+         rest,
+         line,
+         column,
+         dot_info,
+         length,
+         unencoded_op,
+         scope,
+         _lookbehind
+       ) do
     op_token =
       Identifier.check_call_identifier(
         line,
@@ -156,11 +165,11 @@ defmodule Toxic.BinaryNormalTokenizer.Dot do
   defp op_atom_from_unencoded(~c"~>>"), do: :~>>
   defp op_atom_from_unencoded(~c"<<~"), do: :<<~
   defp op_atom_from_unencoded(~c"<~>"), do: :<~>
-  defp op_atom_from_unencoded(~c"<|>"), do: :<|>
+  defp op_atom_from_unencoded(~c"<|>"), do: :"<|>"
   defp op_atom_from_unencoded(~c"==="), do: :===
   defp op_atom_from_unencoded(~c"!=="), do: :!==
   defp op_atom_from_unencoded(~c"&&&"), do: :&&&
   defp op_atom_from_unencoded(~c"|||"), do: :|||
-  defp op_atom_from_unencoded(~c"~~~"), do: :~~~
-  defp op_atom_from_unencoded(~c"^^^"), do: :^^^
+  defp op_atom_from_unencoded(~c"~~~"), do: :"~~~"
+  defp op_atom_from_unencoded(~c"^^^"), do: :"^^^"
 end

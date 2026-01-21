@@ -153,8 +153,8 @@ defmodule Toxic.BinaryNormalTokenizer.Sigil do
         start_token =
           token(:sigil_start, meta(line, start_column, line, column + 1, nil), sigil_atom, <<h>>)
 
-        {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, rest, line,
-         column + 1, scope}
+        {{:switch_to_interp, start_token, :sigil, is_downcase(s), sigil_terminator(h)}, rest,
+         line, column + 1, scope}
 
       {:error, err} ->
         {:error, err}
@@ -207,7 +207,8 @@ defmodule Toxic.BinaryNormalTokenizer.Sigil do
 
   def collect_modifiers(string, buffer \\ [])
 
-  def collect_modifiers(<<h, rest::binary>>, buffer) when is_downcase(h) or is_upcase(h) or is_digit(h) do
+  def collect_modifiers(<<h, rest::binary>>, buffer)
+      when is_downcase(h) or is_upcase(h) or is_digit(h) do
     collect_modifiers(rest, [h | buffer])
   end
 

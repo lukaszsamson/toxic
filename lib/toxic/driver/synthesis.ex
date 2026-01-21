@@ -38,7 +38,12 @@ defmodule Toxic.Driver.Synthesis do
     {:closer, [tok], new_scope}
   end
 
-  def synthesize_from_reason(%Error{code: _code, token_display: token_display}, line, column, scope) do
+  def synthesize_from_reason(
+        %Error{code: _code, token_display: token_display},
+        line,
+        column,
+        scope
+      ) do
     flattened_chars = List.flatten(List.wrap(token_display))
 
     case closer_atom_from_chars(flattened_chars) do

@@ -424,8 +424,8 @@ defmodule Toxic.BinaryInterpolationTokenizer do
       ) do
     content = Toxic.Util.characters_to_binary(Enum.reverse(buffer))
 
-    {:fragment, meta(start_line, start_column, line, column, nil), content, rest, line,
-     column, scope}
+    {:fragment, meta(start_line, start_column, line, column, nil), content, rest, line, column,
+     scope}
   end
 
   # Interpolation start with empty buffer
@@ -574,8 +574,7 @@ defmodule Toxic.BinaryInterpolationTokenizer do
         scope = scope(scope, allow_triple_terminator: true)
 
         {:fragment, meta(start_line, start_column, line + 1, column, nil),
-         Toxic.Util.characters_to_binary(Enum.reverse(buffer)), original, line + 1,
-         column, scope}
+         Toxic.Util.characters_to_binary(Enum.reverse(buffer)), original, line + 1, column, scope}
 
       {new_rest, new_buffer, column} ->
         next(

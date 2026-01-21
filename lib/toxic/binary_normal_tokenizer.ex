@@ -10,7 +10,17 @@ defmodule Toxic.BinaryNormalTokenizer do
   import Toxic.CharacterClassifier
   import Toxic.Token
   import Toxic.BinaryNormalTokenizer.Operator
-  import Toxic.Util, only: [strip_horizontal_space_bin: 2, no_token: 4, reset_eol: 4, emit: 5, emit_with_eol: 5, emit_op_identifier: 5]
+
+  import Toxic.Util,
+    only: [
+      strip_horizontal_space_bin: 2,
+      no_token: 4,
+      reset_eol: 4,
+      emit: 5,
+      emit_with_eol: 5,
+      emit_op_identifier: 5
+    ]
+
   import Toxic.Scope, except: [track_ascii: 2]
 
   # VC merge conflict
@@ -192,41 +202,41 @@ defmodule Toxic.BinaryNormalTokenizer do
     end
   end
 
-  defp op_atom3(?+, ?+, ?+), do: :"+++"
-  defp op_atom3(?-, ?-, ?-), do: :"---"
-  defp op_atom3(?<, ?<, ?<), do: :"<<<"
-  defp op_atom3(?>, ?>, ?>), do: :">>>"
-  defp op_atom3(?~, ?>, ?>), do: :"~>>"
-  defp op_atom3(?<, ?<, ?~), do: :"<<~"
-  defp op_atom3(?<, ?~, ?>), do: :"<~>"
+  defp op_atom3(?+, ?+, ?+), do: :+++
+  defp op_atom3(?-, ?-, ?-), do: :---
+  defp op_atom3(?<, ?<, ?<), do: :<<<
+  defp op_atom3(?>, ?>, ?>), do: :>>>
+  defp op_atom3(?~, ?>, ?>), do: :~>>
+  defp op_atom3(?<, ?<, ?~), do: :<<~
+  defp op_atom3(?<, ?~, ?>), do: :<~>
   defp op_atom3(?<, ?|, ?>), do: :"<|>"
-  defp op_atom3(?&, ?&, ?&), do: :"&&&"
-  defp op_atom3(?|, ?|, ?|), do: :"|||"
-  defp op_atom3(?=, ?=, ?=), do: :"==="
-  defp op_atom3(?!, ?=, ?=), do: :"!=="
-  defp op_atom3(?., ?., ?.), do: :"..."
+  defp op_atom3(?&, ?&, ?&), do: :&&&
+  defp op_atom3(?|, ?|, ?|), do: :|||
+  defp op_atom3(?=, ?=, ?=), do: :===
+  defp op_atom3(?!, ?=, ?=), do: :!==
+  defp op_atom3(?., ?., ?.), do: :...
   defp op_atom3(?~, ?~, ?~), do: :"~~~"
   defp op_atom3(?^, ?^, ?^), do: :"^^^"
 
-  defp op_atom2(?., ?.), do: :".."
-  defp op_atom2(?+, ?+), do: :"++"
-  defp op_atom2(?-, ?-), do: :"--"
-  defp op_atom2(?<, ?>), do: :"<>"
-  defp op_atom2(?*, ?*), do: :"**"
-  defp op_atom2(?|, ?>), do: :"|>"
-  defp op_atom2(?~, ?>), do: :"~>"
-  defp op_atom2(?<, ?~), do: :"<~"
-  defp op_atom2(?<, ?=), do: :"<="
-  defp op_atom2(?>, ?=), do: :">="
-  defp op_atom2(?=, ?=), do: :"=="
-  defp op_atom2(?=, ?~), do: :"=~"
-  defp op_atom2(?!, ?=), do: :"!="
+  defp op_atom2(?., ?.), do: :..
+  defp op_atom2(?+, ?+), do: :++
+  defp op_atom2(?-, ?-), do: :--
+  defp op_atom2(?<, ?>), do: :<>
+  defp op_atom2(?*, ?*), do: :**
+  defp op_atom2(?|, ?>), do: :|>
+  defp op_atom2(?~, ?>), do: :~>
+  defp op_atom2(?<, ?~), do: :<~
+  defp op_atom2(?<, ?=), do: :<=
+  defp op_atom2(?>, ?=), do: :>=
+  defp op_atom2(?=, ?=), do: :==
+  defp op_atom2(?=, ?~), do: :=~
+  defp op_atom2(?!, ?=), do: :!=
   defp op_atom2(?/, ?/), do: :"//"
-  defp op_atom2(?&, ?&), do: :"&&"
-  defp op_atom2(?|, ?|), do: :"||"
-  defp op_atom2(?<, ?-), do: :"<-"
+  defp op_atom2(?&, ?&), do: :&&
+  defp op_atom2(?|, ?|), do: :||
+  defp op_atom2(?<, ?-), do: :<-
   defp op_atom2(?\\, ?\\), do: :"\\\\"
-  defp op_atom2(?-, ?>), do: :"->"
+  defp op_atom2(?-, ?>), do: :->
   defp op_atom2(?:, ?:), do: :"::"
 
   defp op_atom1(?@), do: :@
@@ -239,9 +249,9 @@ defmodule Toxic.BinaryNormalTokenizer do
   defp op_atom1(?/), do: :/
   defp op_atom1(?<), do: :<
   defp op_atom1(?>), do: :>
-  defp op_atom1(?=), do: :"="
+  defp op_atom1(?=), do: :=
   defp op_atom1(?|), do: :|
-  defp op_atom1(?.), do: :"."
+  defp op_atom1(?.), do: :.
 
   # Three Token Operators
   def next(<<?:, t1, t2, t3, rest::binary>>, line, column, scope, _lookbehind)
@@ -527,11 +537,13 @@ defmodule Toxic.BinaryNormalTokenizer do
 
         {:error, err}
 
-      {<<i, rest2::binary>>, number, _original, _length} when is_upcase(i) or is_downcase(i) or i == ?_ ->
+      {<<i, rest2::binary>>, number, _original, _length}
+      when is_upcase(i) or is_downcase(i) or i == ?_ ->
         if number == 0 and i in [?x, ?0, ?b] and rest2 == <<>> and cursor_completion != false do
           no_token(<<>>, line, column, scope)
         else
           char_str = to_charlist(<<i::utf8>>)
+
           number_str =
             case number do
               int when is_integer(int) -> Integer.to_charlist(int)
@@ -647,6 +659,7 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   def next(<<?\n, rest::binary>>, line, column, scope, lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+
     tokenize_eol(
       remaining,
       line,
@@ -658,6 +671,7 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   def next(<<?\r, ?\n, rest::binary>>, line, column, scope, lookbehind) do
     {remaining, extra_newlines} = count_newlines_bin(rest, 0)
+
     tokenize_eol(
       remaining,
       line,
@@ -731,7 +745,8 @@ defmodule Toxic.BinaryNormalTokenizer do
         column,
         original_scope = scope(cursor_completion: cursor_completion),
         lookbehind
-      ) when is_binary(string) and byte_size(string) > 0 do
+      )
+      when is_binary(string) and byte_size(string) > 0 do
     case Identifier.tokenize_identifier(
            string,
            line,
@@ -919,7 +934,8 @@ defmodule Toxic.BinaryNormalTokenizer do
     {rest, count}
   end
 
-  defp tokenize_eol(rest, line, scope = scope(column: base_column), eol, extra_newlines) when is_binary(rest) do
+  defp tokenize_eol(rest, line, scope = scope(column: base_column), eol, extra_newlines)
+       when is_binary(rest) do
     {stripped_rest, column} = strip_horizontal_space_bin(rest, base_column)
     indented_scope = scope(scope, indentation: column - 1)
     new_line = line + 1 + extra_newlines
@@ -983,7 +999,14 @@ defmodule Toxic.BinaryNormalTokenizer do
 
   def maybe_warn_too_many_of_same_char(_token, _rest, _line, _column, scope), do: scope
 
-  def maybe_warn_for_ambiguous_bang_before_equals(kind, unencoded, <<?=, _::binary>>, line, column, scope) do
+  def maybe_warn_for_ambiguous_bang_before_equals(
+        kind,
+        unencoded,
+        <<?=, _::binary>>,
+        line,
+        column,
+        scope
+      ) do
     identifier =
       case kind do
         :atom -> [?: | unencoded]

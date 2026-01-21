@@ -2342,5 +2342,36 @@ defmodule Toxic.TolerantModeTest do
       assert is_list(tokens)
       assert length(tokens) > 0
     end
+
+    test "missing_scope_hint repro" do
+      tokens = tokenize_tolerant("fn x when fn{'% -> 1 end")
+
+      # 4 errors: string missing terminator, { missing }, fn missing end (x2)
+      assert length(error_tokens(tokens)) == 4
+
+      # 11 valid: fn, identifier, when_op, fn, {, list_string_start, string_fragment, list_string_end, }, end, end
+      assert length(valid_tokens(tokens)) == 11
+
+      types = token_types(tokens)
+      assert :identifier in types
+      assert :error_token in types
+
+      # Verify that the fn missing end errors have hints
+      fn_errors =
+        error_tokens(tokens)
+        |> Enum.filter(fn {:error_token, _meta, %{code: code}} ->
+          code == :terminator_missing_closer
+        end)
+
+      assert length(fn_errors) >= 2
+
+      # At least one should have a hint about fn not having matching end
+      hints =
+        fn_errors
+        |> Enum.map(fn {:error_token, _meta, %{details: %{hint_iolist: hint}}} -> hint end)
+        |> Enum.reject(&(&1 == []))
+
+      assert length(hints) >= 1
+    end
   end
 end

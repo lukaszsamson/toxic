@@ -4,13 +4,17 @@ defmodule Toxic.Util do
   import Toxic.Scope
 
   # Charlist variant
-  def strip_horizontal_space([h1, h2, h3, h4 | t], counter) when is_horizontal_space(h1) and is_horizontal_space(h2) and is_horizontal_space(h3) and is_horizontal_space(h4) do
+  def strip_horizontal_space([h1, h2, h3, h4 | t], counter)
+      when is_horizontal_space(h1) and is_horizontal_space(h2) and is_horizontal_space(h3) and
+             is_horizontal_space(h4) do
     strip_horizontal_space(t, counter + 4)
   end
 
-  def strip_horizontal_space([h1, h2 | t], counter) when is_horizontal_space(h1) and is_horizontal_space(h2) do
+  def strip_horizontal_space([h1, h2 | t], counter)
+      when is_horizontal_space(h1) and is_horizontal_space(h2) do
     strip_horizontal_space(t, counter + 2)
   end
+
   def strip_horizontal_space([h | t], counter) when is_horizontal_space(h) do
     strip_horizontal_space(t, counter + 1)
   end
@@ -18,11 +22,13 @@ defmodule Toxic.Util do
   def strip_horizontal_space(t, counter), do: {t, counter}
 
   # Binary variant
-  def strip_horizontal_space_bin(<<h, h, h, h, h, h, h, h, t::binary>>, counter) when is_horizontal_space(h) do
+  def strip_horizontal_space_bin(<<h, h, h, h, h, h, h, h, t::binary>>, counter)
+      when is_horizontal_space(h) do
     strip_horizontal_space_bin(t, counter + 8)
   end
 
-  def strip_horizontal_space_bin(<<h, h, h, h, t::binary>>, counter) when is_horizontal_space(h) do
+  def strip_horizontal_space_bin(<<h, h, h, h, t::binary>>, counter)
+      when is_horizontal_space(h) do
     strip_horizontal_space_bin(t, counter + 4)
   end
 
@@ -38,43 +44,45 @@ defmodule Toxic.Util do
 
   defmacro no_token(rest, line, column, scope) do
     quote do
-    {nil, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {nil, unquote(rest), unquote(line), unquote(column), unquote(scope)}
     end
   end
 
   defmacro reset_eol(rest, line, column, scope) do
     quote do
-    {:reset_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {:reset_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
     end
   end
 
   defmacro increase_eol(rest, line, column, scope) do
     quote do
-    {:increase_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {:increase_eol, unquote(rest), unquote(line), unquote(column), unquote(scope)}
     end
   end
 
   defmacro emit(token, rest, line, column, scope) do
     quote do
-    {{:token, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {{:token, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
     end
   end
 
   defmacro emit_with_eol(token, rest, line, column, scope) do
     quote do
-    {{:token_with_eol, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {{:token_with_eol, unquote(token)}, unquote(rest), unquote(line), unquote(column),
+       unquote(scope)}
     end
   end
 
   defmacro emit_op_identifier(token, rest, line, column, scope) do
     quote do
-    {{:dual_op_identifier, unquote(token)}, unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {{:dual_op_identifier, unquote(token)}, unquote(rest), unquote(line), unquote(column),
+       unquote(scope)}
     end
   end
 
   defmacro multiple(events, rest, line, column, scope) do
     quote do
-    {unquote(events), unquote(rest), unquote(line), unquote(column), unquote(scope)}
+      {unquote(events), unquote(rest), unquote(line), unquote(column), unquote(scope)}
     end
   end
 
@@ -89,7 +97,8 @@ defmodule Toxic.Util do
 
   def lookbehind_from_token(token), do: {token, false, 0}
 
-  @compile {:inline, lookbehind_from_token: 1, prev_token: 1, previous_was_eol: 1, previous_was_dot?: 1}
+  @compile {:inline,
+            lookbehind_from_token: 1, prev_token: 1, previous_was_eol: 1, previous_was_dot?: 1}
 
   def prev_token({prev, _prev_was_eol, _prev_eol_count}), do: prev
 

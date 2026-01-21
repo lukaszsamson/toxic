@@ -296,7 +296,14 @@ defmodule Toxic.Driver do
           | {:ok_many, [token()], input(), pos_integer(), pos_integer(), driver_hot()}
           | {:eof, driver_hot()}
           | {:error, error_reason(), input(), pos_integer(), pos_integer(), driver_hot()}
-  def step(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind) do
+  def step(
+        rest,
+        line,
+        column,
+        {scope, contexts, deferrals, output, recent_token},
+        cfg,
+        lookbehind
+      ) do
     # Optional tracing for re-lex analysis (enabled via Process.put(:toxic_trace_lexing, true))
     if Process.get(:toxic_trace_lexing, false) do
       rest_size = if is_binary(rest), do: byte_size(rest), else: length(rest)
@@ -329,7 +336,14 @@ defmodule Toxic.Driver do
 
       # Deferrals need processing - must go through slow path
       _ ->
-        step_slow(rest, line, column, {scope, contexts, deferrals, output, recent_token}, cfg, lookbehind)
+        step_slow(
+          rest,
+          line,
+          column,
+          {scope, contexts, deferrals, output, recent_token},
+          cfg,
+          lookbehind
+        )
     end
   end
 
@@ -373,15 +387,16 @@ defmodule Toxic.Driver do
          _lookbehind
        ) do
     # Build hot record instead of map - avoids per-call allocation of large map
-    state = hot(
-      line: line,
-      column: column,
-      scope: scope,
-      contexts: contexts,
-      deferrals: deferrals,
-      output: output,
-      recent_token: recent_token
-    )
+    state =
+      hot(
+        line: line,
+        column: column,
+        scope: scope,
+        contexts: contexts,
+        deferrals: deferrals,
+        output: output,
+        recent_token: recent_token
+      )
 
     case next_hot(rest, state, cfg) do
       {:ok, token, new_rest, new_state} ->
@@ -400,13 +415,14 @@ defmodule Toxic.Driver do
         end
 
       {:eof, new_state} ->
-        {:eof, {
-          hot(new_state, :scope),
-          hot(new_state, :contexts),
-          hot(new_state, :deferrals),
-          hot(new_state, :output),
-          hot(new_state, :recent_token)
-        }}
+        {:eof,
+         {
+           hot(new_state, :scope),
+           hot(new_state, :contexts),
+           hot(new_state, :deferrals),
+           hot(new_state, :output),
+           hot(new_state, :recent_token)
+         }}
 
       {:error, reason, new_rest, new_state} ->
         driver_hot = {
@@ -429,6 +445,7 @@ defmodule Toxic.Driver do
 
         if hot(new_state, :deferrals) == [] and hot(new_state, :output) == [] do
           tokens = :lists.reverse(acc)
+
           driver_hot = {
             hot(new_state, :scope),
             hot(new_state, :contexts),
@@ -444,6 +461,7 @@ defmodule Toxic.Driver do
 
       {:eof, new_state} ->
         tokens = :lists.reverse(acc)
+
         driver_hot = {
           hot(new_state, :scope),
           hot(new_state, :contexts),
@@ -491,6 +509,7 @@ defmodule Toxic.Driver do
       error when cfg.error_mode == :strict ->
         line = hot(state, :line)
         column = hot(state, :column)
+
         case error do
           {:missing_interpolation, interp_context} ->
             reason = Contexts.missing_interpolation_reason(interp_context, line, column)
@@ -516,7 +535,11 @@ defmodule Toxic.Driver do
   end
 
   # EOF handling - binary backend with empty deferrals
-  defp next_hot(<<>>, hot(deferrals: [], contexts: contexts, scope: scope) = state, %{lexer_backend: :binary} = cfg) do
+  defp next_hot(
+         <<>>,
+         hot(deferrals: [], contexts: contexts, scope: scope) = state,
+         %{lexer_backend: :binary} = cfg
+       ) do
     case Contexts.pending_error(contexts, scope) do
       nil ->
         {:eof, state}
@@ -524,6 +547,7 @@ defmodule Toxic.Driver do
       error when cfg.error_mode == :strict ->
         line = hot(state, :line)
         column = hot(state, :column)
+
         case error do
           {:missing_interpolation, interp_context} ->
             reason = Contexts.missing_interpolation_reason(interp_context, line, column)
@@ -544,7 +568,11 @@ defmodule Toxic.Driver do
   end
 
   # EOF handling - binary backend with non-empty deferrals
-  defp next_hot(<<>>, hot(deferrals: [_ | _] = deferrals) = state, %{lexer_backend: :binary} = cfg) do
+  defp next_hot(
+         <<>>,
+         hot(deferrals: [_ | _] = deferrals) = state,
+         %{lexer_backend: :binary} = cfg
+       ) do
     next_hot(<<>>, hot(state, deferrals: [], output: :lists.reverse(deferrals)), cfg)
   end
 
@@ -554,14 +582,17 @@ defmodule Toxic.Driver do
          hot(
            contexts: [
              :normal,
-             {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info, _fragments, _saw_interp}
+             {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info,
+              _fragments, _saw_interp}
              | _contexts_rest
            ],
            scope: scope(terminators: [{start_token, _meta, _indent} = entry | _])
          ) = state,
          cfg
-       ) when start_token != :"{" do
-    reason = Contexts.mismatched_delimiter_reason(entry, :"}", hot(state, :line), hot(state, :column))
+       )
+       when start_token != :"{" do
+    reason =
+      Contexts.mismatched_delimiter_reason(entry, :"}", hot(state, :line), hot(state, :column))
 
     case cfg.error_mode do
       :strict ->
@@ -581,7 +612,8 @@ defmodule Toxic.Driver do
            column: column,
            contexts: [
              :normal,
-             {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments, saw_interp}
+             {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+              saw_interp}
              | contexts_rest
            ],
            deferrals: deferrals,
@@ -591,15 +623,17 @@ defmodule Toxic.Driver do
        ) do
     token_meta = {{line, column}, {line, column + 1}, nil}
 
-    new_state = hot(state,
-      column: column + 1,
-      contexts: [
-        {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments, saw_interp}
-        | contexts_rest
-      ],
-      output: :lists.reverse([{:end_interpolation, token_meta, kind} | deferrals]),
-      deferrals: []
-    )
+    new_state =
+      hot(state,
+        column: column + 1,
+        contexts: [
+          {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+           saw_interp}
+          | contexts_rest
+        ],
+        output: :lists.reverse([{:end_interpolation, token_meta, kind} | deferrals]),
+        deferrals: []
+      )
 
     next_hot(rest, new_state, cfg)
   end
@@ -610,14 +644,17 @@ defmodule Toxic.Driver do
          hot(
            contexts: [
              :normal,
-             {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info, _fragments, _saw_interp}
+             {:interp, _kind, _interpolation, _delim, _parent_terminators, _start_info,
+              _fragments, _saw_interp}
              | _contexts_rest
            ],
            scope: scope(terminators: [{start_token, _meta, _indent} = entry | _])
          ) = state,
          %{lexer_backend: :binary} = cfg
-       ) when start_token != :"{" do
-    reason = Contexts.mismatched_delimiter_reason(entry, :"}", hot(state, :line), hot(state, :column))
+       )
+       when start_token != :"{" do
+    reason =
+      Contexts.mismatched_delimiter_reason(entry, :"}", hot(state, :line), hot(state, :column))
 
     case cfg.error_mode do
       :strict ->
@@ -637,7 +674,8 @@ defmodule Toxic.Driver do
            column: column,
            contexts: [
              :normal,
-             {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments, saw_interp}
+             {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+              saw_interp}
              | contexts_rest
            ],
            deferrals: deferrals,
@@ -647,15 +685,17 @@ defmodule Toxic.Driver do
        ) do
     token_meta = {{line, column}, {line, column + 1}, nil}
 
-    new_state = hot(state,
-      column: column + 1,
-      contexts: [
-        {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments, saw_interp}
-        | contexts_rest
-      ],
-      output: :lists.reverse([{:end_interpolation, token_meta, kind} | deferrals]),
-      deferrals: []
-    )
+    new_state =
+      hot(state,
+        column: column + 1,
+        contexts: [
+          {:interp, kind, interpolation, delim, parent_terminators, start_info, fragments,
+           saw_interp}
+          | contexts_rest
+        ],
+        output: :lists.reverse([{:end_interpolation, token_meta, kind} | deferrals]),
+        deferrals: []
+      )
 
     next_hot(rest, new_state, cfg)
   end
@@ -724,14 +764,22 @@ defmodule Toxic.Driver do
            column: column,
            scope: scope,
            contexts: [
-             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, fragments, saw_interp}
+             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+              fragments, saw_interp}
              | contexts_rest
            ],
            recent_token: recent_token
          ) = state,
          %{lexer_backend: :charlist} = cfg
        ) do
-    case Toxic.InterpolationTokenizer.next(line, column, scope, interpolation_allowed?, string, delim) do
+    case Toxic.InterpolationTokenizer.next(
+           line,
+           column,
+           scope,
+           interpolation_allowed?,
+           string,
+           delim
+         ) do
       {:error, reason} ->
         case cfg.error_mode do
           :strict ->
@@ -742,7 +790,8 @@ defmodule Toxic.Driver do
             emit_error_and_advance_hot_record(reason, string, state, cfg)
         end
 
-      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest, new_line, new_column, new_scope} ->
+      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
+       new_line, new_column, new_scope} ->
         {binary_part, adjusted_line} =
           case recent_token do
             {token_kind, _, _} when token_kind in [:bin_heredoc_start, :list_heredoc_start] ->
@@ -758,12 +807,14 @@ defmodule Toxic.Driver do
           end
 
         updated_contexts = [
-          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, [binary_part | fragments], saw_interp}
+          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+           [binary_part | fragments], saw_interp}
           | contexts_rest
         ]
 
         return_token_hot(
-          {:string_fragment, meta(start_line, start_column, adjusted_line, end_column, extra), binary_part},
+          {:string_fragment, meta(start_line, start_column, adjusted_line, end_column, extra),
+           binary_part},
           rest,
           hot(state,
             line: adjusted_line,
@@ -785,15 +836,20 @@ defmodule Toxic.Driver do
             []
           end
 
-        return_token_hot(end_token, rest, hot(state,
-          line: new_line,
-          column: new_column + modifiers_length,
-          scope: scope(new_scope, terminators: parent_terminators),
-          contexts: contexts_rest,
-          output: output
-        ))
+        return_token_hot(
+          end_token,
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column + modifiers_length,
+            scope: scope(new_scope, terminators: parent_terminators),
+            contexts: contexts_rest,
+            output: output
+          )
+        )
 
-      {:done, done_meta, indent, rest, new_line, new_column, new_scope} when kind in [:bin_heredoc, :list_heredoc] ->
+      {:done, done_meta, indent, rest, new_line, new_column, new_scope}
+      when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type =
           case kind do
             :list_heredoc -> :list_heredoc_end
@@ -802,20 +858,27 @@ defmodule Toxic.Driver do
 
         updated_scope =
           if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
-            warning = Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+            warning =
+              Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+
             Toxic.Scope.prepend_warning(warning, new_scope)
           else
             new_scope
           end
 
-        return_token_hot(token(end_token_type, done_meta, delim, indent), rest, hot(state,
-          line: new_line,
-          column: new_column,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest
-        ))
+        return_token_hot(
+          token(end_token_type, done_meta, delim, indent),
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column,
+            scope: scope(updated_scope, terminators: parent_terminators),
+            contexts: contexts_rest
+          )
+        )
 
-      {:done, done_meta, nil, rest, new_line, new_column, new_scope} when kind == :quoted_identifier ->
+      {:done, done_meta, nil, rest, new_line, new_column, new_scope}
+      when kind == :quoted_identifier ->
         end_token_type =
           case rest do
             [?( | _] -> :quoted_paren_identifier_end
@@ -824,36 +887,77 @@ defmodule Toxic.Driver do
           end
 
         updated_scope =
-          case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, :quoted_identifier, new_scope) do
+          case Contexts.is_unnecessary_quote(
+                 :lists.reverse(fragments),
+                 saw_interp,
+                 :quoted_identifier,
+                 new_scope
+               ) do
             {true, content} ->
-              Contexts.maybe_warn_unnecessary_quote(:quoted_identifier, content, delim, start_info.line, start_info.column, new_scope)
+              Contexts.maybe_warn_unnecessary_quote(
+                :quoted_identifier,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                new_scope
+              )
+
             false ->
               new_scope
           end
 
         if end_token_type == :quoted_identifier_end do
-          next_hot(rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: scope(updated_scope, terminators: parent_terminators),
-            contexts: contexts_rest,
-            deferrals: [{end_token_type, done_meta, delim}]
-          ), cfg)
+          next_hot(
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest,
+              deferrals: [{end_token_type, done_meta, delim}]
+            ),
+            cfg
+          )
         else
-          return_token_hot({end_token_type, done_meta, delim}, rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: scope(updated_scope, terminators: parent_terminators),
-            contexts: contexts_rest
-          ))
+          return_token_hot(
+            {end_token_type, done_meta, delim},
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest
+            )
+          )
         end
 
       {:done, done_meta, nil, rest, new_line, new_column, new_scope} ->
-        handle_done_string_hot(state, cfg, kind, delim, parent_terminators, start_info, fragments, saw_interp, contexts_rest, done_meta, rest, new_line, new_column, new_scope)
+        handle_done_string_hot(
+          state,
+          cfg,
+          kind,
+          delim,
+          parent_terminators,
+          start_info,
+          fragments,
+          saw_interp,
+          contexts_rest,
+          done_meta,
+          rest,
+          new_line,
+          new_column,
+          new_scope
+        )
 
       {:begin_interpolation, interp_meta, rest, new_line, new_column, new_scope} ->
         if kind == :quoted_identifier do
-          reason = Contexts.interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+          reason =
+            Contexts.interpolation_in_quoted_identifier_reason(
+              start_info.line,
+              start_info.column,
+              delim
+            )
 
           case cfg.error_mode do
             :strict ->
@@ -861,17 +965,28 @@ defmodule Toxic.Driver do
               {:error, reason_tuple, rest, state}
 
             :tolerant ->
-              emit_error_and_advance_hot_record(reason, rest, hot(state, line: new_line, column: new_column, scope: new_scope), cfg)
+              emit_error_and_advance_hot_record(
+                reason,
+                rest,
+                hot(state, line: new_line, column: new_column, scope: new_scope),
+                cfg
+              )
           end
         else
-          updated_parent_context = {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, fragments, true}
+          updated_parent_context =
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, true}
 
-          return_token_hot({:begin_interpolation, interp_meta, kind}, rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: new_scope,
-            contexts: [:normal, updated_parent_context | contexts_rest]
-          ))
+          return_token_hot(
+            {:begin_interpolation, interp_meta, kind},
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: new_scope,
+              contexts: [:normal, updated_parent_context | contexts_rest]
+            )
+          )
         end
     end
   end
@@ -884,14 +999,22 @@ defmodule Toxic.Driver do
            column: column,
            scope: scope,
            contexts: [
-             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, fragments, saw_interp}
+             {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+              fragments, saw_interp}
              | contexts_rest
            ],
            recent_token: recent_token
          ) = state,
          %{lexer_backend: :binary} = cfg
        ) do
-    case Toxic.BinaryInterpolationTokenizer.next(line, column, scope, interpolation_allowed?, string, delim) do
+    case Toxic.BinaryInterpolationTokenizer.next(
+           line,
+           column,
+           scope,
+           interpolation_allowed?,
+           string,
+           delim
+         ) do
       {:error, reason} ->
         case cfg.error_mode do
           :strict ->
@@ -902,7 +1025,8 @@ defmodule Toxic.Driver do
             emit_error_and_advance_hot_record(reason, string, state, cfg)
         end
 
-      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest, new_line, new_column, new_scope} ->
+      {:fragment, meta(start_line, start_column, _end_line, end_column, extra), binary_part, rest,
+       new_line, new_column, new_scope} ->
         {binary_part, adjusted_line} =
           case recent_token do
             {token_kind, _, _} when token_kind in [:bin_heredoc_start, :list_heredoc_start] ->
@@ -918,12 +1042,14 @@ defmodule Toxic.Driver do
           end
 
         updated_contexts = [
-          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, [binary_part | fragments], saw_interp}
+          {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+           [binary_part | fragments], saw_interp}
           | contexts_rest
         ]
 
         return_token_hot(
-          {:string_fragment, meta(start_line, start_column, adjusted_line, end_column, extra), binary_part},
+          {:string_fragment, meta(start_line, start_column, adjusted_line, end_column, extra),
+           binary_part},
           rest,
           hot(state,
             line: adjusted_line,
@@ -945,15 +1071,20 @@ defmodule Toxic.Driver do
             []
           end
 
-        return_token_hot(end_token, rest, hot(state,
-          line: new_line,
-          column: new_column + modifiers_length,
-          scope: scope(new_scope, terminators: parent_terminators),
-          contexts: contexts_rest,
-          output: output
-        ))
+        return_token_hot(
+          end_token,
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column + modifiers_length,
+            scope: scope(new_scope, terminators: parent_terminators),
+            contexts: contexts_rest,
+            output: output
+          )
+        )
 
-      {:done, done_meta, indent, rest, new_line, new_column, new_scope} when kind in [:bin_heredoc, :list_heredoc] ->
+      {:done, done_meta, indent, rest, new_line, new_column, new_scope}
+      when kind in [:bin_heredoc, :list_heredoc] ->
         end_token_type =
           case kind do
             :list_heredoc -> :list_heredoc_end
@@ -962,58 +1093,106 @@ defmodule Toxic.Driver do
 
         updated_scope =
           if end_token_type == :list_heredoc_end and delim == [?', ?', ?'] do
-            warning = Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+            warning =
+              Toxic.Warning.deprecated_charlist(start_info.line, start_info.column, ~c"'''")
+
             Toxic.Scope.prepend_warning(warning, new_scope)
           else
             new_scope
           end
 
-        return_token_hot(token(end_token_type, done_meta, delim, indent), rest, hot(state,
-          line: new_line,
-          column: new_column,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest
-        ))
+        return_token_hot(
+          token(end_token_type, done_meta, delim, indent),
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column,
+            scope: scope(updated_scope, terminators: parent_terminators),
+            contexts: contexts_rest
+          )
+        )
 
-      {:done, done_meta, nil, rest, new_line, new_column, new_scope} when kind == :quoted_identifier ->
+      {:done, done_meta, nil, rest, new_line, new_column, new_scope}
+      when kind == :quoted_identifier ->
         end_token_type =
           case rest do
-            <<?( , _::binary>> -> :quoted_paren_identifier_end
+            <<?(, _::binary>> -> :quoted_paren_identifier_end
             <<?[, _::binary>> -> :quoted_bracket_identifier_end
             _ -> :quoted_identifier_end
           end
 
         updated_scope =
-          case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, :quoted_identifier, new_scope) do
+          case Contexts.is_unnecessary_quote(
+                 :lists.reverse(fragments),
+                 saw_interp,
+                 :quoted_identifier,
+                 new_scope
+               ) do
             {true, content} ->
-              Contexts.maybe_warn_unnecessary_quote(:quoted_identifier, content, delim, start_info.line, start_info.column, new_scope)
+              Contexts.maybe_warn_unnecessary_quote(
+                :quoted_identifier,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                new_scope
+              )
+
             false ->
               new_scope
           end
 
         if end_token_type == :quoted_identifier_end do
-          next_hot(rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: scope(updated_scope, terminators: parent_terminators),
-            contexts: contexts_rest,
-            deferrals: [{end_token_type, done_meta, delim}]
-          ), cfg)
+          next_hot(
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest,
+              deferrals: [{end_token_type, done_meta, delim}]
+            ),
+            cfg
+          )
         else
-          return_token_hot({end_token_type, done_meta, delim}, rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: scope(updated_scope, terminators: parent_terminators),
-            contexts: contexts_rest
-          ))
+          return_token_hot(
+            {end_token_type, done_meta, delim},
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: scope(updated_scope, terminators: parent_terminators),
+              contexts: contexts_rest
+            )
+          )
         end
 
       {:done, done_meta, nil, rest, new_line, new_column, new_scope} ->
-        handle_done_string_binary_hot(state, cfg, kind, delim, parent_terminators, start_info, fragments, saw_interp, contexts_rest, done_meta, rest, new_line, new_column, new_scope)
+        handle_done_string_binary_hot(
+          state,
+          cfg,
+          kind,
+          delim,
+          parent_terminators,
+          start_info,
+          fragments,
+          saw_interp,
+          contexts_rest,
+          done_meta,
+          rest,
+          new_line,
+          new_column,
+          new_scope
+        )
 
       {:begin_interpolation, interp_meta, rest, new_line, new_column, new_scope} ->
         if kind == :quoted_identifier do
-          reason = Contexts.interpolation_in_quoted_identifier_reason(start_info.line, start_info.column, delim)
+          reason =
+            Contexts.interpolation_in_quoted_identifier_reason(
+              start_info.line,
+              start_info.column,
+              delim
+            )
 
           case cfg.error_mode do
             :strict ->
@@ -1021,23 +1200,49 @@ defmodule Toxic.Driver do
               {:error, reason_tuple, rest, state}
 
             :tolerant ->
-              emit_error_and_advance_hot_record(reason, rest, hot(state, line: new_line, column: new_column, scope: new_scope), cfg)
+              emit_error_and_advance_hot_record(
+                reason,
+                rest,
+                hot(state, line: new_line, column: new_column, scope: new_scope),
+                cfg
+              )
           end
         else
-          updated_parent_context = {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info, fragments, true}
+          updated_parent_context =
+            {:interp, kind, interpolation_allowed?, delim, parent_terminators, start_info,
+             fragments, true}
 
-          return_token_hot({:begin_interpolation, interp_meta, kind}, rest, hot(state,
-            line: new_line,
-            column: new_column,
-            scope: new_scope,
-            contexts: [:normal, updated_parent_context | contexts_rest]
-          ))
+          return_token_hot(
+            {:begin_interpolation, interp_meta, kind},
+            rest,
+            hot(state,
+              line: new_line,
+              column: new_column,
+              scope: new_scope,
+              contexts: [:normal, updated_parent_context | contexts_rest]
+            )
+          )
         end
     end
   end
 
   # Helper for handling :done result in string contexts (charlist)
-  defp handle_done_string_hot(state, _cfg, kind, delim, parent_terminators, start_info, fragments, saw_interp, contexts_rest, done_meta, rest, new_line, new_column, new_scope) do
+  defp handle_done_string_hot(
+         state,
+         _cfg,
+         kind,
+         delim,
+         parent_terminators,
+         start_info,
+         fragments,
+         saw_interp,
+         contexts_rest,
+         done_meta,
+         rest,
+         new_line,
+         new_column,
+         new_scope
+       ) do
     case rest do
       [?:, ws | tail] when is_space(ws) ->
         {{sl, sc}, {el, ec}, extra} = done_meta
@@ -1050,25 +1255,44 @@ defmodule Toxic.Driver do
           end
 
         updated_scope =
-          case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, end_token_type, new_scope) do
+          case Contexts.is_unnecessary_quote(
+                 :lists.reverse(fragments),
+                 saw_interp,
+                 end_token_type,
+                 new_scope
+               ) do
             {true, content} ->
-              Contexts.maybe_warn_unnecessary_quote(end_token_type, content, delim, start_info.line, start_info.column, new_scope)
+              Contexts.maybe_warn_unnecessary_quote(
+                end_token_type,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                new_scope
+              )
+
             false ->
               if delim == ?' do
-                warning = Toxic.Warning.deprecated_single_quote_keyword(start_info.line, start_info.column)
+                warning =
+                  Toxic.Warning.deprecated_single_quote_keyword(
+                    start_info.line,
+                    start_info.column
+                  )
+
                 Toxic.Scope.prepend_warning(warning, new_scope)
               else
                 new_scope
               end
           end
 
-        {:ok, {end_token_type, adj_meta, delim}, [ws | tail], hot(state,
-          line: new_line,
-          column: new_column + 1,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest,
-          recent_token: {end_token_type, adj_meta, delim}
-        )}
+        {:ok, {end_token_type, adj_meta, delim}, [ws | tail],
+         hot(state,
+           line: new_line,
+           column: new_column + 1,
+           scope: scope(updated_scope, terminators: parent_terminators),
+           contexts: contexts_rest,
+           recent_token: {end_token_type, adj_meta, delim}
+         )}
 
       _ ->
         end_token_type =
@@ -1081,33 +1305,69 @@ defmodule Toxic.Driver do
 
         updated_scope =
           if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
-            case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, kind, new_scope) do
+            case Contexts.is_unnecessary_quote(
+                   :lists.reverse(fragments),
+                   saw_interp,
+                   kind,
+                   new_scope
+                 ) do
               {true, content} ->
-                {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} = start_info.token
-                Contexts.maybe_warn_unnecessary_quote(kind, content, delim, start_info.line, token_start_col, new_scope)
+                {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} =
+                  start_info.token
+
+                Contexts.maybe_warn_unnecessary_quote(
+                  kind,
+                  content,
+                  delim,
+                  start_info.line,
+                  token_start_col,
+                  new_scope
+                )
+
               false ->
                 new_scope
             end
           else
             if end_token_type == :list_string_end and delim == ?' do
-              warning = Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+              warning =
+                Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+
               Toxic.Scope.prepend_warning(warning, new_scope)
             else
               new_scope
             end
           end
 
-        return_token_hot({end_token_type, done_meta, delim}, rest, hot(state,
-          line: new_line,
-          column: new_column,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest
-        ))
+        return_token_hot(
+          {end_token_type, done_meta, delim},
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column,
+            scope: scope(updated_scope, terminators: parent_terminators),
+            contexts: contexts_rest
+          )
+        )
     end
   end
 
   # Helper for handling :done result in string contexts (binary)
-  defp handle_done_string_binary_hot(state, _cfg, kind, delim, parent_terminators, start_info, fragments, saw_interp, contexts_rest, done_meta, rest, new_line, new_column, new_scope) do
+  defp handle_done_string_binary_hot(
+         state,
+         _cfg,
+         kind,
+         delim,
+         parent_terminators,
+         start_info,
+         fragments,
+         saw_interp,
+         contexts_rest,
+         done_meta,
+         rest,
+         new_line,
+         new_column,
+         new_scope
+       ) do
     case rest do
       <<?:, ws, tail::binary>> when is_space(ws) ->
         {{sl, sc}, {el, ec}, extra} = done_meta
@@ -1120,25 +1380,44 @@ defmodule Toxic.Driver do
           end
 
         updated_scope =
-          case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, end_token_type, new_scope) do
+          case Contexts.is_unnecessary_quote(
+                 :lists.reverse(fragments),
+                 saw_interp,
+                 end_token_type,
+                 new_scope
+               ) do
             {true, content} ->
-              Contexts.maybe_warn_unnecessary_quote(end_token_type, content, delim, start_info.line, start_info.column, new_scope)
+              Contexts.maybe_warn_unnecessary_quote(
+                end_token_type,
+                content,
+                delim,
+                start_info.line,
+                start_info.column,
+                new_scope
+              )
+
             false ->
               if delim == ?' do
-                warning = Toxic.Warning.deprecated_single_quote_keyword(start_info.line, start_info.column)
+                warning =
+                  Toxic.Warning.deprecated_single_quote_keyword(
+                    start_info.line,
+                    start_info.column
+                  )
+
                 Toxic.Scope.prepend_warning(warning, new_scope)
               else
                 new_scope
               end
           end
 
-        {:ok, {end_token_type, adj_meta, delim}, <<ws, tail::binary>>, hot(state,
-          line: new_line,
-          column: new_column + 1,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest,
-          recent_token: {end_token_type, adj_meta, delim}
-        )}
+        {:ok, {end_token_type, adj_meta, delim}, <<ws, tail::binary>>,
+         hot(state,
+           line: new_line,
+           column: new_column + 1,
+           scope: scope(updated_scope, terminators: parent_terminators),
+           contexts: contexts_rest,
+           recent_token: {end_token_type, adj_meta, delim}
+         )}
 
       _ ->
         end_token_type =
@@ -1151,28 +1430,49 @@ defmodule Toxic.Driver do
 
         updated_scope =
           if end_token_type in [:atom_safe_end, :atom_unsafe_end] do
-            case Contexts.is_unnecessary_quote(:lists.reverse(fragments), saw_interp, kind, new_scope) do
+            case Contexts.is_unnecessary_quote(
+                   :lists.reverse(fragments),
+                   saw_interp,
+                   kind,
+                   new_scope
+                 ) do
               {true, content} ->
-                {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} = start_info.token
-                Contexts.maybe_warn_unnecessary_quote(kind, content, delim, start_info.line, token_start_col, new_scope)
+                {_, {{_start_line, token_start_col}, {_end_line, _end_col}, _extra}, _} =
+                  start_info.token
+
+                Contexts.maybe_warn_unnecessary_quote(
+                  kind,
+                  content,
+                  delim,
+                  start_info.line,
+                  token_start_col,
+                  new_scope
+                )
+
               false ->
                 new_scope
             end
           else
             if end_token_type == :list_string_end and delim == ?' do
-              warning = Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+              warning =
+                Toxic.Warning.deprecated_charlist_detailed(start_info.line, start_info.column)
+
               Toxic.Scope.prepend_warning(warning, new_scope)
             else
               new_scope
             end
           end
 
-        return_token_hot({end_token_type, done_meta, delim}, rest, hot(state,
-          line: new_line,
-          column: new_column,
-          scope: scope(updated_scope, terminators: parent_terminators),
-          contexts: contexts_rest
-        ))
+        return_token_hot(
+          {end_token_type, done_meta, delim},
+          rest,
+          hot(state,
+            line: new_line,
+            column: new_column,
+            scope: scope(updated_scope, terminators: parent_terminators),
+            contexts: contexts_rest
+          )
+        )
     end
   end
 
@@ -1204,153 +1504,192 @@ defmodule Toxic.Driver do
           Enum.reduce(events, {rest, state}, fn event, {r, s} ->
             handle_tokenize_result_hot(s, {event, r, line, column, scope}, nil)
           end)
+
         {rest, final_state}
 
       {:drop_not, rest, line, column, scope} ->
         {rest, hot(state, line: line, column: column, scope: scope, deferrals: tl(deferrals))}
 
       {:reset_eol, rest, line, column, scope} ->
-        [{kind, meta(start_line, start_column, _end_line, _end_column, _extra), extra_value} | t] = deferrals
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [{kind, meta(start_line, start_column, line, column, 0), extra_value} | t]
-        )}
+        [{kind, meta(start_line, start_column, _end_line, _end_column, _extra), extra_value} | t] =
+          deferrals
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [{kind, meta(start_line, start_column, line, column, 0), extra_value} | t]
+         )}
 
       {:increase_eol, rest, line, column, scope} ->
-        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] = deferrals
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [{kind, meta(start_line, start_column, line, column, extra + 1), extra_value} | t]
-        )}
+        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] =
+          deferrals
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [
+             {kind, meta(start_line, start_column, line, column, extra + 1), extra_value} | t
+           ]
+         )}
 
       {{:increase_eol_by, count}, rest, line, column, scope} ->
-        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] = deferrals
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [{kind, meta(start_line, start_column, line, column, extra + count), extra_value} | t]
-        )}
+        [{kind, meta(start_line, start_column, _end_line, _end_column, extra), extra_value} | t] =
+          deferrals
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [
+             {kind, meta(start_line, start_column, line, column, extra + count), extra_value} | t
+           ]
+         )}
 
       {{:token, {eol, _meta, _extra} = token, _lookbehind}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         new_output = flush_deferrals(output, deferrals)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: [token]
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: [token]
+         )}
 
       {{:token, {eol, _meta, _extra} = token}, rest, line, column, scope}
       when eol in [:eol, :";", :","] ->
         new_output = flush_deferrals(output, deferrals)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: [token]
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: [token]
+         )}
 
       {:transform_into_do_identifier, rest, line, column, scope} ->
         {output_tokens, deferrals_result} =
           case deferrals do
             [{:identifier, def_meta, name}] ->
               {[{:do_identifier, def_meta, name}], []}
+
             [{:quoted_identifier_end, def_meta, name}] ->
               {[{:quoted_do_identifier_end, def_meta, name}], []}
+
             _ ->
               {[], deferrals}
           end
+
         new_output = append_deferrals(output, deferrals_result, output_tokens)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: []
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: []
+         )}
 
       {{:token, {:identifier, _, _} = token, _lookbehind}, rest, line, column, scope} ->
         new_output = flush_deferrals(output, deferrals)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: [token]
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: [token]
+         )}
 
       {{:token, {:identifier, _, _} = token}, rest, line, column, scope} ->
         new_output = flush_deferrals(output, deferrals)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: [token]
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: [token]
+         )}
 
       {{:token, token, _lookbehind}, rest, line, column, scope} ->
         new_output = append_deferrals(output, deferrals, [token])
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [],
-          output: new_output
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [],
+           output: new_output
+         )}
 
       {{:token, token}, rest, line, column, scope} ->
         new_output = append_deferrals(output, deferrals, [token])
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [],
-          output: new_output
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [],
+           output: new_output
+         )}
 
       {{:dual_op_identifier, token}, rest, line, column, scope} ->
         {output_tokens, deferrals_result} =
           case deferrals do
             [{:identifier, def_meta, name}] ->
               {[{:op_identifier, def_meta, name}, token], []}
+
             [{:quoted_identifier_end, def_meta, name}] ->
               {[{:quoted_op_identifier_end, def_meta, name}, token], []}
+
             _ ->
               {[token], deferrals}
           end
-        new_output = append_deferrals(output, deferrals_result, output_tokens)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: []
-        )}
 
-      {{:token_with_eol, {:unary_op, _meta, :not} = token, _lookbehind}, rest, line, column, scope} ->
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [token | deferrals]
-        )}
+        new_output = append_deferrals(output, deferrals_result, output_tokens)
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: []
+         )}
+
+      {{:token_with_eol, {:unary_op, _meta, :not} = token, _lookbehind}, rest, line, column,
+       scope} ->
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [token | deferrals]
+         )}
 
       {{:token_with_eol, {:unary_op, _meta, :not} = token}, rest, line, column, scope} ->
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          deferrals: [token | deferrals]
-        )}
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           deferrals: [token | deferrals]
+         )}
 
       {{:token_with_eol, token, _lookbehind}, rest, line, column, scope} ->
         carry_with_recent =
@@ -1358,14 +1697,17 @@ defmodule Toxic.Driver do
             {left, [{:eol, _, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
+
         new_output = flush_deferrals(output, carry_with_recent)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: []
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: []
+         )}
 
       {{:token_with_eol, token}, rest, line, column, scope} ->
         carry_with_recent =
@@ -1373,31 +1715,39 @@ defmodule Toxic.Driver do
             {left, [{:eol, _, _} | tokens]} -> [left | tokens]
             {left, tokens} -> [left | tokens]
           end
+
         new_output = flush_deferrals(output, carry_with_recent)
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope,
-          output: new_output,
-          deferrals: []
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope,
+           output: new_output,
+           deferrals: []
+         )}
 
       {{:switch_to_interp, start_token, interp_kind, interpolation_allowed?, delimiter}, rest,
        line, column, scope = scope(terminators: terminators)} ->
         start_info = Contexts.compute_start_info(start_token, delimiter, line, column)
+
         new_contexts = [
-          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info, [], false}
+          {:interp, interp_kind, interpolation_allowed?, delimiter, terminators, start_info, [],
+           false}
           | contexts
         ]
+
         new_output = append_deferrals(output, deferrals, [start_token])
-        {rest, hot(state,
-          line: line,
-          column: column,
-          scope: scope(scope, terminators: []),
-          output: new_output,
-          deferrals: [],
-          contexts: new_contexts
-        )}
+
+        {rest,
+         hot(state,
+           line: line,
+           column: column,
+           scope: scope(scope, terminators: []),
+           output: new_output,
+           deferrals: [],
+           contexts: new_contexts
+         )}
     end
   end
 
@@ -1424,18 +1774,20 @@ defmodule Toxic.Driver do
       recent_token: hot(state, :recent_token)
     }
 
-    {:ok_many, [token | rest_tokens], new_rest, new_state} = Recovery.emit_error_and_advance_many(reason, rest, state_map)
+    {:ok_many, [token | rest_tokens], new_rest, new_state} =
+      Recovery.emit_error_and_advance_many(reason, rest, state_map)
 
     # Convert back to hot record
-    result_state = hot(
-      line: new_state.line,
-      column: new_state.column,
-      scope: new_state.scope,
-      contexts: new_state.contexts,
-      deferrals: new_state.deferrals,
-      output: rest_tokens,
-      recent_token: token
-    )
+    result_state =
+      hot(
+        line: new_state.line,
+        column: new_state.column,
+        scope: new_state.scope,
+        contexts: new_state.contexts,
+        deferrals: new_state.deferrals,
+        output: rest_tokens,
+        recent_token: token
+      )
 
     {:ok, token, new_rest, result_state}
   end
@@ -1461,11 +1813,12 @@ defmodule Toxic.Driver do
     new_contexts = Contexts.drop_first_normal_before_interp(contexts)
     new_output = output ++ [error_token | inserted]
 
-    {:ok, hd(new_output), [], hot(state,
-      contexts: new_contexts,
-      output: tl(new_output),
-      recent_token: hd(new_output)
-    )}
+    {:ok, hd(new_output), [],
+     hot(state,
+       contexts: new_contexts,
+       output: tl(new_output),
+       recent_token: hd(new_output)
+     )}
   end
 
   defp emit_pending_error_hot(
@@ -1493,12 +1846,13 @@ defmodule Toxic.Driver do
     new_contexts = Contexts.drop_first_interp(contexts)
     new_output = output ++ [error_token | inserted]
 
-    {:ok, hd(new_output), [], hot(state,
-      contexts: new_contexts,
-      scope: new_scope,
-      output: tl(new_output),
-      recent_token: hd(new_output)
-    )}
+    {:ok, hd(new_output), [],
+     hot(state,
+       contexts: new_contexts,
+       scope: new_scope,
+       output: tl(new_output),
+       recent_token: hd(new_output)
+     )}
   end
 
   defp emit_pending_error_hot({:missing_scope, {start, _meta, _indent} = entry}, state, cfg) do
@@ -1520,11 +1874,12 @@ defmodule Toxic.Driver do
 
     new_output = output ++ [error_token | inserted]
 
-    {:ok, hd(new_output), [], hot(state,
-      scope: new_scope,
-      output: tl(new_output),
-      recent_token: hd(new_output)
-    )}
+    {:ok, hd(new_output), [],
+     hot(state,
+       scope: new_scope,
+       output: tl(new_output),
+       recent_token: hd(new_output)
+     )}
   end
 
   defp error_payload_hot(%Toxic.Error{} = error, cfg) do
@@ -1571,6 +1926,7 @@ defmodule Toxic.Driver do
           {:missing_interpolation, interp_context} ->
             reason =
               Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
+
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
 
           {:missing_context, interp_context} ->
@@ -1579,7 +1935,13 @@ defmodule Toxic.Driver do
 
           {:missing_scope, entry} ->
             reason =
-              Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
+              Contexts.missing_scope_terminator_reason(
+                entry,
+                state.line,
+                state.column,
+                state.scope
+              )
+
             {:error, Toxic.Error.to_reason_tuple(reason), [], state}
         end
 
@@ -1603,6 +1965,7 @@ defmodule Toxic.Driver do
           {:missing_interpolation, interp_context} ->
             reason =
               Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
+
             {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
 
           {:missing_context, interp_context} ->
@@ -1611,7 +1974,13 @@ defmodule Toxic.Driver do
 
           {:missing_scope, entry} ->
             reason =
-              Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
+              Contexts.missing_scope_terminator_reason(
+                entry,
+                state.line,
+                state.column,
+                state.scope
+              )
+
             {:error, Toxic.Error.to_reason_tuple(reason), <<>>, state}
         end
 
@@ -2262,7 +2631,7 @@ defmodule Toxic.Driver do
       {:done, meta, nil, rest, line, column, scope} when kind == :quoted_identifier ->
         end_token_type =
           case rest do
-            <<?( , _::binary>> -> :quoted_paren_identifier_end
+            <<?(, _::binary>> -> :quoted_paren_identifier_end
             <<?[, _::binary>> -> :quoted_bracket_identifier_end
             _ -> :quoted_identifier_end
           end
@@ -2540,7 +2909,8 @@ defmodule Toxic.Driver do
              column: column,
              scope: scope,
              deferrals: [
-               {kind, meta(start_line, start_column, line, column, extra + count), extra_value} | t
+               {kind, meta(start_line, start_column, line, column, extra + count), extra_value}
+               | t
              ]
          }}
 
@@ -2864,12 +3234,12 @@ defmodule Toxic.Driver do
   defp delimiter_atom([?', ?', ?']), do: :"'''"
   defp delimiter_atom(?"), do: :"\""
   defp delimiter_atom(?'), do: :"'"
-  defp delimiter_atom(?/), do: :"/"
-  defp delimiter_atom(?|), do: :"|"
+  defp delimiter_atom(?/), do: :/
+  defp delimiter_atom(?|), do: :|
   defp delimiter_atom(?)), do: :")"
   defp delimiter_atom(?]), do: :"]"
   defp delimiter_atom(?}), do: :"}"
-  defp delimiter_atom(?>), do: :">"
+  defp delimiter_atom(?>), do: :>
   defp delimiter_atom(_), do: :unknown_delimiter
 
   @doc """
@@ -2944,13 +3314,16 @@ defmodule Toxic.Driver do
   # When deferrals is empty, just concatenate output with tokens
   defp append_deferrals(output, [], tokens), do: output ++ tokens
   # General case: concatenate output with reversed deferrals and tokens
-  defp append_deferrals(output, deferrals, tokens), do: output ++ :lists.reverse(deferrals, tokens)
+  defp append_deferrals(output, deferrals, tokens),
+    do: output ++ :lists.reverse(deferrals, tokens)
 
   @compile {:inline, flush_deferrals: 2, append_deferrals: 3}
 
   defp emit_error_and_advance_hot(reason, rest, state) do
-    {:ok_many, [token | rest_tokens], new_rest, new_state} = Recovery.emit_error_and_advance_many(reason, rest, state)
-        {:ok, token, new_rest, %{new_state | output: rest_tokens, recent_token: token}}
+    {:ok_many, [token | rest_tokens], new_rest, new_state} =
+      Recovery.emit_error_and_advance_many(reason, rest, state)
+
+    {:ok, token, new_rest, %{new_state | output: rest_tokens, recent_token: token}}
   end
 
   defp emit_pending_error(
@@ -2960,6 +3333,7 @@ defmodule Toxic.Driver do
        ) do
     reason =
       Contexts.missing_interpolation_reason(interp_context, state.line, state.column)
+
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_payload(reason, state)}
 
@@ -3019,6 +3393,7 @@ defmodule Toxic.Driver do
   defp emit_pending_error({:missing_scope, {start, _meta, _indent} = entry}, state) do
     reason =
       Contexts.missing_scope_terminator_reason(entry, state.line, state.column, state.scope)
+
     meta0 = meta(state.line, state.column, state.line, state.column, nil)
     error_token = {:error_token, meta0, error_payload(reason, state)}
 

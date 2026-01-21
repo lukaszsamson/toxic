@@ -55,8 +55,14 @@ defmodule Toxic.Driver.Position do
 
   def scan_to_sync(
         rest,
-        %{line: line, column: column, scope: scope, contexts: contexts,
-          error_sync: sync, error_max_skip: max}
+        %{
+          line: line,
+          column: column,
+          scope: scope,
+          contexts: contexts,
+          error_sync: sync,
+          error_max_skip: max
+        }
       ) do
     cfg = %{error_sync: sync, error_max_skip: max}
     scan_to_sync(rest, line, column, scope, contexts, cfg)
@@ -232,8 +238,14 @@ defmodule Toxic.Driver.Position do
 
   def scan_to_sync_bin(
         rest,
-        %{line: line, column: column, scope: scope, contexts: contexts,
-          error_sync: sync, error_max_skip: max}
+        %{
+          line: line,
+          column: column,
+          scope: scope,
+          contexts: contexts,
+          error_sync: sync,
+          error_max_skip: max
+        }
       )
       when is_binary(rest) do
     cfg = %{error_sync: sync, error_max_skip: max}

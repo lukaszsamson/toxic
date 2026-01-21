@@ -49,7 +49,8 @@ defmodule Toxic.NormalTokenizer.Keyword do
         info = meta(line, column, length, previous_was_eol(lookbehind))
 
         case {kind, prev_token(lookbehind)} do
-          {:in_op, {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}} ->
+          {:in_op,
+           {:unary_op, meta(start_line, start_column, _end_line, _end_column, extra), :not}} ->
             not_info_meta = meta(start_line, start_column, line, column + length, extra)
             token = token(:in_op, not_info_meta, :"not in", info)
             multiple([:drop_not, {:token_with_eol, token}], rest, line, column + length, scope)

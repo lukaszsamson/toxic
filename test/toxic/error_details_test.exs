@@ -208,11 +208,15 @@ defmodule Toxic.ErrorDetailsTest do
 
     test "identifier_nonexistent_atom_when_existing_only includes position details" do
       # Using existing_atoms_only: true with a non-existent atom
-      tokens = tokenize_tolerant(":this_atom_definitely_does_not_exist_xyz123", existing_atoms_only: true)
+      tokens =
+        tokenize_tolerant(":this_atom_definitely_does_not_exist_xyz123",
+          existing_atoms_only: true
+        )
 
       error_token = find_error_token(tokens)
 
-      assert {:error_token, _meta, %Error{code: :identifier_nonexistent_atom_when_existing_only, details: d}} =
+      assert {:error_token, _meta,
+              %Error{code: :identifier_nonexistent_atom_when_existing_only, details: d}} =
                error_token
 
       assert is_integer(d[:line])
@@ -225,7 +229,8 @@ defmodule Toxic.ErrorDetailsTest do
 
       error_token = find_error_token(tokens)
 
-      assert {:error_token, _meta, %Error{code: :interpolation_not_allowed_in_quoted_identifier, details: d}} =
+      assert {:error_token, _meta,
+              %Error{code: :interpolation_not_allowed_in_quoted_identifier, details: d}} =
                error_token
 
       assert is_integer(d[:start_line])

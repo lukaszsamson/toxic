@@ -425,7 +425,14 @@ defmodule Toxic.String.Tokenizer do
     continue(tail, [?@ | acc], length + 1, ascii_letters?, scriptset, special)
   end
 
-  defp continue(<<head::utf8, tail::binary>> = bin, acc, length, ascii_letters?, scriptset, special) do
+  defp continue(
+         <<head::utf8, tail::binary>> = bin,
+         acc,
+         length,
+         ascii_letters?,
+         scriptset,
+         special
+       ) do
     cond do
       ascii_lower?(head) or ascii_upper?(head) ->
         continue(tail, [head | acc], length + 1, ascii_letters?, ss_latin(scriptset), special)
@@ -444,7 +451,9 @@ defmodule Toxic.String.Tokenizer do
              @bottom <- unicode_continue(head) do
           case normalize_start(head) do
             @bottom ->
-              {:error, {:unexpected_token, :lists.reverse([head | acc]) |> :unicode.characters_to_binary()}}
+              {:error,
+               {:unexpected_token,
+                :lists.reverse([head | acc]) |> :unicode.characters_to_binary()}}
 
             {head, ss} ->
               ss = ss_intersect(scriptset, ss)

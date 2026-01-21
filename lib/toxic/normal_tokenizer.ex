@@ -5,7 +5,18 @@ defmodule Toxic.NormalTokenizer do
   import Toxic.CharacterClassifier
   import Toxic.Token
   import Toxic.NormalTokenizer.Operator
-  import Toxic.Util, only: [strip_horizontal_space: 2, no_token: 4, reset_eol: 4, increase_eol: 4, emit: 5, emit_with_eol: 5, emit_op_identifier: 5]
+
+  import Toxic.Util,
+    only: [
+      strip_horizontal_space: 2,
+      no_token: 4,
+      reset_eol: 4,
+      increase_eol: 4,
+      emit: 5,
+      emit_with_eol: 5,
+      emit_op_identifier: 5
+    ]
+
   import Toxic.Scope, except: [track_ascii: 2]
 
   # This cannot happen
@@ -980,10 +991,13 @@ defmodule Toxic.NormalTokenizer do
        when dual_op(sign) and not is_space(not_marker) and not_marker != sign and not_marker != ?/ and
               not_marker != ?> and token in [:identifier, :quoted_identifier_end] do
     rest = [not_marker | t]
-    dual_op_atom = case sign do
-      ?+ -> :+
-      _ -> :-
-    end
+
+    dual_op_atom =
+      case sign do
+        ?+ -> :+
+        _ -> :-
+      end
+
     dual_op_token = {:dual_op, meta(line, column, 1, nil), dual_op_atom}
     emit_op_identifier(dual_op_token, rest, line, column + 1, scope)
   end

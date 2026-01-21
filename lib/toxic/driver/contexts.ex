@@ -31,7 +31,12 @@ defmodule Toxic.Driver.Contexts do
     pending_error(contexts, scope)
   end
 
-  @spec mismatched_delimiter_reason({atom(), term(), term()}, atom(), pos_integer(), pos_integer()) ::
+  @spec mismatched_delimiter_reason(
+          {atom(), term(), term()},
+          atom(),
+          pos_integer(),
+          pos_integer()
+        ) ::
           Error.t()
   def mismatched_delimiter_reason({start, meta, _indent}, closing, end_line, end_column) do
     expected = Driver.closing_for(start)
@@ -272,13 +277,18 @@ defmodule Toxic.Driver.Contexts do
   defp missing_scope_hint({_start, _meta, _indent}, _closing, scope(mismatch_hints: [])), do: []
 
   defp missing_scope_hint({start, _meta, _indent}, closing, scope(mismatch_hints: mismatch_hints)) do
-    {^start, hint_meta, _indentation} = :lists.keyfind(start, 1, mismatch_hints)
-    {{hint_line, _hint_column}, _, _} = hint_meta
+    case :lists.keyfind(start, 1, mismatch_hints) do
+      {^start, hint_meta, _indentation} ->
+        {{hint_line, _hint_column}, _, _} = hint_meta
 
-    :io_lib.format(
-      ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
-      [Atom.to_string(start), hint_line, Atom.to_string(closing)]
-    )
+        :io_lib.format(
+          ~c"\nhint: it looks like the \"~ts\" on line ~B does not have a matching \"~ts\"",
+          [Atom.to_string(start), hint_line, Atom.to_string(closing)]
+        )
+
+      false ->
+        []
+    end
   end
 
   @spec maybe_warn_unnecessary_quote(
@@ -364,16 +374,16 @@ defmodule Toxic.Driver.Contexts do
     case delim do
       ?" -> :"\""
       ?' -> :"'"
-      ?/ -> :"/"
-      ?| -> :"|"
+      ?/ -> :/
+      ?| -> :|
       ?( -> :"("
       ?) -> :")"
       ?[ -> :"["
       ?] -> :"]"
       ?{ -> :"{"
       ?} -> :"}"
-      ?< -> :"<"
-      ?> -> :">"
+      ?< -> :<
+      ?> -> :>
     end
   end
 
